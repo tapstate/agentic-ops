@@ -1,20 +1,23 @@
 {
-  "schema_version": 1,
-  "nodes": {"node1": ["TM", "FE", "APIServer"]},
+  "schema_version": 2,
+  "nodes": {
+    "node1": [
+      "TM",
+      "FE"
+    ]
+  },
   "image": "eclipse-temurin:17-jre-jammy",
   "platform": "",
-  "mongo_uri_file": "mongodb-uri",
-  "mongo_driver": "tapdata/tapdata-enterprise/tapdata-agent/node_modules",
-  "node_binary": "lib/NDK/node/node",
-  "ports": {"node1": {"tm": 13030, "api": 13080, "license": ""}},
-  "java": {"tm": "-Xmx1G -Xms256M", "engine": "-Xmx2G -Xms512M"},
-  "heartbeat": {
-    "collection": "ClusterState",
-    "uuid_field": "uuid",
-    "time_field": "systemInfo.time",
-    "max_age_seconds": 60,
-    "startup_timeout_seconds": 300
+  "mongo_uri_file": "tapdata-test-env/local/mongodb-uri",
+  "ports": {
+    "node1": {
+      "tm": 13030,
+      "api": null,
+      "license": "secrets/tapdata-test-env/local/license.txt"
+    }
   },
-  "build": [],
-  "assets": []
+  "java": {
+    "tm": "-Xmx1G -Xms256M",
+    "engine": "-Xmx2G -Xms512M"
+  }
 }

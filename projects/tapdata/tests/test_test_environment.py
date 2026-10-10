@@ -18,6 +18,27 @@ spec.loader.exec_module(mod)
 REAL_CALL = mod.call
 
 
+class BuildHelperTests(unittest.TestCase):
+    def test_maven_forwards_verified_repository_java_and_subcommand(self):
+        helper_spec = importlib.util.spec_from_file_location("env_maven", ROOT / "projects/tapdata/scripts/test-environment-maven.py")
+        helper = importlib.util.module_from_spec(helper_spec)
+        helper_spec.loader.exec_module(helper)
+        with mock.patch.object(helper.subprocess, "call", return_value=7) as invoke:
+            self.assertEqual(helper.main(["--maven", "/tools/mvn", "--java-home", "/tools/jdk", "--local-repository", "/station/runtime/maven", "--", "install", "-Penterprise,idaas"]), 7)
+        argv = invoke.call_args.args[0]
+        self.assertEqual(argv, ["/tools/mvn", "-Dmaven.repo.local=/station/runtime/maven", "install", "-Penterprise,idaas"])
+        self.assertEqual(invoke.call_args.kwargs["env"]["JAVA_HOME"], "/tools/jdk")
+
+    def test_maven_rejects_repository_override_before_execution(self):
+        helper_spec = importlib.util.spec_from_file_location("env_maven", ROOT / "projects/tapdata/scripts/test-environment-maven.py")
+        helper = importlib.util.module_from_spec(helper_spec)
+        helper_spec.loader.exec_module(helper)
+        with mock.patch.object(helper.subprocess, "call") as invoke, mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit):
+                helper.main(["--maven", "/tools/mvn", "--java-home", "/tools/jdk", "--local-repository", "/station/runtime/maven", "--", "install", "-Dmaven.repo.local=/shared"])
+        invoke.assert_not_called()
+
+
 class FakeEnvironment(mod.Environment):
     """仅替换外部构建及 Docker 执行，真实生成配置和生命周期文件。"""
     def __init__(self, station):
@@ -27,6 +48,7 @@ class FakeEnvironment(mod.Environment):
         self.build_failure = False
         self.monitor_ready = True
         self.artifact = "old"
+        self.existing_collections = 0
 
     def docker_resources(self):
         return self.containers
@@ -46,7 +68,7 @@ class FakeEnvironment(mod.Environment):
             raise mod.EnvironmentError("构建失败")
         candidate = self.root / "builds" / ("b" * 32 if self.artifact == "old" else "c" * 32)
         (candidate / "bundle").mkdir(parents=True, exist_ok=True)
-        return candidate, {"artifact_digest": self.artifact}
+        return candidate, {"artifact_digest": self.artifact, "mongo_preflight": {"database": "test", "collection_count": self.existing_collections}}
 
     def probe(self, config, bundle, nodes):
         return {"verified": self.monitor_ready, "nodes": [{"node": node["name"], "registered": True, "heartbeat_fresh": self.monitor_ready} for node in nodes]}
@@ -59,8 +81,12 @@ class EnvironmentTests(unittest.TestCase):
         self.station = Path(self.tmp.name).resolve() / "station"
         (self.station / ".agenticops").mkdir(parents=True)
         mod.write_json(self.station / ".agenticops/station.json", {"project": "tapdata", "station_id": "a" * 32})
-        self.config = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env.json")
+        self.runtime_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env.json")
+        self.preparation_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env-preparation.json")
+        self.config = {**self.runtime_template, **self.preparation_template}
+        self.config["mongo_uri_file"] = "mongodb-uri"
         self.config["platform"] = "linux/arm64"
+        self.config["nodes"]["node1"] = ["TM", "FE", "APIServer"]
         self.config["build"] = [{"cwd": "tapdata/tapdata", "argv": ["bash", "build.sh"]}]
         self.config["assets"] = [{"source": "tapdata/tapdata/output", "target": "."}]
         # 不占用本机固定测试端口。
@@ -87,6 +113,71 @@ class EnvironmentTests(unittest.TestCase):
     def save(self, name, config=None):
         mod.write_json(self.env.config_dir / (name + ".json"), config or self.config)
 
+    def separate_inputs(self):
+        runtime = {key: value for key, value in self.config.items() if key in mod.RUNTIME_FIELDS}
+        runtime["schema_version"] = 2
+        preparation = {key: value for key, value in self.config.items() if key in mod.PREPARATION_FIELDS}
+        preparation["schema_version"] = 1
+        runtime_path = self.station / "runtime-input.json"
+        preparation_path = self.station / "preparation-input.json"
+        mod.write_json(runtime_path, runtime)
+        mod.write_json(preparation_path, preparation)
+        return runtime_path, preparation_path
+
+    def test_separate_runtime_configuration_deploys_and_keeps_preparation_private(self):
+        runtime, preparation = self.separate_inputs()
+        self.env.configure("local", runtime, preparation)
+        self.assertEqual(self.env.names(), ["dev", "local"])
+        saved = mod.read_json(self.env.config_dir / "local.json")
+        self.assertEqual(set(saved), mod.RUNTIME_FIELDS)
+        self.assertEqual(self.env.config("local")[1], self.config)
+        self.assertTrue(self.env.deploy("local")["ready"])
+        self.env.remove()
+        self.assertTrue((self.env.config_dir / "preparation/local.json").is_file())
+        self.assertEqual(self.env.config("local")[1], self.config)
+
+    def test_runtime_change_reuses_preparation_and_requires_update(self):
+        runtime, preparation = self.separate_inputs()
+        self.env.configure("local", runtime, preparation)
+        self.env.deploy("local")
+        config = mod.read_json(runtime)
+        config["java"]["tm"] = "-Xmx2G"
+        mod.write_json(runtime, config)
+        self.env.configure("local", runtime)
+        self.assertTrue(self.env.status()["configuration_changed"])
+        with self.assertRaisesRegex(mod.EnvironmentError, "update"):
+            self.env.deploy("local")
+        self.assertTrue(self.env.deploy(update=True)["ready"])
+
+    def test_invalid_preparation_does_not_replace_existing_config_or_stop_environment(self):
+        runtime, preparation = self.separate_inputs()
+        self.env.configure("local", runtime, preparation)
+        self.env.deploy("local")
+        before = self.env.state()
+        saved = (self.env.config_dir / "preparation/local.json").read_bytes()
+        mod.write_json(preparation, {"schema_version": 1, "build": []})
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.configure("local", runtime, preparation)
+        self.assertEqual(self.env.state(), before)
+        self.assertEqual((self.env.config_dir / "preparation/local.json").read_bytes(), saved)
+
+    def test_missing_preparation_guides_agent_and_does_not_create_configuration(self):
+        runtime, _ = self.separate_inputs()
+        with self.assertRaisesRegex(mod.EnvironmentError, "Agent"):
+            self.env.configure("local", runtime)
+        self.assertFalse((self.env.config_dir / "local.json").exists())
+
+    def test_runtime_rejects_build_fields_and_preparation_rejects_runtime_fields(self):
+        runtime, preparation = self.separate_inputs()
+        r, p = mod.read_json(runtime), mod.read_json(preparation)
+        r["build"] = []
+        with self.assertRaises(mod.EnvironmentError):
+            mod.combine_config(r, p)
+        r.pop("build")
+        p["platform"] = "linux/amd64"
+        with self.assertRaises(mod.EnvironmentError):
+            mod.combine_config(r, p)
+
     def test_configured_startup_grace_reaches_container(self):
         self.config["heartbeat"]["startup_timeout_seconds"] = 900
         self.save("dev")
@@ -96,6 +187,26 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(mod.read_json(candidate / "node1-settings.json")["startup_timeout_seconds"], 900)
         service = mod.read_json(self.env.root / "compose.json")["services"]["node1"]
         self.assertEqual(service["healthcheck"]["start_period"], "900s")
+
+    def test_existing_mongo_requires_user_choice_before_first_start(self):
+        self.env.existing_collections = 12
+        with self.assertRaisesRegex(mod.EnvironmentError, "用户选择"):
+            self.env.deploy("dev")
+        self.assertIsNone(self.env.state())
+        self.assertNotIn("up", self.env.history)
+        self.assertTrue(self.env.deploy("dev", reuse_mongo=True)["ready"])
+
+    def test_existing_mongo_switch_keeps_old_environment_without_choice(self):
+        self.env.deploy("dev")
+        before = self.env.state()
+        self.save("other")
+        self.env.existing_collections = 12
+        self.env.history.clear()
+        with self.assertRaisesRegex(mod.EnvironmentError, "reuse-mongo"):
+            self.env.deploy("other", switch=True)
+        self.assertEqual(self.env.state(), before)
+        self.assertNotIn("down", self.env.history)
+        self.assertTrue(self.env.deploy(update=True)["ready"])
 
     def test_node_settings_mountpoint_exists_before_compose_start(self):
         original_start = self.env.start
@@ -149,7 +260,7 @@ class EnvironmentTests(unittest.TestCase):
     def test_bundled_jdk_is_executed_during_preflight(self):
         self.build_fixture()
         real = mod.Environment(self.station)
-        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe"), mock.patch.object(mod, "call", return_value="") as calls:
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe", return_value={"database": "test", "collection_count": 0}), mock.patch.object(mod, "call", return_value="") as calls:
             real.build(self.config)
         commands = [c.args[0] for c in calls.call_args_list]
         self.assertTrue(any("/bundle/lib/jdk/bin/java" in c and c[-1] == "-version" for c in commands))
@@ -207,7 +318,7 @@ class EnvironmentTests(unittest.TestCase):
             "node3": {"tm": None, "api": None, "license": ""},
         }
         real = mod.Environment(self.station)
-        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe"), mock.patch.object(mod, "call", return_value=""):
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe", return_value={"database": "test", "collection_count": 0}), mock.patch.object(mod, "call", return_value=""):
             candidate, record = real.build(mod.validate(self.config))
             real.generate("dev", self.config, candidate, record)
         compose = mod.read_json(candidate / "compose.json")
@@ -234,7 +345,7 @@ class EnvironmentTests(unittest.TestCase):
         shutil.rmtree(driver)
         self.config["build"] = [{"cwd": "tapdata/tapdata", "argv": [sys.executable, "-c", "from pathlib import Path; p=Path('../tapdata-enterprise/tapdata-agent/node_modules/mongodb/package.json'); p.parent.mkdir(parents=True); p.write_text('{}')"]}]
         real = mod.Environment(self.station)
-        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe"), mock.patch.object(mod, "call", return_value=""):
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe", return_value={"database": "test", "collection_count": 0}), mock.patch.object(mod, "call", return_value=""):
             candidate, record = real.build(self.config)
         self.assertTrue((driver / "mongodb/package.json").is_file())
         self.assertEqual(record["commands"][0]["exit_code"], 0)
@@ -603,7 +714,7 @@ setTimeout(()=>console.log(JSON.stringify({exitCode:localProcess.exitCode,observ
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，监控探测行为待核验")
 class MonitorProbeTests(unittest.TestCase):
-    def probe(self, timestamp, registered=True, reachable=True):
+    def probe(self, timestamp, registered=True, reachable=True, preflight=False):
         script = ROOT / "projects/tapdata/scripts/test-environment-probe.js"
         harness = r"""
 const vm = require('vm'), fs = require('fs');
@@ -612,16 +723,26 @@ const callbacks = {}, output=[];
 const localProcess = {exitCode:0,stdin:{setEncoding:()=>{},on:(event,cb)=>{callbacks[event]=cb;}}};
 class MongoClient {
   async connect() {} async close() {}
-  db() {return {command:async()=>({hosts:['mongo.internal:27017']}),collection:()=>({findOne:async()=>args.registered ? {systemInfo:{time:args.timestamp}} : null})};}
+  db() {return {databaseName:'test',listCollections:()=>({toArray:async()=>[{name:'Settings'},{name:'Users'}]}),command:async()=>({hosts:['mongo.internal:27017']}),collection:()=>({findOne:async()=>args.registered ? {systemInfo:{time:args.timestamp}} : null})};}
 }
 const net={connect:()=>{const cbs={};const socket={destroy:()=>{},setTimeout:()=>{},on:(event,cb)=>{cbs[event]=cb;if(event==='error')setImmediate(()=>cbs[args.reachable ? 'connect' : 'error']());}};return socket;}};
 vm.runInNewContext(fs.readFileSync(process.argv[2],'utf8'),{require:name=>name==='net'?net:{MongoClient},process:localProcess,console:{log:value=>output.push(value)}});
-callbacks.data(JSON.stringify({uri:'mongodb://private-password@mongo.internal/test',nodes:[{name:'node1',uuid:'identity'}],heartbeat:{collection:'ClusterState',uuid_field:'uuid',time_field:'systemInfo.time',max_age_seconds:60}}));
+callbacks.data(JSON.stringify({uri:'mongodb://private-password@mongo.internal/test',nodes:args.preflight ? [] : [{name:'node1',uuid:'identity'}],heartbeat:{collection:'ClusterState',uuid_field:'uuid',time_field:'systemInfo.time',max_age_seconds:60}}));
 callbacks.end().then(()=>console.log(JSON.stringify({exitCode:localProcess.exitCode,output})));
 """
-        run = subprocess.run(["node", "-e", harness, json.dumps({"timestamp": timestamp, "registered": registered, "reachable": reachable}), str(script)], capture_output=True, text=True, check=True)
+        run = subprocess.run(["node", "-e", harness, json.dumps({"timestamp": timestamp, "registered": registered, "reachable": reachable, "preflight": preflight}), str(script)], capture_output=True, text=True, check=True)
         self.assertNotIn("private-password", run.stdout + run.stderr)
         return json.loads(run.stdout)
+
+    def test_preflight_reads_database_inventory_without_records_or_mutations(self):
+        result = self.probe(0, preflight=True)
+        self.assertEqual(result["exitCode"], 0)
+        report = json.loads(result["output"][0])
+        self.assertEqual(report["database"], "test")
+        self.assertEqual(report["collection_count"], 2)
+        self.assertEqual(report["nodes"], [])
+        self.assertFalse(report["verified"])
+        self.assertNotIn("Users", result["output"][0])
 
     def test_fresh_registered_heartbeat_passes(self):
         result = self.probe(mod.time.time() * 1000)

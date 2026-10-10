@@ -27,6 +27,10 @@ process.stdin.on('end', async () => {
     const members = [...new Set([...(hello.hosts || []), ...(hello.passives || []), ...(hello.arbiters || [])])];
     if (!(await Promise.all(members.map(memberReachable))).every(Boolean)) throw new Error('member unreachable');
     const nodes = [];
+    const inventory = request.nodes.length === 0 ? {
+      database: client.db().databaseName,
+      collection_count: (await client.db().listCollections({}, {nameOnly: true}).toArray()).length
+    } : {};
     for (const node of request.nodes) {
       const record = await client.db().collection(request.heartbeat.collection).findOne({[request.heartbeat.uuid_field]: node.uuid});
       const timestamp = record && field(record, request.heartbeat.time_field);
@@ -34,7 +38,7 @@ process.stdin.on('end', async () => {
       const age = (Date.now() - numeric) / 1000;
       nodes.push({node: node.name, registered: Boolean(record), heartbeat_fresh: Boolean(timestamp) && age >= -5 && age <= request.heartbeat.max_age_seconds});
     }
-    console.log(JSON.stringify({mongo_reachable: true, replica_members_reachable: true, verified: nodes.length > 0 && nodes.every(node => node.registered && node.heartbeat_fresh), nodes}));
+    console.log(JSON.stringify({mongo_reachable: true, replica_members_reachable: true, ...inventory, verified: nodes.length > 0 && nodes.every(node => node.registered && node.heartbeat_fresh), nodes}));
   } catch (_) {
     // 驱动异常可能含原始 URI 或用户信息。
     process.exitCode = 1;

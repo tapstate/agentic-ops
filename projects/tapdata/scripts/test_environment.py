@@ -18,6 +18,8 @@ import uuid
 HERE = Path(__file__).resolve().parent
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LABEL = "io.agenticops.station"
+PREPARATION_FIELDS = {"mongo_driver", "node_binary", "build", "assets", "heartbeat"}
+RUNTIME_FIELDS = {"schema_version", "nodes", "image", "platform", "mongo_uri_file", "ports", "java"}
 
 
 class EnvironmentError(ValueError):
@@ -123,6 +125,17 @@ def validate(config):
     return config
 
 
+def combine_config(runtime, preparation):
+    """新配置只保存运行输入；旧 schema 1 的执行结构继续复用。"""
+    if not isinstance(runtime, dict) or set(runtime) != RUNTIME_FIELDS or type(runtime["schema_version"]) is not int or runtime["schema_version"] != 2:
+        raise EnvironmentError("运行配置字段或 schema_version 无效")
+    if not isinstance(preparation, dict) or set(preparation) != PREPARATION_FIELDS | {"schema_version"} or type(preparation["schema_version"]) is not int or preparation["schema_version"] != 1:
+        raise EnvironmentError("项目准备文件字段或 schema_version 无效")
+    combined = dict(runtime)
+    combined.update(preparation)
+    return validate(combined)
+
+
 class Environment:
     def __init__(self, station):
         self.station = Path(station).resolve()
@@ -163,7 +176,34 @@ class Environment:
         if not NAME.fullmatch(name):
             raise EnvironmentError("环境名称必须为小写字母、数字和连字符")
         path = contained(self.config_dir, name + ".json")
-        return name, validate(read_json(path))
+        config = read_json(path)
+        if isinstance(config, dict) and config.get("schema_version") == 2:
+            preparation_path = contained(self.config_dir, "preparation/" + name + ".json")
+            if not preparation_path.is_file():
+                raise EnvironmentError("缺少项目准备文件，请由 Agent 按项目开发指引补齐")
+            config = combine_config(config, read_json(preparation_path))
+        return name, validate(config)
+
+    def configure(self, name, path, preparation_path=None):
+        if not name or not NAME.fullmatch(name):
+            raise EnvironmentError("环境名称必须为小写字母、数字和连字符")
+        config = read_json(Path(path))
+        if isinstance(config, dict) and config.get("schema_version") == 2:
+            target = contained(self.config_dir, "preparation/" + name + ".json")
+            if preparation_path:
+                preparation = read_json(Path(preparation_path))
+            elif target.is_file():
+                preparation = read_json(target)
+            else:
+                raise EnvironmentError("新运行配置需要 Agent 提供 --preparation 项目准备文件")
+            effective = combine_config(config, preparation)
+            write_json(target, preparation)
+        else:
+            if preparation_path:
+                raise EnvironmentError("旧完整配置不接受 --preparation")
+            effective = validate(config)
+        write_json(contained(self.config_dir, name + ".json"), config)
+        return {"configured": name, "applied": False, "build_configured": bool(effective["build"] and effective["assets"])}
 
     def state(self):
         path = self.root / "active.json"
@@ -318,7 +358,8 @@ class Environment:
         for java_entry in java_entries:
             call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", java_entry, config["image"], "-version"], timeout=180)
         call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "--version"], timeout=180)
-        self.probe(config, bundle, [])
+        record["mongo_preflight"] = self.probe(config, bundle, [])
+        write_json(candidate / "build-record.json", record)
         return candidate, record
 
     def probe(self, config, bundle, nodes):
@@ -478,7 +519,7 @@ class Environment:
         if erase:
             shutil.rmtree(self.root)
 
-    def deploy(self, name=None, update=False, switch=False):
+    def deploy(self, name=None, update=False, switch=False, reuse_mongo=False):
         state = self.state()
         resources = self.docker_resources()
         if (resources or self.network_ids) and not state:
@@ -502,6 +543,8 @@ class Environment:
             if port["license"] and not contained(self.station / "config", port["license"]).is_file():
                 raise EnvironmentError("许可证文件缺失")
         candidate, record = self.build(config)
+        if not update and record.get("mongo_preflight", {}).get("collection_count", 0) and not reuse_mongo:
+            raise EnvironmentError("目标 MongoDB 已有集合；请用户选择保留，或自行执行已审核的清理命令后重新检查；保留需显式 --reuse-mongo。未停止原环境")
         generated = self.generate(name, config, candidate, record, previous=state if update else None)
         call(["docker", "compose", "-p", self.project, "-f", str(candidate / "compose.json"), "config", "--quiet"])
         owned_ports = set()
@@ -539,10 +582,13 @@ class Environment:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["configure", "list", "deploy", "update", "status", "uninstall"])
+    parser.add_argument("operation", choices=["configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
     parser.add_argument("--station", required=True)
     parser.add_argument("--env")
     parser.add_argument("--config", help="configure 使用的完整 JSON 文件")
+    parser.add_argument("--preparation", help="configure 使用的 Agent 项目准备文件；用户不填写")
+    parser.add_argument("--reuse-mongo", action="store_true", help="用户明确选择保留目标库已有集合；只适用于 deploy")
+    parser.add_argument("--bundle", help="inspect-mongo 使用的受管 Linux 装配目录；缺省使用当前制品")
     parser.add_argument("--switch", action="store_true", help="明确切换并清理旧节点现场")
     args = parser.parse_args(argv)
     try:
@@ -550,14 +596,18 @@ def main(argv=None):
             raise EnvironmentError("--switch 只适用于 deploy")
         if args.config and args.operation != "configure":
             raise EnvironmentError("--config 只适用于 configure")
+        if args.preparation and args.operation != "configure":
+            raise EnvironmentError("--preparation 只适用于 configure")
+        if args.reuse_mongo and args.operation != "deploy":
+            raise EnvironmentError("--reuse-mongo 只适用于 deploy")
+        if args.bundle and args.operation != "inspect-mongo":
+            raise EnvironmentError("--bundle 只适用于 inspect-mongo")
         env = Environment(args.station)
         with env.lock():
             if args.operation == "configure":
                 if not args.env or not NAME.fullmatch(args.env) or not args.config:
                     raise EnvironmentError("configure 需要 --env 名称与 --config 文件")
-                config = validate(read_json(Path(args.config)))
-                write_json(contained(env.config_dir, args.env + ".json"), config)
-                result = {"configured": args.env, "applied": False, "build_configured": bool(config["build"] and config["assets"])}
+                result = env.configure(args.env, args.config, args.preparation)
             elif args.operation == "list":
                 try:
                     runtime = env.status()
@@ -566,6 +616,16 @@ def main(argv=None):
                 result = {"configurations": env.names(), "runtime": runtime}
             elif args.operation == "status":
                 result = env.status()
+            elif args.operation == "inspect-mongo":
+                state = env.state()
+                _, config = env.config(args.env or (state["environment"] if state else None))
+                if args.bundle:
+                    bundle = contained(env.root, args.bundle)
+                elif state:
+                    bundle = env.root / "builds" / state["build"] / "bundle"
+                else:
+                    raise EnvironmentError("先由 Agent 准备目标 Linux 制品，再提供 --bundle 只读检查；不自动清理数据库")
+                result = env.probe(config, bundle, [])
             elif args.operation == "uninstall":
                 state = env.state()
                 if args.env and state and state["environment"] != args.env:
@@ -573,7 +633,7 @@ def main(argv=None):
                 env.remove()
                 result = {"uninstalled": True, "configurations": env.names(), "external_mongo": "preserved"}
             else:
-                result = env.deploy(args.env, update=args.operation == "update", switch=args.switch)
+                result = env.deploy(args.env, update=args.operation == "update", switch=args.switch, reuse_mongo=args.reuse_mongo)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, KeyError, TypeError, AttributeError, IndexError, subprocess.TimeoutExpired):
