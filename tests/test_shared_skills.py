@@ -113,6 +113,20 @@ class SharedSkillsTests(unittest.TestCase):
                 refresh_wiring(self.product, expected_artifacts(self.product), tree)
         self.assertEqual(target.read_text(), 'user content')
 
+    def test_both_agents_receive_same_skill_help_contract_navigation(self):
+        self.assertEqual((ROOT / 'CLAUDE.md').read_text().strip(), '@AGENTS.md')
+        skill(self.product / 'projects/demo/skills', 'project-test')
+        station = self.root / 'station'
+        station.mkdir()
+        artifacts, _ = render.expected_artifacts(self.product, station, 'demo', ['codex', 'claude'], discover(self.product))
+        entry = artifacts['AGENTS.md']['content']
+        self.assertIn(str(self.product) + '/docs/skill-maintenance.md#技能调用与帮助', entry)
+        self.assertNotIn('__AGENTIC_OPS_HOME__', entry)
+        self.assertIn('@AGENTS.md', artifacts['CLAUDE.md']['content'])
+        for directory in ['.agents/skills', '.claude/skills']:
+            self.assertIn(directory + '/shared-test', artifacts)
+            self.assertIn(directory + '/project-test', artifacts)
+
 
 class InstalledScopeTests(unittest.TestCase):
     def setUp(self):

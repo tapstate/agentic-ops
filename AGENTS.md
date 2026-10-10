@@ -56,6 +56,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - 不提交 secrets、tokens、private keys、客户数据或原始敏感日志。
 - `.superpowers/` 只属于本机临时状态，不维护、不提交，也不是事实源。
 - Skill 只能指导 Agent 使用现役架构，不得承担可由 Policy 或 Runtime 强制的规则。
+- 受管技能调用遵循[统一帮助合同](docs/skill-maintenance.md#技能调用与帮助)：仅提供技能名而无法确定操作，或明确请求帮助时，按合同展示帮助；已有明确行动意图时继续原技能流程。
 
 ### Markdown 排版
 

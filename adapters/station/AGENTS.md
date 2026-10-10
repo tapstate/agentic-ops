@@ -19,6 +19,8 @@
 
 Codex 的 `.agents/skills/`、Claude Code 的 `.claude/skills/` 链接到同一中央项目 Skill，不复制规则。AGENTS、Agent 入口和 MCP 配置只是可再生接线，不是事实源。
 
+技能调用遵循[统一帮助合同](__AGENTIC_OPS_HOME__/docs/skill-maintenance.md#技能调用与帮助)：仅提供技能名而无法确定操作，或明确请求帮助时，按合同展示帮助；已有明确行动意图时继续原技能流程。
+
 ## 必需插件的按需配置
 
 必需插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`。首次需要 Jira 事实时检查 `atlassian` 是否可用；缺失、未启用或未登录时，只暂停依赖 Jira 的步骤，说明用途与当前客户端安装/登录入口。不得伪造结果、自行配置全局插件或改用未受控 token/PAT。GitHub MCP、gh 或其它工具由 Agent 按已有授权选择，不作为启动前置条件。

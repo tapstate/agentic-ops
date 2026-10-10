@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+受管技能的调用与帮助交互由 [Skill 维护规范](skill-maintenance.md#技能调用与帮助)统一定义，覆盖源码维护根和业务工位的维护、共享、项目技能。源码 `AGENTS.md`、只引用它的 `CLAUDE.md` 与工位模板负责导航到同一合同；操作与示例取自现役技能，不建立第二份技能操作清单。
+
 TapData 指定连接器的编译和注册由 [连接器能力](../projects/tapdata/skills/tapdata-connectors/SKILL.md)进入，[项目开发指引](../projects/tapdata/runbooks/tapdata-development.md#连接器编译与注册)维护操作、制品和回读合同。可独立编译、独立注册或组合执行，复用当前工位源码、Maven 隔离和命名开发环境，不重建整套环境。
 
 [任务存档与恢复](usage/task-archive-and-resume.md)是使用者处理任务中断、重建与研发环境升级的场景入口；[扩展使用总纲](usage/README.md)说明它与授权、更新、质量及材料文档的职责关系。

@@ -16,6 +16,7 @@ stories:
       - .githooks/**
       - .github/**
       - AGENTS.md
+      - CLAUDE.md
       - README.md
       - docs/**
       - internal/**

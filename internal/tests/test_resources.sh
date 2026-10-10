@@ -66,7 +66,7 @@ $tool_root_entries
 EOF
 
 for file in \
-  .agentic-ops-source AGENTS.md README.md agenticops \
+  .agentic-ops-source AGENTS.md CLAUDE.md README.md agenticops \
   docs/strategy/project-goals.md docs/architecture/agenticops-v1-architecture.md \
   docs/skill-maintenance.md \
   contracts/gate-request.schema.json contracts/gate-decision.schema.json \
