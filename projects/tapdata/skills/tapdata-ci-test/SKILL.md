@@ -9,7 +9,7 @@ metadata:
 
 TapData 代码变更以 CI 集成测试为主要验证路径，依据 Wiki 规范和任务源码判断覆盖、编写及测试。TapTest（t-layer3-test）的用例开发与运行仅在用户选择当前会话处理时，由 [tapdata-task](../tapdata-task/SKILL.md) 导航至独立项目指引，不进入本技能的 Maven 流程。
 
-分支适用性及提交边界遵循[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#分支修复与测试维护)：集成测试集中在 develop 维护，release 不回补框架和用例；分析 release 时仍返回真实测试能力及覆盖缺口，不在 release 自动新增集成测试。需要 develop 修复或用例时返回主流程准备对应基线与授权，不自行切分支或借用 release 授权。业务与集成测试必须分开提交，develop 最终验证覆盖组合成果。
+分支适用性及提交边界遵循[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#分支修复与测试维护)：`ci-test`（`it`）集中在 develop 维护，其框架、用例和专用配置不回补低版本；普通 `test` 可随适用业务变更合入低版本，不因在 CI 执行而被排除；分析 release 时仍返回真实测试能力及覆盖缺口，不在 release 自动新增集成测试。需要 develop 修复或用例时返回主流程准备对应基线与授权，不自行切分支或借用 release 授权。业务与集成测试必须分开提交，develop 最终验证覆盖组合成果。
 
 由 [tapdata-task](../tapdata-task/SKILL.md) 在方案分析、实现后验证和 PR CI 报告返回时按需调用，也可单独请求分析。先读取当前任务的范围、验收预期、工程基线和已有验证记录；实际源码取工位 source。无 current run 时仅输出“未绑定任务基线”的分析，不修改源码、不执行测试、不创建任务状态；仅有 Wiki 支撑的结论标为未核验。检测到 current run 后沿用主流程的授权、范围和失败记录，不借独立调用重置修复轮次。
 
