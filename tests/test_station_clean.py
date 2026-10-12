@@ -20,12 +20,49 @@ class StationCleanTests(unittest.TestCase):
     git = fixture.ResourceTests.git
     takeover = fixture.ResourceTests.takeover
     ready = fixture.ResourceTests.ready
+    rule_task = fixture.lifecycle.StationTests.rule_task
     execute = fixture.ResourceTests.execute
 
     def result_request(self, task):
         return dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
                     cleanup_version=6, abandon_changes=True,
                     confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
+
+    def test_plan_still_rejects_frozen_origin_different_from_catalog(self):
+        import copy
+        task = self.ready()
+        changed = copy.deepcopy(task)
+        changed['engineering_baseline']['repositories'][self.name]['origin'] = str(self.root / 'other.git')
+        with self.assertRaisesRegex(ValueError, 'origin'):
+            resources.plan(self.ws, changed)
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_reused_plan_detects_source_change_before_archive_publication(self):
+        task = self.ready()
+        request = self.result_request(task)
+        original = station.archives.publish
+        def changed_source(*args, **kwargs):
+            (self.repo / 'file.txt').write_text('late source must survive')
+            return original(*args, **kwargs)
+        with mock.patch.object(station.archives, 'publish', side_effect=changed_source):
+            with self.assertRaisesRegex(ValueError, '现场变化'):
+                self.execute(task, request)
+        self.assertEqual('late source must survive', (self.repo / 'file.txt').read_text())
+        self.assertIsNotNone(task_store.read_task(self.ws))
+        self.assertIsNone(task_store.read_task(self.ws)['archive_ref'])
+
+    def test_cleanup_resume_rechecks_origin_after_preparation(self):
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-origin-resume', request)
+        prepared = station.execute(*args, cleanup_mode='prepare')
+        self.assertEqual('awaiting_cleanup_result', prepared['phase'])
+        self.git(self.repo, 'config', 'remote.origin.url', str(self.root / 'other.git'))
+        with self.assertRaisesRegex(ValueError, 'origin'):
+            station.execute(*args)
+        self.assertIsNotNone(task_store.read_task(self.ws))
+        self.git(self.repo, 'config', 'remote.origin.url', str(self.remote))
+        self.assertEqual('done', station.execute(*args)['status'])
 
     def test_legacy_empty_runtime_recovery_is_explicit_and_idempotent(self):
         from internal import station_identity_recovery as recovery
@@ -73,7 +110,7 @@ class StationCleanTests(unittest.TestCase):
     def test_creation_device_change_does_not_block_new_plan(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         path = directories.registry_path(self.ws, task)
         original = json.loads(path.read_text())
         changed = json.loads(path.read_text())
@@ -90,7 +127,7 @@ class StationCleanTests(unittest.TestCase):
     def test_confirmed_identity_change_requires_amendment(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -112,7 +149,7 @@ class StationCleanTests(unittest.TestCase):
     def test_amend_cannot_redelete_completed_runtime(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -405,7 +442,7 @@ class StationCleanTests(unittest.TestCase):
     def test_agent_can_clear_registered_root_without_script_delete_receipt(self):
         task = self.ready()
         (self.product / "projects/tapdata/station-clean.json").write_text(json.dumps({
-            "version": 1, "preserve": [], "clean": [{"pattern": "scratch", "action": "remove"}]}))
+            "version": 2, "rules": [{"scope": "station-root", "type": "directory", "pattern": "scratch", "action": "remove"}]}))
         resources.register(self.ws, task["issue_key"], task["run_id"], [{
             "kind": "directory", "producer": "fixture", "path": "scratch"}])
         request = self.result_request(task)
@@ -537,9 +574,9 @@ class StationCleanTests(unittest.TestCase):
                 for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
 
     def test_old_requested_versions_are_rejected_without_writes(self):
-        task = self.ready()
-        (self.repo / 'file.txt').write_text('must preserve')
-        request = self.result_request(task)
+        task = self.rule_task()
+        (self.ws / 'runtime/keep.txt').write_text('must preserve')
+        request = dict(summary='保存并重置', reason='用户清理', decision_ref='fixture:user', abandon_changes=True)
         before = self.state_bytes()
         for version in (3, 4, 5, 6.0, True, '6'):
             with self.subTest(version=version):
@@ -575,12 +612,12 @@ class StationCleanTests(unittest.TestCase):
 
     def project_rules(self, preserve=(), clean=()):
         self.write(self.product/'projects/tapdata/station-clean.json',
-                   dict(version=1, preserve=list(preserve), clean=list(clean)))
+                   dict(version=2, rules=[dict(scope="station-root", type="directory", pattern=p.rstrip("/"), action="preserve") for p in preserve] + [dict(scope="station-root", type="directory", pattern=r["pattern"].rstrip("/"), action=r["action"]) for r in clean]))
 
     def test_priority_and_unmatched(self):
         self.project_rules(['cache/'], [{'pattern':'source/', 'action':'remove'}, {'pattern':'scratch/', 'action':'remove'}])
         config = rules.load(self.ws)
-        for name, expected in [('config', 'preserve'), ('cache', 'preserve'), ('source', 'source-reset'), ('scratch', 'remove'), ('unknown', 'block')]:
+        for name, expected in [('config', 'preserve'), ('cache', 'preserve'), ('source', 'remove'), ('scratch', 'remove'), ('unknown', 'block')]:
             with self.subTest(name=name):
                 self.assertEqual(expected, rules.classify(config, name, True)['action'])
 
@@ -591,8 +628,37 @@ class StationCleanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '重复'):
             rules.load(self.ws)
 
+    def test_rule_scope_type_and_action_combinations_fail_closed(self):
+        invalid = [dict(scope='repository', pattern='cache', type='directory', action='remove'),
+                   dict(scope='repository', pattern='report', type='file', action='preserve'),
+                   dict(scope='source-layout', pattern='owner', type='directory', action='remove'),
+                   dict(scope='station-root', pattern='file', type='file', action='source-reset')]
+        for row in invalid:
+            with self.subTest(row=row), self.assertRaisesRegex(ValueError, '作用域|类型'):
+                rules.validate_layer({'version': 2, 'rules': [row]})
+        config = rules.load(self.ws)
+        self.assertEqual('block', rules.classify(config, '.DS_Store', True)['action'])
+        self.assertEqual('archive', rules.classify(config, 'ordinary.txt', scope='repository')['action'])
+        legacy = {'version': 1, 'preserve': [], 'clean': []}
+        with self.assertRaisesRegex(ValueError, '版本'):
+            rules.validate_layer(legacy)
+
+    def test_project_rule_priority_and_core_capability_are_separate(self):
+        self.project_rules(clean=[{'pattern': '.idea', 'action': 'remove'}])
+        self.assertEqual('remove', rules.classify(rules.load(self.ws), '.idea', True)['action'])
+        self.project_rules(clean=[{'pattern': 'source', 'action': 'remove'}])
+        with self.assertRaisesRegex(ValueError, '生命周期'):
+            rules.inspect(self.ws)
+        self.project_rules()
+        path = self.product/'policies/station-clean.json'
+        value = json.loads(path.read_text())
+        value['rules'] = [row for row in value['rules'] if row['pattern'] != 'runtime']
+        self.write(path, value)
+        with self.assertRaisesRegex(ValueError, '生命周期'):
+            rules.inspect(self.ws)
+
     def test_inventory_always_enforces_current_rules(self):
-        self.ready()
+        self.rule_task()
         self.project_rules(['source/'])
         with self.assertRaisesRegex(ValueError, '生命周期'):
             resources.verify_station_inventory(self.ws)
@@ -641,7 +707,7 @@ class StationCleanTests(unittest.TestCase):
         self.assertEqual('baseline', (self.repo/'file.txt').read_text().strip())
 
     def test_no_abandon_is_zero_write(self):
-        self.ready()
+        self.rule_task()
         before = {p.relative_to(self.ws):p.read_bytes() for p in (self.ws/'.agenticops').rglob('*') if p.is_file()}
         with mock.patch('sys.stdout', new_callable=io.StringIO):
             self.assertEqual(0, station_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no']))
@@ -841,6 +907,7 @@ class CleanupStagesTests(unittest.TestCase):
     git = fixture.ResourceTests.git
     takeover = fixture.ResourceTests.takeover
     ready = fixture.ResourceTests.ready
+    rule_task = fixture.lifecycle.StationTests.rule_task
     reset_request = fixture.ResourceTests.reset_request
 
     def args(self, task):

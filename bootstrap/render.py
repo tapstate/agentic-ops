@@ -23,10 +23,10 @@ from station_compatibility import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, task_store
+from workflow import project_rules, task_store, station_context, station_layout
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = station_context.schema_version()
 INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
@@ -130,8 +130,7 @@ def load_station(station, tree=None):
     else:
         return None, None
     if document is not None:
-        if document.get("schema_version") not in (1, SCHEMA_VERSION):
-            raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+        station_context.validate_binding(document)
         return document, None
     return None, None
 
@@ -241,8 +240,8 @@ def expected_artifacts(install_root, station, project, agents, manifests):
 
 
 def require_current_station_document(document):
-    if document is not None and document.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    if document is not None:
+        station_context.validate_binding(document)
     return document
 
 
@@ -442,8 +441,7 @@ def validate_station_document(install_root, document):
     station_id = document.get("station_id")
     if not isinstance(station_id, str) or not re.fullmatch(r"[a-f0-9]{32}", station_id):
         raise ValueError("工位配置缺少 station_id")
-    if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
-        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    station_context.validate_binding(document)
     if not isinstance(source_pool, str) or not source_pool or not Path(source_pool).is_absolute():
         raise ValueError("工位配置 source_pool 无效")
     branch_identity(document)
@@ -460,10 +458,14 @@ def check_station(install_root, station, config, init, tree):
     from workflow import station_operation, task_store
     task_store.read_current(station)
     station_operation.read(station)
-    for name in ("config", "source", "runtime"):
+    for row in station_layout.load(install_root)["roots"]:
+        if not row["create"]:
+            continue
+        name = row["path"]
         if not tree.is_dir(name) or tree.is_symlink(name):
             raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
-    if tree.exists("archive") and (not tree.is_dir("archive") or tree.is_symlink("archive")):
+    retained_root = station_layout.name("retained-material", install_root)
+    if tree.exists(retained_root) and (not tree.is_dir(retained_root) or tree.is_symlink(retained_root)):
         raise ValueError("旧工位归档目录不安全：archive")
     artifacts, _ = expected_artifacts(install_root, station, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
@@ -594,12 +596,15 @@ def main():
                 )
                 return 0
 
-            for name in ("config", "source", "runtime", "archive"):
+            for row in station_layout.load(install_root)["roots"]:
+                if row["role"] == "station-state":
+                    continue
+                name = row["path"]
                 if tree.exists(name):
                     if not tree.is_dir(name) or tree.is_symlink(name):
                         raise ValueError("工位目录已有未知内容或不安全路径，拒绝覆盖：%s" % name)
                     if config is None and any(tree.path(name).iterdir()):
-                        if name == "runtime" or not arguments.reuse_materials:
+                        if row["role"] == "task-runtime" or not arguments.reuse_materials:
                             raise ValueError("已有材料不能自动采用；runtime 必须为空，其它目录需明确 --reuse-materials：%s" % name)
             if config is None:
                 if tree.exists(STATE_DIRECTORY):
@@ -658,8 +663,9 @@ def main():
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
-            for name in ("config", "source", "runtime"):
-                tree.path(name).mkdir(mode=0o700, exist_ok=True)
+            for row in station_layout.load(install_root)["roots"]:
+                if row["create"]:
+                    tree.path(row["path"]).mkdir(mode=0o700, exist_ok=True)
             task_store.initialize_current(station)
     except ValueError as error:
         parser.error(str(error))

@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from workflow import git_refs  # noqa: E402
+from workflow import git_refs, station_context  # noqa: E402
 
 RELEASE_RE = re.compile(r"^release-v\d+(?:\.\d+){2,}$")
 AUTO_REFRESH_MAX_AGE_SECONDS = 3600
@@ -244,16 +244,10 @@ def module_repository(tapdata_root, repository):
 
 def station_tapdata_root(start):
     """返回离执行路径最近的工位绑定所对应的 TapData 模块根目录。"""
-    current = Path(start).resolve()
-    for directory in (current, *current.parents):
-        binding = directory / ".agenticops" / "station.json"
-        if not binding.is_file():
-            continue
-        document = read_json(binding)
-        if document.get("schema_version") != 3:
-            raise AlignmentError("旧工位必须使用原版本受控解绑并重建")
-        return directory / "source" / "tapdata", binding
-    return None, None
+    station, binding, _ = station_binding(start)
+    if station is None:
+        return None, None
+    return station / "source" / "tapdata", binding
 
 
 def resolve_tapdata_root(explicit, execution_directory):
@@ -266,12 +260,13 @@ def resolve_tapdata_root(explicit, execution_directory):
 
 
 def station_binding(start):
-    current = Path(start).resolve()
-    for directory in (current, *current.parents):
-        binding = directory / ".agenticops" / "station.json"
-        if binding.is_file():
-            return directory, binding, read_json(binding)
-    return None, None, None
+    try:
+        station, binding, document = station_context.find_binding(start)
+        if station is not None:
+            station_context.require_epoch(station, document["product_root"])
+        return station, binding, document
+    except ValueError as error:
+        raise AlignmentError(str(error)) from error
 
 
 def git_refs_cache_file(execution_directory, explicit=None):
@@ -281,8 +276,6 @@ def git_refs_cache_file(execution_directory, explicit=None):
     station, binding, document = station_binding(execution_directory)
     if station is None:
         raise AlignmentError("缺少工位绑定；请提供 --cache-file，不能从 tapdata-root 父目录猜测 source 工程目录")
-    if document.get("schema_version") != 3:
-        raise AlignmentError("旧工位必须使用原版本受控解绑并重建")
     return station / ".agenticops" / "git-ref-cache-v2.json", station / "source"
 
 

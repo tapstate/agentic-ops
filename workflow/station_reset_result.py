@@ -67,6 +67,7 @@ def guard(base, task, operation, final=False):
     resources.verify_stopped(base, task, require_cleaned=final)
     resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
     directories.verify_completed_roots(base, task, operation)
+    resources.verify_completed_batches(base, task, operation)
     # 所有工位根必须先核验身份，不能在源码恢复后才发现 runtime 已被替换。
     for entry in plan["directories"]:
         if entry["kind"] == "source-generated":
@@ -81,7 +82,7 @@ def guard(base, task, operation, final=False):
                        for name in task.get("task_repositories", {}))):
             raise ValueError("释放保留成果与交付证明不一致")
     catalog = resources.project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved"), rules=plan["rules"]) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():
         repository = source.repository_path(base, name)
@@ -135,6 +136,8 @@ def verify(base, task, operation):
     plan = guard(base, task, operation, final=True)
     for name, entry in plan["source"].items():
         source_result(base, task, name, entry)
+    for batch in plan["rules"]["batches"]:
+        resources.discard_batch(base, task, operation, batch, verify_only=True)
     from workflow import station_cleanup_stages
     station_cleanup_stages.verify_dispositions(base, task, operation)
     for entry in plan["directories"]:
@@ -178,11 +181,16 @@ def _apply_repository(base, task, operation, name, entry):
     if entry.get("initial_checkout"):
         return
     repository = source.repository_path(base, name)
+    key = resources.batch_key(operation, "repository:" + name)
+    if operation.get("steps", {}).get(key, {}).get("receipt") is not None:
+        source_result(base, task, name, entry)
+        return
     try:
         source_result(base, task, name, entry)
     except ValueError:
         pass
     else:
+        resources.discard_batch(base, task, operation, "repository:" + name)
         return
     current_dirs = source_directories(repository)
     allowed = set(entry["directories"]) | target_directories(repository, entry["neutral"]["sha"])
@@ -194,6 +202,7 @@ def _apply_repository(base, task, operation, name, entry):
     head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
     if head not in (entry["head"], entry["neutral"]["sha"]):
         raise ValueError("清理期间源码 Head 变化：" + name)
+    resources.discard_batch(base, task, operation, "repository:" + name, complete=False)
     observed = artifacts.snapshot(base, name, {}, {}, entry["neutral"]["sha"], include_ignored=True)
     original = {row["path"]: row for row in plan["entries"] if row["repository"] == name}
     for row in observed["entries"]:
@@ -211,6 +220,7 @@ def _apply_repository(base, task, operation, name, entry):
             path.rmdir()
     resources.neutral(base, task, operation, only_repository=name)
     source_result(base, task, name, entry)
+    resources.discard_batch(base, task, operation, "repository:" + name)
 
 
 def verify_sources(base, task, operation):
@@ -274,8 +284,8 @@ def record(base, task, operation):
                 task_store._write_json_atomic(target, data)
     # 执行中断留下的意图以实际结果闭合，不伪称原命令执行成功。
     for key, step in list(operation["steps"].items()):
-        if step["receipt"] is None and not step.get("superseded_by") and key.startswith(("source-reset:", "neutral:", "station-source-reset:")):
-            operations.receipt(base, operation, key, observed)
+        if step["receipt"] is None and not step.get("superseded_by") and key.startswith(("source-reset:", "neutral:", "station-source-reset:", "cleanup-batch:")):
+            operations.receipt(base, operation, key, step["expected"] if key.startswith("cleanup-batch:") else observed)
     name = "station-source-reset:" + str(len(operation.get("plan_revisions", []))) + ":" + observed["plan_digest"]
     operations.intent(base, operation, name, {}, {"plan_digest": observed["plan_digest"]})
     operations.receipt(base, operation, name, observed)

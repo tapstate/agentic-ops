@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "roots": [
+    {
+      "path": "source",
+      "role": "repositories",
+      "actions": [
+        "source-reset"
+      ],
+      "create": true
+    },
+    {
+      "path": "runtime",
+      "role": "task-runtime",
+      "actions": [
+        "clear-children"
+      ],
+      "create": true
+    },
+    {
+      "path": ".agenticops",
+      "role": "station-state",
+      "actions": [
+        "lifecycle-clean"
+      ],
+      "create": false
+    },
+    {
+      "path": "config",
+      "role": "configuration",
+      "actions": [
+        "preserve"
+      ],
+      "create": true
+    },
+    {
+      "path": "archive",
+      "role": "retained-material",
+      "actions": [
+        "preserve"
+      ],
+      "create": false
+    }
+  ]
+}

@@ -12,15 +12,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from workflow.git_environment import git_environment
+from workflow import station_context
 
 MANIFEST_PATH = "contracts/station-state-compatibility.json"
 def validate_manifest(document, label):
-    required = {"station_state_epoch"}
-    if not isinstance(document, dict) or set(document) != required:
-        raise ValueError("%s结构无效" % label)
-    if type(document.get("station_state_epoch")) is not int or document["station_state_epoch"] < 1:
-        raise ValueError("%s station_state_epoch 无效" % label)
-    return document
+    try:
+        return station_context.validate_manifest(document)
+    except ValueError as error:
+        raise ValueError("%s结构无效：%s" % (label, error)) from error
 
 
 def load_manifest(product_root):
@@ -93,19 +92,7 @@ def check_upgrade(product_root, current_ref, target_ref, operation="update"):
 
 def require_station_can_adopt(product_root, station, target_manifest=None):
     """只接受当前产品 epoch；不采用旧工位状态。"""
-    target = target_manifest or load_manifest(product_root)
-    init_path = Path(station) / ".agenticops" / "init.json"
-    try:
-        init = json.loads(init_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError("工位初始化标记无法读取，请使用原版本解绑并重建：%s" % error) from error
-    current_epoch = init.get("station_state_epoch") if isinstance(init, dict) else None
-    if type(current_epoch) is int and current_epoch == target["station_state_epoch"]:
-        return current_epoch
-    raise ValueError(
-        "工位状态与当前产品不兼容，repair 不执行跨代际采用。"
-        "请使用原版本完成任务后受控解绑并重建；不要手改 epoch 或任务状态。"
-    )
+    return station_context.require_epoch(station, product_root, target_manifest)
 
 
 def main(argv=None):

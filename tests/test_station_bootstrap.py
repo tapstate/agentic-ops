@@ -83,6 +83,45 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
+    def test_station_status_is_read_only_for_idle_and_active_tasks(self):
+        command = [str(self.station / 'agenticops'), 'station', 'status', '--json']
+        def query():
+            before = {str(p): p.read_bytes() for p in (self.station / '.agenticops').rglob('*') if p.is_file()}
+            registered = registry.registry_path(ROOT).read_bytes()
+            result = subprocess.run(command, cwd=self.station, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(before, {str(p): p.read_bytes() for p in (self.station / '.agenticops').rglob('*') if p.is_file()})
+            self.assertEqual(registered, registry.registry_path(ROOT).read_bytes())
+            self.assertNotIn('private-fact-marker', result.stdout)
+            return json.loads(result.stdout)
+        info = query()
+        self.assertEqual(str(ROOT), info['product_root'])
+        self.assertEqual(str(self.station.resolve()), info['station'])
+        self.assertTrue(info['product_version'])
+        self.assertEqual('tapdata', info['project'])
+        self.assertTrue(info['registered'])
+        self.assertIsNone(info['task'])
+        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
+            'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
+            'facts': {'private': 'private-fact-marker'}, 'history': [], 'pending': None,
+            'engineering_baseline': {'status': 'resolving'}, 'task_repositories': {},
+            'terminal_proof': None, 'archive_ref': None})
+        self.assertEqual({'issue_key': 'TAP-123', 'run_id': 'run-test', 'status': 'in_progress',
+                          'stage': 'waiting_takeover'}, query()['task'])
+
+    def test_station_status_rejects_incompatible_epoch_before_reading_task(self):
+        init_path = self.station / '.agenticops/init.json'
+        init = json.loads(init_path.read_text())
+        init['station_state_epoch'] += 1
+        init_path.write_text(json.dumps(init))
+        state = self.station / '.agenticops/current-task.json'
+        state.write_text('invalid old state')
+        result = subprocess.run([str(self.station / 'agenticops'), 'station', 'status'],
+                                cwd=self.station, capture_output=True, text=True)
+        self.assertEqual(2, result.returncode)
+        self.assertIn('代际', result.stderr)
+        self.assertEqual('invalid old state', state.read_text())
+
     def test_generate_purge_generate(self):
         before = json.loads((self.station / '.agenticops/station.json').read_text())
         self.assertEqual(before['schema_version'], 4)

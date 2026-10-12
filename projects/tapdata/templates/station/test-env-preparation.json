@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "mongo_driver": "tapdata/tapdata-enterprise/tapdata-agent/node_modules",
+  "node_binary": "lib/NDK/node/bin/node",
+  "build": [],
+  "assets": [],
+  "heartbeat": {
+    "collection": "ClusterState",
+    "uuid_field": "uuid",
+    "time_field": "systemInfo.time",
+    "max_age_seconds": 60,
+    "startup_timeout_seconds": 300
+  }
+}

@@ -302,39 +302,8 @@ def _active_product_lifecycle(product_root):
 
 def _require_station_epoch_supported(base, product_root):
     """只允许当前产品 epoch 的已初始化工位写入。"""
-    manifest_path = (
-        Path(product_root).resolve()
-        / "contracts"
-        / "station-state-compatibility.json"
-    )
-    init_path = state_path(base) / "init.json"
-    if not manifest_path.is_file() or not init_path.is_file():
-        raise ValueError("工位兼容性清单或初始化标记缺失，请受控解绑并重建")
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        init = json.loads(init_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("工位状态代际无法核验：%s" % error) from error
-    if (
-        not isinstance(manifest, dict)
-        or not isinstance(init, dict)
-        or set(manifest) != {"station_state_epoch"}
-    ):
-        raise ValueError("工位状态兼容性清单或代际标记无效")
-    product_epoch = manifest.get("station_state_epoch")
-    epoch = init.get("station_state_epoch")
-    if (
-        type(product_epoch) is not int
-        or product_epoch < 1
-        or type(epoch) is not int
-        or epoch < 1
-    ):
-        raise ValueError("工位状态兼容性清单或代际标记无效")
-    if epoch != product_epoch:
-        raise ValueError(
-            "工位状态代际 %s 与当前产品不兼容；请使用可处理该状态的原版本，"
-            "保存材料后将这个旧工位受控解绑并重建；repair 不执行跨代际采用" % epoch
-        )
+    from workflow import station_context
+    return station_context.require_epoch(base, product_root)
 
 
 @contextmanager
@@ -362,9 +331,10 @@ def task_state_lock(
     binding_path = state_root / "station.json"
     if state_root.is_symlink() or binding_path.is_symlink():
         raise ValueError("工位状态目录与绑定不能是符号链接")
+    from workflow import station_context
     try:
-        binding = json.loads(binding_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        binding = station_context.read_binding(base)
+    except ValueError as error:
         raise ValueError("工位绑定无法读取：%s" % error) from error
     product_root = binding.get("product_root")
     if not isinstance(product_root, str) or not product_root:
@@ -385,8 +355,8 @@ def task_state_lock(
             if (opened.st_dev, opened.st_ino) != (current_directory.st_dev, current_directory.st_ino):
                 raise ValueError("获得任务状态锁后工位状态目录已替换，拒绝继续")
             try:
-                current = json.loads(binding_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as error:
+                current = station_context.read_binding(base)
+            except ValueError as error:
                 raise ValueError("获得任务状态锁后工位绑定无法读取：%s" % error) from error
             current_root = current.get("product_root")
             if (current != binding or state_root.is_symlink() or binding_path.is_symlink()

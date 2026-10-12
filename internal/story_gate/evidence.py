@@ -12,12 +12,10 @@ import subprocess
 import sys
 
 from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
+from internal import test_selection
 
-EVIDENCE_SCHEMA_VERSION = 5
-CHECK_TIMEOUTS = {
-    "python_runtime": 600, "resource_contracts": 120,
-    "product_install_boundary": 600, "release_workflow": 300,
-}
+EVIDENCE_SCHEMA_VERSION = 6
+SLOW_CHECK_SECONDS = 600
 BEHAVIOR_FLAGS = ("AO_CONNECTOR_MAVEN_TEST", "AO_JAR_MAVEN_TEST")
 
 
@@ -82,8 +80,9 @@ def require_material(root, impact):
 
 
 def contract_digest():
-    return digest({"contract": "fixed-four/v5", "checks": FULL_ACCEPTANCE_CHECKS,
-                   "timeouts": CHECK_TIMEOUTS})
+    return digest({"contract": "candidate-selection/v6", "checks": FULL_ACCEPTANCE_CHECKS,
+                   "slow_check_seconds": SLOW_CHECK_SECONDS,
+                   "selection_digest": hashlib.sha256(Path(test_selection.__file__).read_bytes()).hexdigest()})
 
 
 def environment(root):
@@ -102,7 +101,7 @@ def environment(root):
     locks = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
              for name in ("internal/uv.lock", "internal/pyproject.toml")}
     if any(os.environ.get(key) == "1" for key in BEHAVIOR_FLAGS):
-        raise ValueError("正式四项验收不启用可选 Maven 集成测试；请单独运行诊断")
+        raise ValueError("正式候选验收不启用可选 Maven 集成测试；请单独运行诊断")
     return {
         "tools": {"product_python": version([product_python, "--version"]),
                   "internal_python": version([internal_python, "--version"]),

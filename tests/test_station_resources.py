@@ -43,6 +43,13 @@ class ResourceTests(unittest.TestCase):
         resources.register(self.ws, task['issue_key'], task['run_id'], [{'kind':'directory', 'producer':'maven', 'path':'source/'+self.name+'/'+path}])
         return directories.load(self.ws, task)['source/'+self.name+'/'+path]
 
+    def discard_for_test(self, task, plan):
+        operation = dict(operations.read(self.ws), cleanup_plan=plan)
+        operation['steps'] = dict(operation['steps'])
+        with mock.patch.object(operations, 'save'):
+            for name in plan['rules']['batches']:
+                resources.discard_batch(self.ws, task, operation, name, complete=False)
+
     def gitlink_ready(self):
         self.prepare_engineering()
         sha = self.git(self.seed, 'rev-parse', 'HEAD')
@@ -194,6 +201,310 @@ class ResourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'未知'):
             resources.plan(self.ws,task)
         self.assertEqual((self.ws/'source/unknown').read_text(),'keep')
+
+    def test_metadata_is_discarded_without_archiving_or_preflight_deletion(self):
+        task = self.ready()
+        paths = [self.ws / '.DS_Store', self.ws / 'source/.DS_Store',
+                 self.ws / 'source/tapdata/.DS_Store', self.repo / '.DS_Store']
+        (self.repo / '.git/info/exclude').write_text('.DS_Store\n')
+        keep = self.ws / 'config/.DS_Store'
+        keep.write_text('retained')
+        for path in paths:
+            path.write_text('metadata')
+        plan = resources.plan(self.ws, task)
+        self.assertFalse(any(e['file'] == '.DS_Store' for e in plan['entries']))
+        self.assertTrue(all(path.exists() for path in paths))
+        self.execute(task, self.reset_request(task))
+        self.assertTrue(all(not path.exists() for path in paths))
+        self.assertEqual(keep.read_text(), 'retained')
+        saved = json.loads((archive_store.run_directory(self.ws, task['run_id']) / 'source-artifacts.json').read_text())
+        self.assertNotIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+
+    def test_metadata_appearing_after_confirmation_is_cleaned(self):
+        task = self.ready()
+        request = self.reset_request(task)
+        original = resources.discard_batch
+        def late_metadata(base, task, operation, name, **kwargs):
+            if not kwargs.get('verify_only') and not kwargs.get('complete', True):
+                (self.repo / '.DS_Store').write_text('regenerated')
+                (self.ws / '.DS_Store').write_text('regenerated')
+            return original(base, task, operation, name, **kwargs)
+        with mock.patch.object(resources, 'discard_batch', side_effect=late_metadata):
+            self.execute(task, request)
+        self.assertFalse((self.repo / '.DS_Store').exists())
+        self.assertFalse((self.ws / '.DS_Store').exists())
+
+    def test_metadata_old_plan_preservation_and_nonregular_boundaries(self):
+        task = self.ready()
+        path = self.repo / '.DS_Store'
+        path.write_text('old archive')
+        old = artifacts.snapshot(self.ws, self.name, {}, {}, include_ignored=True)
+        plan = resources.plan(self.ws, task)
+        plan['entries'] = old['entries']
+        self.discard_for_test(task, plan)
+        self.assertEqual(path.read_text(), 'old archive')
+        # 原显式保全选择继续进入新计划，旧状态无需迁移。
+        explicit = {'source/' + self.name + '/.DS_Store': {'action': 'archive'}}
+        self.assertEqual(resources.plan(self.ws, task, decisions_override=explicit)['entries'][0]['preservation']['action'], 'archive')
+        path.unlink()
+        outside = self.root / 'outside'
+        outside.write_text('keep')
+        path.symlink_to(outside)
+        plan = resources.plan(self.ws, task)
+        self.assertEqual(plan['entries'][0]['preservation']['action'], 'archive')
+        self.discard_for_test(task, plan)
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(outside.read_text(), 'keep')
+        root_file = self.ws / '.DS_Store'
+        root_file.mkdir()
+        with self.assertRaisesRegex(ValueError, '未知'):
+            resources.plan(self.ws, task)
+
+    def test_old_metadata_archive_plan_still_executes(self):
+        task = self.ready()
+        path = self.repo / '.DS_Store'
+        path.write_text('old plan bytes')
+        original = artifacts.snapshot
+        def old_snapshot(*args, **kwargs):
+            kwargs['rules'] = None
+            return original(*args, **kwargs)
+        with mock.patch.object(artifacts, 'snapshot', side_effect=old_snapshot):
+            self.execute(task, self.reset_request(task))
+        saved = json.loads((archive_store.run_directory(self.ws, task['run_id']) / 'source-artifacts.json').read_text())
+        self.assertIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertFalse(path.exists())
+        artifacts.verify_reconstruction(self.repo, saved['repositories'][self.name])
+
+    def test_metadata_cleanup_preserves_aborted_replan_fingerprint(self):
+        task = self.ready()
+        name = 'tapdata/tapdata-common-lib'
+        repo = self.ws / 'source' / name
+        self.git(self.root, 'clone', str(self.remote), str(repo))
+        kept = repo / '.DS_Store'
+        kept.write_bytes(b'preserved metadata')
+        from workflow.quality import git_revision
+        frozen = git_revision(repo)
+        task['replan_preserved'] = {name: {'origin': str(self.remote), 'fingerprint': frozen}}
+        task['retained_repositories'][name] = {
+            'head': self.git(repo, 'rev-parse', 'HEAD'),
+            'branch': self.git(repo, 'branch', '--show-current')}
+        task_store.write_task(self.ws, task)
+        task = task_store.read_task(self.ws)
+        disposable = self.repo / '.DS_Store'
+        disposable.write_bytes(b'current task metadata')
+        self.execute(task, self.reset_request(task))
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertFalse(disposable.exists())
+        self.assertEqual(kept.read_bytes(), b'preserved metadata')
+        self.assertEqual(git_revision(repo), frozen)
+
+    def test_metadata_cleanup_is_controlled_by_existing_policy(self):
+        task = self.ready()
+        policy_path = self.product / 'policies/station-clean.json'
+        policy = json.loads(policy_path.read_text())
+        policy['rules'] = [row for row in policy['rules'] if row['pattern'] != '.DS_Store']
+        self.write(policy_path, policy)
+        path = self.repo / '.DS_Store'
+        path.write_text('keep without policy')
+        plan = resources.plan(self.ws, task)
+        self.assertEqual(plan['entries'][0]['preservation']['action'], 'archive')
+        self.discard_for_test(task, plan)
+        self.assertTrue(path.exists())
+        (self.ws / '.DS_Store').write_text('unknown')
+        with self.assertRaisesRegex(ValueError, '未知'):
+            resources.plan(self.ws, task)
+
+    def test_tracked_metadata_uses_normal_source_preservation(self):
+        task = self.ready()
+        path = self.repo / '.DS_Store'
+        path.write_text('tracked')
+        self.git(self.repo, 'add', '.DS_Store')
+        plan = resources.plan(self.ws, task)
+        self.assertEqual(plan['entries'][0]['action'], 'restore')
+        self.assertEqual(plan['entries'][0]['preservation']['action'], 'archive')
+        self.discard_for_test(task, plan)
+        self.assertEqual(path.read_text(), 'tracked')
+
+    def configure_rules(self, rows):
+        self.write(self.product / 'projects/tapdata/station-clean.json', {'version': 2, 'rules': rows})
+
+    def test_generic_discard_names_are_consumed_without_filename_adapters(self):
+        task = self.ready()
+        self.configure_rules([dict(scope=scope, pattern='temporary.cache', type='file', action='discard')
+                              for scope in ('station-root', 'source-layout', 'repository')])
+        paths = [self.ws/'temporary.cache', self.ws/'source/temporary.cache',
+                 self.ws/'source/tapdata/temporary.cache', self.repo/'temporary.cache']
+        retained = self.ws/'config/temporary.cache'
+        retained.write_text('configuration')
+        for path in paths:
+            path.write_text('generated')
+        self.execute(task, self.reset_request(task))
+        self.assertFalse(any(p.exists() for p in paths))
+        self.assertEqual('configuration', retained.read_text())
+
+    def test_project_archive_overrides_central_discard_without_retaining_dirty_source(self):
+        task = self.ready()
+        self.configure_rules([dict(scope='repository', pattern='.DS_Store', type='file', action='archive')])
+        (self.repo/'.DS_Store').write_text('valuable')
+        plan = resources.plan(self.ws, task)
+        self.assertEqual('archive', plan['entries'][0]['preservation']['action'])
+        self.execute(task, self.reset_request(task))
+        saved = json.loads((archive_store.run_directory(self.ws, task['run_id'])/'source-artifacts.json').read_text())
+        self.assertIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertFalse((self.repo/'.DS_Store').exists())
+
+    def test_preserve_does_not_hide_initialized_wiring_drift(self):
+        task = self.ready()
+        import hashlib
+        wired = self.ws/'.agents/skills/example'
+        wired.parent.mkdir(parents=True)
+        wired.write_text('managed')
+        init_path = self.ws/'.agenticops/init.json'
+        init = json.loads(init_path.read_text())
+        init['artifacts'] = [{'path': '.agents/skills/example', 'sha256': hashlib.sha256(b'managed').hexdigest()}]
+        self.write(init_path, init)
+        self.configure_rules([dict(scope='station-root', pattern='.agents', type='directory', action='preserve')])
+        resources.verify_station_inventory(self.ws)
+        wired.write_text('changed')
+        with self.assertRaisesRegex(ValueError, '初始化接线'):
+            resources.plan(self.ws, task)
+        self.assertEqual('changed', wired.read_text())
+
+    def test_completed_repository_is_not_reopened_when_another_repository_failed(self):
+        self.prepare_engineering(2)
+        task = self.ready()
+        names = list(task['engineering_baseline']['repositories'])
+        other = next(name for name in names if name != self.name)
+        from workflow import station_reset_result
+        (self.repo/'.DS_Store').write_text('first')
+        request = self.reset_request(task)
+        original = station_reset_result._apply_repository
+        def fail_second(base, task, operation, name, entry):
+            if name == other:
+                raise OSError('second repository interrupted')
+            return original(base, task, operation, name, entry)
+        with mock.patch.object(station_reset_result, '_apply_repository', side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, 'second repository'):
+                self.execute(task, request)
+        late = self.repo/'.DS_Store'
+        late.write_text('must survive recovery')
+        with self.assertRaises(ValueError):
+            self.execute(task, request)
+        self.assertEqual('must survive recovery', late.read_text())
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_completed_root_batch_rejects_regenerated_file_after_resource_failure(self):
+        task = self.ready()
+        request = self.reset_request(task)
+        with mock.patch.object(directories, 'reset', side_effect=OSError('directory interrupted')):
+            with self.assertRaisesRegex(OSError, 'directory interrupted'):
+                self.execute(task, request)
+        late = self.ws/'.DS_Store'
+        late.write_text('keep after completed root batch')
+        with self.assertRaisesRegex(ValueError, '已完成清理对象'):
+            self.execute(task, request)
+        self.assertEqual('keep after completed root batch', late.read_text())
+
+    def test_frozen_batch_does_not_scan_added_catalog_repository(self):
+        task = self.ready()
+        plan = resources.plan(self.ws, task)
+        other = 'tapdata/tapdata-common-lib'
+        repo = self.ws/'source'/other
+        self.git(self.root, 'clone', str(self.remote), str(repo))
+        keep = repo/'.DS_Store'; keep.write_text('outside confirmed set')
+        self.assertNotIn('repository:'+other, plan['rules']['batches'])
+        self.discard_for_test(task, plan)
+        self.assertEqual('outside confirmed set', keep.read_text())
+        with self.assertRaisesRegex(ValueError, '持久仓库'):
+            self.execute(task, dict(self.reset_request(task), confirmed_digest=plan['digest']))
+        self.assertTrue(keep.exists())
+
+    def test_new_directory_is_not_authorized_by_matching_filename(self):
+        task = self.ready()
+        request = self.reset_request(task)
+        path = self.repo/'new-directory/.DS_Store'
+        path.parent.mkdir(); path.write_text('keep')
+        with self.assertRaisesRegex(ValueError, '摘要|清单|确认'):
+            self.execute(task, request)
+        self.assertEqual('keep', path.read_text())
+
+    def test_replaced_parent_is_rejected_before_generic_discard(self):
+        task = self.ready()
+        directory = self.repo/'generated'; directory.mkdir()
+        (directory/'.DS_Store').write_text('old')
+        plan = resources.plan(self.ws, task)
+        directory.rename(self.root/'old-generated')
+        directory.mkdir(); (directory/'.DS_Store').write_text('new')
+        with self.assertRaisesRegex(ValueError, '身份变化'):
+            self.discard_for_test(task, plan)
+        self.assertEqual('new', (directory/'.DS_Store').read_text())
+
+    def test_file_becoming_tracked_during_discard_is_preserved(self):
+        task = self.ready()
+        path = self.repo/'.DS_Store'; path.write_text('keep')
+        plan = resources.plan(self.ws, task)
+        from workflow import station_source
+        original = station_source.untracked_discard
+        matched = [False]
+        def concurrent_tracking(repository, filename, rules, reset_sha='HEAD'):
+            eligible = original(repository, filename, rules, reset_sha)
+            if eligible and not matched[0]:
+                matched[0] = True
+                self.git(self.repo, 'add', '.DS_Store')
+            return eligible
+        with mock.patch.object(station_source, 'untracked_discard', side_effect=concurrent_tracking):
+            with self.assertRaisesRegex(ValueError, '跟踪状态'):
+                self.discard_for_test(task, plan)
+        self.assertEqual('keep', path.read_text())
+
+    def test_completed_batches_use_their_own_historical_revision(self):
+        import copy
+        task = self.ready()
+        plan = resources.plan(self.ws, task)
+        operation = dict(operations.read(self.ws), cleanup_plan=plan, steps={})
+        batch = 'station-root'
+        old_key = resources.batch_key(operation, batch)
+        expected = {'batch': batch, 'boundary_digest': resources.baseline.digest(plan['rules']['batches'][batch]),
+                    'plan_digest': plan['digest']}
+        operation['steps'][old_key] = {'before': {}, 'expected': expected, 'receipt': expected}
+        new = copy.deepcopy(plan)
+        new['retained'].append('new confirmed observation')
+        new['digest'] = resources.baseline.digest({k:v for k,v in new.items() if k != 'digest'})
+        operation['plan_revisions'] = [{'plan': plan}]
+        operation['cleanup_plan'] = new
+        new_expected = dict(expected, plan_digest=new['digest'])
+        operation['steps'][resources.batch_key(operation, batch)] = {'before': {}, 'expected': new_expected, 'receipt': new_expected}
+        before = copy.deepcopy(operation)
+        resources.verify_completed_batches(self.ws, task, operation)
+        self.assertEqual(before, operation)
+
+    def test_structure_contract_paths_are_shared_by_takeover_preservation_and_reset(self):
+        layout_path = self.product/'contracts/station-layout.json'
+        layout = json.loads(layout_path.read_text())
+        mapping = {'runtime': 'execution'}
+        for row in layout['roots']:
+            if row['path'] in mapping:
+                old = row['path']; row['path'] = mapping[old]
+                (self.ws/old).rename(self.ws/row['path'])
+        self.write(layout_path, layout)
+        policy_path = self.product/'policies/station-clean.json'
+        policy = json.loads(policy_path.read_text())
+        for row in policy['rules']:
+            if row['scope'] == 'station-root' and row['pattern'] in mapping:
+                row['pattern'] = mapping[row['pattern']]
+        self.write(policy_path, policy)
+        task = self.takeover()
+        self.name = next(iter(task['engineering_baseline']['repositories']))
+        self.repo = self.ws/'source'/self.name
+        report = self.repo/'report.txt'; report.write_text('retain in archive')
+        disposable = self.repo/'.DS_Store'; disposable.write_text('discard')
+        self.execute(task, self.reset_request(task))
+        self.assertFalse(disposable.exists())
+        self.assertFalse(report.exists())
+        self.assertEqual([], list((self.ws/'execution').iterdir()))
+        self.assertFalse((self.ws/'runtime').exists())
+        saved = json.loads((archive_store.run_directory(self.ws, task['run_id'])/'source-artifacts.json').read_text())
+        self.assertIn('report.txt', saved['repositories'][self.name]['untracked'])
 
     def test_ignored_file_requires_preservation_in_confirmed_plan(self):
         task = self.ready()

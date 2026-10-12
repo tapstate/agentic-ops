@@ -1,16 +1,32 @@
 # AgenticOps 文档总纲
 
+受管技能的调用与帮助交互由 [Skill 维护规范](skill-maintenance.md#技能调用与帮助)统一定义，覆盖源码维护根和业务工位的维护、共享、项目技能。源码 `AGENTS.md`、只引用它的 `CLAUDE.md` 与工位模板负责导航到同一合同；操作与示例取自现役技能，不建立第二份技能操作清单。
+
+TapData 指定连接器的编译和注册由 [连接器能力](../projects/tapdata/skills/tapdata-connectors/SKILL.md)进入，[项目开发指引](../projects/tapdata/runbooks/tapdata-development.md#连接器编译与注册)维护操作、制品和回读合同。可独立编译、独立注册或组合执行，复用当前工位源码、Maven 隔离和命名开发环境，不重建整套环境。
+
+[任务存档与恢复](usage/task-archive-and-resume.md)是使用者处理任务中断、重建与研发环境升级的场景入口；[扩展使用总纲](usage/README.md)说明它与授权、更新、质量及材料文档的职责关系。
+
+任务中途升级后的接续以 Jira 任务为入口，GitHub 保存远端代码、PR 和 CI 成果；目标见[项目目标](strategy/project-goals.md)，本地运行与外部成果的边界见[工位合同](architecture/single-task-station.md#从任务事实接续)。[任务授权指引](usage/task-authorization.md#从-jira-任务接续)负责记录、缺项补全和重新接管，[更新与回退](usage/update-and-rollback.md#任务处理中升级后继续)负责产品切换顺序，共享 [ao-task-resume](../skills/shared/ao-task-resume/SKILL.md) 指导 Agent 使用现役入口。各文档不维护逐 epoch 迁移规则或独立交接台账。
+
+[质量检查与证据](usage/quality-checkpoints.md)维护阶段评论、Issue Analysis 实施方案、Fix Details 修复总结和 GitHub PR Ready 回读闭环；提审含具体 Checks 例外，仍保留真实结果与独立合并授权。新客户端的兼容边界为 epoch 27，旧工位退出与重建遵循[更新与回退](usage/update-and-rollback.md)。
+
+TapData 工位 Docker 开发环境以统一运行配置、多份命名环境和唯一活动现场为目标：[开发环境 Skill](../projects/tapdata/skills/tapdata-test-env/SKILL.md)负责收集架构与运行配置、执行生命周期及验收，[开发环境指引](../projects/tapdata/runbooks/test-environment.md)维护输入、命名、外部 MongoDB、同一 Compose 项目和恢复合同。[TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md#3-构建并装配)负责 Agent 内部的工具准备、源码构建、完整 Launcher 装配及项目辅助脚本；[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven/Profile、原生 CLI 仓库继承及 Mac Debezium protoc 参数等项目知识；编译兼容性结论注明实际验证范围。运行配置与 Agent 管理的 preparation 文件分离，旧版完整配置继续读取，不自动迁移；不改变 `.agenticops/` 状态或 station_state_epoch，不建立环境池。
+
+流程授权与提示词边界由[任务授权指引](usage/task-authorization.md)维护来源同步、方案决定复用和清理内分支/PR 处置的操作说明；[Skill 维护规范](skill-maintenance.md)负责按需加载与能力缺失的接力原则。通用工位模板只导航当前 Project 的规则，项目 Skill 消费配置与已核验结果，不重复维护项目分支值或增加确认步骤；实际状态和授权判定仍由现役 Workflow、Policy 与工位合同负责。
+
 TapData 正在进行的任务由研发选择恢复已有 run 或建立新 run；项目准入配置与操作步骤由 [TapData 任务技能](../projects/tapdata/skills/tapdata-task/SKILL.md#接管与恢复)维护，复用既有归档清理和分支续办机制，不复制旧授权或验收结论。
 
-CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
+TapData 代码变更以 CI 集成测试为主要验证路径，Jira 关联 Test 检查继续保留，用例是否在当前会话开发由用户决定。CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
+
+TapData 分支修复与测试维护由[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md#分支修复与测试维护)集中定义：release 修复先核查 develop，业务及适用普通 `test` 与 `ci-test`（`it`）分开提交；前者可合入低版本，后者不回补，用户回补后在 release 独立验证。任务技能负责授权与交接，集成测试技能负责 develop 用例及报告；共同质量合同继续处理具体未覆盖范围，不新增状态或通用门禁；该项目 Runbook 同时维护前端 PR 默认审查人，任务技能仅引用，不复制账号映射。
 
 任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
 
-共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划。
+共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。该技能负责设计变更同步、冲突核查与交接：每项设计内容只有一个现役权威来源，其它指引引用该来源，设计改变时同步修订。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划；历史决策记录仅辅助问题定位，不承载现役设计或作为功能开发、修复及验收依据。
 
 共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。
 
-TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)覆盖用例生成、脚本开发、环境配置、执行与结果分析，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
+TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)保留用例开发、环境配置、执行与结果分析能力，仅在用户选择当前会话处理 TapTest 时阅读；用例规范按需查询 Wiki 并结合任务源码核验，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
 
 通用工具 Hook 执行链退役后，[工程架构](architecture/agenticops-v1-architecture.md)维护 Agent 原生执行、Workflow 检查点和显式 Gate API 的边界；[标准契约](../contracts/README.md)维护 Manifest v3 的声明式接线；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 原版本退出与重建，用户故事和端到端验证只维护对应验收合同，不另设迁移执行计划。
 
@@ -32,9 +48,9 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 质量输入格式预检和完成等待合并的使用边界由[扩展使用总纲](usage/README.md)导航至质量与任务授权指引；质量执行事件增加未执行原因的兼容边界由机器工位契约管理，工位 epoch 以机器契约为准，升级继续遵守原版退出并 purge。
 
-配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。名单只负责工位根分类，源码按 Git 与确认快照处理，不保留旧计划执行器或构建工具清理配方。
+配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。配置统一声明作用域、名称模式、对象类型和动作；结构身份由中央机器合同维护，源码继续 Git 保全，执行和恢复绑定冻结规则、扫描边界及具体对象完成回执。
 
-[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
+[维护指引](maintenance-guide.md#5-验证)负责诊断检查、提交候选按影响验收、发布隔离四项验收、耗时报告与证据 v6 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 
@@ -76,7 +92,7 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 |---|---|---|
 | 产品定位与架构 | [项目目标](strategy/project-goals.md)、[v1 工程架构](architecture/agenticops-v1-architecture.md)、[术语表](glossary.md) | 产品边界、分层、稳定术语、流程检查点与 Agent 原生权限责任及迁移准绳 |
 | 使用与维护 | [首次使用指引](usage-guide.md)、[必需 MCP 配置](usage/mcp-setup.md)、[Agent引导安装指引](usage/agent-guided-install.md)、[任务授权指引](usage/task-authorization.md)、[扩展使用索引](usage/README.md)、[维护指引](maintenance-guide.md)、[Skill 维护规范](skill-maintenance.md) | 首次安装到接管任务、Claude Code/Codex 的必需 Jira MCP 接线、GitHub 工具的自主选择边界、由 AI Agent 在空工位完成安装与初始化、脚本加载任务、准入、受控基线与实施授权、独立源码准备与持久材料复用、更新和回退、项目工位根 `./agenticops` 薄入口、受控仓库准备、当前工位会话中的任务执行上下文、任务恢复与精确清理、Skill 分类与发现接线、证据标签，以及日常运行和维护 |
-| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收 |
+| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收；[维护验证](maintenance-guide.md#5-验证)负责源码规则测试、真实交互测试与固定验收的分工 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 
 文档链接权威来源而不重复维护相同规则。具体工作项、进度、阻塞和验收由 Jira 管理，不在本树新增平行执行计划。
@@ -90,4 +106,10 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。
 
-目录长期归属与清理操作身份快照的职责、epoch 25 既有状态兼容、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
+目录长期归属与清理操作身份快照的职责、epoch 26 配置与扫描边界冻结、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
+
+工位绑定的统一读取、格式校验与 epoch 复核由[工位合同](architecture/single-task-station.md)定义；Bootstrap 与项目工具复用 Workflow 的只读访问模块。升级指引只负责版本切换顺序，不维护逐工具 schema 支持列表。
+
+正式验收的持续执行、慢检查诊断和用户优化决策由[维护指引](maintenance-guide.md#5-验证)维护；检查耗时仅触发诊断提示，取消与失败处理仍由验收器负责。
+
+macOS `.DS_Store` 的清理边界由[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护：中央清理名单声明元数据名称，Workflow 在已授权清理内处理普通未跟踪文件；旧计划的成果保全决定继续有效，不遍历保留目录或 Git 内部目录。

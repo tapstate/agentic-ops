@@ -71,6 +71,81 @@ class VerificationTests(unittest.TestCase):
         self.stage(self.root, 'gate/engine.py', 'VALUE = 2\n')
         self.assertIsNone(self.service.inspect('staged')['acceptance_evidence'])
 
+    def local_candidate(self):
+        self.git(self.root, 'reset', '--hard', self.base)
+        registry = self.root / 'internal/story_gate/stories.yaml'
+        self.stage(self.root, str(registry.relative_to(self.root)), registry.read_text().replace('protected_paths: [gate/**]', 'protected_paths: [gate/**, tests/**, docs/**]'))
+        self.git(self.root, 'commit', '-qm', 'fixture mapping')
+        self.stage(self.root, 'tests/test_quality.py', '# rule candidate\n')
+
+    def test_local_evidence_records_selected_checks_and_reuses_for_range(self):
+        self.local_candidate()
+        result, calls = self.verify()
+        expected = ['resource_contracts', 'affected:quality']
+        self.assertEqual(expected, [call.args[1] for call in calls.call_args_list])
+        path, record = self.record(result)
+        self.assertEqual('affected', record['verification_scope'])
+        self.assertEqual(expected, record['binding']['required_checks'])
+        self.assertEqual('passed', self.service.inspect('staged')['acceptance_status'])
+        for invalid in (None, {}, [None]):
+            broken = dict(record, checks=invalid)
+            path.write_text(json.dumps(broken))
+            self.assertEqual('not_run', self.service.inspect('staged')['acceptance_status'])
+        path.write_text(json.dumps(record))
+        base = self.git_output(self.root, 'rev-parse', 'HEAD')
+        self.git(self.root, 'commit', '-qm', 'local candidate')
+        self.assertEqual('passed', self.service.inspect('range', base=base, head='HEAD')['acceptance_status'])
+
+    def test_local_full_override_and_selection_contract_change(self):
+        self.local_candidate()
+        result, calls = self.verify(scope='full')
+        self.assertEqual(list(FULL_ACCEPTANCE_CHECKS), [call.args[1] for call in calls.call_args_list])
+        _, record = self.record(result)
+        self.assertEqual('full', record['verification_scope'])
+        self.assertEqual('passed', self.service.inspect('staged')['acceptance_status'])
+        with mock.patch('internal.story_gate.evidence.contract_digest', return_value='changed-selector'):
+            self.assertEqual('not_run', self.service.inspect('staged')['acceptance_status'])
+
+    def test_partial_record_cannot_claim_full_or_satisfy_wider_selection(self):
+        self.local_candidate()
+        result, _ = self.verify()
+        path, record = self.record(result)
+        path.write_text(json.dumps(dict(record, verification_scope='full')))
+        self.assertEqual('not_run', self.service.inspect('staged')['acceptance_status'])
+        path.write_text(json.dumps(record))
+        with mock.patch('internal.test_selection.formal_checks', return_value=FULL_ACCEPTANCE_CHECKS):
+            self.assertEqual('not_run', self.service.inspect('staged')['acceptance_status'])
+        # 发布可核验历史局部开发事实，但仍须独立执行隔离四项。
+        with mock.patch.dict(os.environ, {'AGENTIC_OPS_STORY_GATE_STAGE': 'release'}):
+            _, impact = self.service._calculate('staged', base=None, head=None)
+            self.assertIsNotNone(self.service._read_matching_evidence(impact))
+        release = (Path(__file__).resolve().parents[1] / 'release/lib/release-common.sh').read_text()
+        function = release.split('release_run_full_verification() {', 1)[1].split('RELEASE_VERIFIED_AT=', 1)[0]
+        for check in FULL_ACCEPTANCE_CHECKS:
+            self.assertIn('run_verification_step ' + check, function)
+
+
+    def test_document_candidate_uses_only_resource_checks(self):
+        self.local_candidate()
+        self.git(self.root, 'reset', '--hard', 'HEAD')
+        self.stage(self.root, 'docs/usage/example.md', '# documentation candidate\n')
+        result, calls = self.verify()
+        self.assertEqual(['resource_contracts'], [call.args[1] for call in calls.call_args_list])
+        self.assertEqual('affected', self.record(result)[1]['verification_scope'])
+        self.assertEqual('passed', self.service.inspect('staged')['acceptance_status'])
+
+    def test_failed_local_reverification_revokes_old_pass(self):
+        self.local_candidate()
+        result, _ = self.verify()
+        with self.assertRaises(StoryGateError):
+            self.verify(['/usr/bin/false'])
+        record = json.loads(Path(result['evidence_path']).read_text())
+        self.assertEqual('failed', record['acceptance_status'])
+        self.assertEqual('affected', record['verification_scope'])
+        self.assertEqual(['resource_contracts', 'affected:quality'], record['planned_checks'])
+        self.assertEqual('not_run', self.service.inspect('staged')['acceptance_status'])
+
+
     def test_trust_root_upgrade_pr_branch_is_unambiguous(self):
         root = Path(__file__).resolve().parents[2]
         for prefix in ('codex', 'feature', 'fix'):
@@ -233,16 +308,20 @@ class VerificationTests(unittest.TestCase):
                 with self.assertRaises(StoryGateError): self.verify()
                 with self.assertRaises(StoryGateError): self.service.approve('range', 'x', 'x')
 
-    def test_timeout_reaps_child_and_invalidates_pass(self):
-        first, _ = self.verify()
-        marker = self.root / '.local/late-write'
-        child = 'import time; from pathlib import Path; time.sleep(.6); Path(%r).touch()' % str(marker)
-        command = [sys.executable, '-c', 'import subprocess,sys,time; subprocess.Popen([sys.executable,"-c",%r]); time.sleep(3)' % child]
-        with mock.patch.dict(evidence.CHECK_TIMEOUTS, {'python_runtime': .15}):
-            with self.assertRaises(StoryGateError): self.verify(command)
-        time.sleep(.65)
-        self.assertFalse(marker.exists())
-        self.assertEqual(self.record(first)[1]['acceptance_status'], 'failed')
+    def test_slow_check_reports_once_and_continues_to_success(self):
+        events = []
+        command = [sys.executable, '-c', 'import time; print("working", flush=True); time.sleep(.35)']
+        with mock.patch.object(evidence, 'SLOW_CHECK_SECONDS', .15):
+            result, _ = self.verify(command, event_sink=events.append)
+            self.assertEqual(self.record(result)[1]['acceptance_status'], 'passed')
+        slow = [event for event in events if event['event'] == 'check_slow']
+        self.assertEqual(len(slow), len(FULL_ACCEPTANCE_CHECKS))
+        self.assertEqual(len({event['check_id'] for event in slow}), len(slow))
+        for event in slow:
+            self.assertGreater(event['elapsed_seconds'], .15)
+            self.assertGreaterEqual(event['output_idle_seconds'], 0)
+            self.assertTrue((self.root / event['log_path']).is_file())
+            self.assertIn('用户', event['required_human_action'])
         self.assertFalse(self.service._verification_lock().exists())
 
     def test_keyboard_interrupt_invalidates_pass(self):
@@ -298,7 +377,10 @@ class VerificationTests(unittest.TestCase):
         entry.chmod(0o755)
         result = subprocess.run(['bash', str(target), 'full', '--change-source', 'staged'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ['--source-root', str(self.root), 'verify', '--change-source', 'staged', '--progress'])
+        self.assertEqual(result.stdout.splitlines(), ['--source-root', str(self.root), 'verify', '--change-source', 'staged', '--scope', 'full', '--progress'])
+        result = subprocess.run(['bash', str(target), 'affected', '--change-source', 'staged'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ['--source-root', str(self.root), 'verify', '--change-source', 'staged', '--scope', 'affected', '--progress'])
         result = subprocess.run(['bash', str(target), 'full'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('不生成提交门禁证据', result.stdout)

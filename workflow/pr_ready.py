@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""核对缺陷任务进入 PR Ready 前的测试任务、PR Checks 与本地检查项。"""
+"""只读提审预检及 GitHub Ready for review 回读；不调用 GitHub 写入。"""
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from datetime import datetime
+from urllib.parse import urlsplit
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -65,7 +67,51 @@ def local_head(repository):
     return worktree.get("final_revision") or ""
 
 
-def ci_problems(base, task):
+def submission_input(base, task):
+    path = task_store.interaction_path(base, task["issue_key"], task["run_id"], "pr-ready-input.json")
+    if not path.exists():
+        return {"checks_exceptions": [], "pull_requests": []}
+    packet = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(packet, dict) or packet.get("schema_version") != 1
+            or packet.get("issue_key") != task["issue_key"] or packet.get("run_id") != task["run_id"]):
+        raise ValueError("提审证据任务、run 或版本不匹配")
+    known = {r["repository"]: str(r.get("pull_request")) for r in task.get("repositories", [])}
+    for kind in ("checks_exceptions", "pull_requests"):
+        rows = packet.get(kind, [])
+        if not isinstance(rows, list):
+            raise ValueError("提审证据必须是列表")
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("提审证据必须是对象")
+            repo = row.get("repository")
+            pr = row.get("pr") if kind == "checks_exceptions" else row.get("number")
+            if not isinstance(repo, str) or repo not in known or str(pr) != known[repo] or repo in seen:
+                raise ValueError("提审证据仓库、PR 不匹配或重复")
+            seen.add(repo)
+            if kind == "checks_exceptions":
+                if not isinstance(row.get("proof"), dict):
+                    raise ValueError("Checks 例外缺少真实决定来源")
+                quality.check_proof(row["proof"])
+                if (row.get("decision") != "accept_checks_and_submit"
+                        or not isinstance(row.get("reason"), str) or not row["reason"].strip()):
+                    raise ValueError("Checks 例外必须说明具体缺口与提审决定")
+        packet[kind] = rows
+    from workflow import project_rules
+    if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(packet, ensure_ascii=False)):
+        raise ValueError("提审证据含敏感内容")
+    return packet
+
+
+def checks_digest(latest):
+    """绑定实际检查集合；刷新时间改变不使同一缺口决定失效。"""
+    return quality.digest({k: latest.get(k) for k in ("head", "verdict", "checks", "failing")})
+
+
+def ci_problems(base, task, packet=None):
+    packet = (submission_input(base, task_store.read_task(base, task["issue_key"]))
+              if task.get("issue_key") else {"checks_exceptions": []}) if packet is None else packet
+    exceptions = {r["repository"]: r for r in packet["checks_exceptions"]}
     states = ci.current_states(base, task)
     by_pull_request = {(state["repository"], str(state["pr"])): state for state in states}
     problems = []
@@ -81,7 +127,11 @@ def ci_problems(base, task):
             continue
         latest = state["history"][-1]
         if latest.get("verdict") != "success":
-            problems.append("仓库 %s 的 PR Checks 未全部明确成功（%s）" % (name, latest.get("verdict") or "未知"))
+            exception = exceptions.get(name, {})
+            if (latest.get("verdict") not in ("none", "start_timeout", "skipped", "failure")
+                    or exception.get("head") != latest.get("head")
+                    or exception.get("checks_digest") != checks_digest(latest)):
+                problems.append("仓库 %s 的 PR Checks 未全部明确成功且无有效具体例外（%s）" % (name, latest.get("verdict") or "未知"))
         head = local_head(repository)
         if ":worktree:" in head:
             problems.append("仓库 %s 存在未提交修改，不能进入 PR Ready" % name)
@@ -90,17 +140,52 @@ def ci_problems(base, task):
     return problems
 
 
+def submission_status(task, packet):
+    observed = {r["repository"]: r for r in packet["pull_requests"]}
+    results = []
+    for repository in task.get("repositories", []):
+        name, pr = repository["repository"], repository.get("pull_request")
+        row = observed.get(name, {})
+        errors = []
+        host = (repository.get("authorized_endpoint") or "github.com/" + name).split("/", 1)[0]
+        url = urlsplit(row.get("url") if isinstance(row.get("url"), str) else "")
+        if (url.scheme != "https" or url.netloc.lower() != host.lower()
+                or url.path.lower() != "/%s/pull/%s" % (name.lower(), pr) or url.query or url.fragment
+                or type(row.get("number")) is not int or str(row["number"]) != str(pr)):
+            errors.append("PR 身份未回读确认")
+        head = local_head(repository)
+        if not quality.exact_commit(head) or row.get("headRefOid") != head:
+            errors.append("PR Head 与当前代码不一致")
+        if row.get("state") != "OPEN":
+            errors.append("PR 未回读为 OPEN")
+        if row.get("isDraft") is not False:
+            errors.append("PR 未回读为 GitHub Ready for review")
+        try:
+            observed_at = row.get("observed_at")
+            if not isinstance(observed_at, str):
+                raise ValueError("missing time")
+            timestamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+            if timestamp.tzinfo is None or not isinstance(row.get("source_ref"), str) or not row["source_ref"].strip():
+                raise ValueError("missing source")
+        except (ValueError, TypeError):
+            errors.append("回读缺少来源或带时区时间")
+        results.append({"repository": name, "pr": pr, "head": head, "confirmed": not errors,
+                        "problems": errors, "source_ref": row.get("source_ref")})
+    return results
+
+
 def check(base, issue_key, jira_input):
     from workflow import external_sync
     task = task_store.read_task(base, issue_key)
     rules = quality.config(base, task)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
         raise ValueError("当前 Project 未配置 PR Ready 验收")
+    packet = submission_input(base, task)
     linked_problems, source_ref, linked_tests, ignored_tests = _jira_test_tasks(jira_input, issue_key, rules)
     linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
     groups = {
         "linked_test_tasks": linked_problems,
-        "pr_checks": ci_problems(base, task),
+        "pr_checks": ci_problems(base, task, packet),
         "task_checks": quality_problems(base, task, rules, jira_status.read_input(jira_input)),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", []), rules),
@@ -121,15 +206,22 @@ def check(base, issue_key, jira_input):
                 status_todos.extend(item["guidance"] for item in attempt.get("guidance", [])
                                     if item.get("guidance"))
     problems = [problem for values in groups.values() for problem in values]
+    submissions = submission_status(task, packet)
+    preflight_ready = not problems
+    ready = preflight_ready and bool(submissions) and all(r["confirmed"] for r in submissions)
     return {"issue_key": issue_key, "run_id": task["run_id"], "source_ref": source_ref,
-            "ready": not problems,
+            "preflight_ready": preflight_ready, "ready": ready,
+            "submission_status": "confirmed" if ready else ("pending" if preflight_ready else "blocked"),
+            "pull_requests": submissions,
+            "remaining": [r for r in submissions if not r["confirmed"]],
             "ignored_tests": [{"key": test["key"], "test_type": test["test_type"],
                                 "guidance": test["guidance"]} for test in ignored_tests],
             "checks": {key: {"passed": not value, "problems": value} for key, value in groups.items()},
             "jira_status_todos": status_todos,
             "warnings": external_sync.warnings(base, task),
-            "next": "三类验收通过；由 Engineering DRI 人工执行 Pull Request Submitted。" if not problems
-                    else "处理上述验收问题后重新检查；Jira 状态同步问题不阻断本地修复，但需在正式提审前人工处理。"}
+            "next": ("全部目标 PR 已回读为 GitHub Ready for review；Jira 提审与合并仍遵循独立边界。" if ready else
+                     "预检通过，按有效授权原生推进剩余 PR 并回读；未知写入先回读，不重建或盲目重发。" if preflight_ready else
+                     "处理上述预检问题后重新核对；尚不能报告 PR Ready。")}
 
 
 def main():

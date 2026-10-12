@@ -1,5 +1,15 @@
 # AgenticOps 扩展使用
 
+[工位源码与材料](station-materials.md#查看工位基本信息)负责 `station status` 的只读基本信息查询，区分绑定应用、版本、工位登记与任务阶段；状态展示不执行修复或任务推进。
+
+[任务存档与恢复](task-archive-and-resume.md)面向使用者，按暂停存档、隔离升级、从 Jira 接续和恢复验证的顺序组织操作及可直接使用的请求示例。它只导航现役授权、工位和升级合同，不定义另一套状态或迁移格式；任务进展仍记录在 Jira。
+
+[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)只负责原版本退出和目标版本重建。共享任务接续 Skill 复用这两页，不建立与 epoch 绑定的转换合同。
+
+[质量检查与证据](quality-checkpoints.md)统一维护阶段评论的人读摘要、Jira 正文表示与回读，以及 PR 提审预检、Checks 具体例外和 GitHub Ready for review 回读闭环。PR Ready 只表示全部目标 PR 已退出 Draft 且回读确认，预检通过不代表提审完成；项目字段采集时机与审批责任由 Project 配置维护。详细结构化证据留在当前 run，不在评论或其它文档重复维护。
+
+[任务授权指引](task-authorization.md)统一说明具体来源同步授权、既有方案决定复用，以及分支/PR 默认保留、精确确认后在清理内或释放后处置的边界；项目同步节点与验收要求从当前 Project 读取，不由通用工位模板固定。
+
 Jira 已有经办人的接管准入与原生表单决策由[统一决策包](quality-checkpoints.md#jira-全流程统一决策包)区分：Project Profile 核验当前用户身份，字段采集只在对应人工节点或实时必填表单要求时请求决定，不重复确认已核验的接管事实。
 
 接管及仓库操作的日常输出与详细恢复回执由[工位源码与材料](station-materials.md)说明；显示摘要不改变操作日志、冻结基线或授权语义。
@@ -74,4 +84,4 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 
 任务进入实现后修订方案或增加允许的仓库，使用[同周期返工](task-authorization.md#同周期方案返工)，保留原成果并撤销旧授权；不通过退出工位重建任务。
 
-CI 集成测试的方案范围、PR 缺口处置与未触发运行表示统一由[质量检查与证据](quality-checkpoints.md#共同验证材料)维护；项目用例分析、编写及重验由其链接的 TapData Skill 和 Runbook 负责，不另设测试台账。
+TapData 代码变更优先按 Wiki 规范判断、编写和验证 CI 集成测试；Jira 关联用例检查保留，用例开发是否在当前会话完成由用户决定。TapTest 开发与执行指引仅在用户选择当前会话处理时读取，处理入口由 [TapData 任务技能](../../projects/tapdata/skills/tapdata-task/SKILL.md)维护。CI 集成测试的方案范围、PR 缺口处置与未触发运行表示统一由[质量检查与证据](quality-checkpoints.md#共同验证材料)维护；项目用例分析、编写及重验由其链接的 TapData Skill 和 Runbook 负责，不另设测试台账。

@@ -1,12 +1,13 @@
 {
   "schema_version": 3,
   "name": "codex",
-  "adapter_version": 9,
+  "adapter_version": 10,
   "artifacts": [],
   "retired_artifacts": [".codex/hooks.json", ".codex/agenticops-hooks.example.json"],
   "launch": {
     "mode": "command",
     "command": "codex",
+    "arguments": ["--approve-for-me"],
     "message": "Codex 使用原生工具权限；本地流程检查由 Workflow 执行，无通用工具 Hook。"
   },
   "skill_target": ".agents/skills"

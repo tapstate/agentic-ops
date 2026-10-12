@@ -12,8 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import station_operation, task_store  # noqa: E402
-from workflow import project_rules  # noqa: E402
+from workflow import project_rules, station_context  # noqa: E402
 from bootstrap import shared_repositories  # noqa: E402
+from bootstrap.product_version import describe  # noqa: E402
 from bootstrap.station_compatibility import require_station_can_adopt
 from bootstrap.station_paths import StationDirectory, station_artifact_path  # noqa: E402
 
@@ -117,8 +118,10 @@ def binding_status(product_root, station, tree=None):
         document = tree.read_json(relative, "工位绑定")
     except ValueError:
         return "unreadable", "工位绑定不可读取"
-    if document.get("schema_version") != 4:
-        return "invalid", "工位绑定版本不支持"
+    try:
+        station_context.validate_binding(document)
+    except ValueError as error:
+        return "invalid", str(error)
     if document.get("product_root") != str(product_root.resolve()):
         return "rebound", "已绑定到其它 Product Root"
     return "tracked", "绑定正常"
@@ -262,9 +265,11 @@ def detach_preflight(product_root, station, purge=False, tree=None):
             continue
         if path.name not in allowed or path.is_symlink() or not path.is_file():
             raise ValueError("工位状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
-    if not tree.is_dir("runtime") or tree.is_symlink("runtime"):
+    from workflow import station_layout
+    runtime_root = station_layout.station_name(station, "task-runtime")
+    if not tree.is_dir(runtime_root) or tree.is_symlink(runtime_root):
         raise ValueError("runtime 目录缺失或不安全，拒绝解绑")
-    if any(tree.path("runtime").iterdir()):
+    if any(tree.path(runtime_root).iterdir()):
         raise ValueError("runtime 仍有材料，必须先经任务清理或明确处置，不能解绑")
     return deletable, 0
 
@@ -314,6 +319,41 @@ class _null_context:
 
     def __exit__(self, _type, _value, _traceback):
         return False
+
+
+def command_status(args, product_root):
+    station = Path(args.station).resolve()
+    with StationDirectory(station) as tree:
+        require_tracked(product_root, station, tree)
+        binding = tree.read_json(Path(STATE_DIRECTORY) / "station.json", "工位绑定")
+        epoch = require_station_can_adopt(product_root, station)
+        current = task_store.read_current(station)["current"]
+    task = None if current is None else {"issue_key": current["issue_key"], "run_id": current["run_id"],
+                                        "status": current["outcome"], "stage": current["stage"]}
+    info = {"station": str(station), "station_id": binding["station_id"],
+            "product_root": binding["product_root"], "product_version": describe(product_root, allow_dirty=True),
+            "project": binding["project"], "agents": binding["agents"],
+            "source_pool": binding["source_pool"], "station_state_epoch": epoch,
+            "registered": str(station) in load_registry(product_root), "task": task}
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return
+    rows = [("工位", info["station"]), ("工位标识", info["station_id"]),
+                         ("绑定应用", info["product_root"]), ("应用版本", info["product_version"]),
+                         ("项目", info["project"]), ("Agent", ",".join(info["agents"])),
+                         ("源码池", info["source_pool"]), ("状态代际", epoch),
+                         ("登记", "已登记" if info["registered"] else "未登记")]
+    if task is None:
+        rows.append(("当前任务", "无（空闲）"))
+    else:
+        rows.extend((("当前任务", task["issue_key"]), ("运行", task["run_id"]),
+                     ("状态", task["status"]), ("阶段", task["stage"])))
+    # 固定标签由中文和 ASCII 构成；中文占两个终端列，不能用字符数补齐。
+    def label_width(label):
+        return sum(1 if ord(char) < 128 else 2 for char in label)
+    width = max(label_width(label) for label, _ in rows)
+    for label, value in rows:
+        print("%s%s : %s" % (label, " " * (width - label_width(label)), value))
 
 
 def command_list(args, product_root):
@@ -463,6 +503,9 @@ def parser():
     commands.add_parser("register").add_argument("--station", required=True)
     commands.add_parser("pending").add_argument("--product-ref", required=True)
     commands.add_parser("list")
+    status = commands.add_parser("status", help="只读查看工位、绑定应用和当前任务基本信息")
+    status.add_argument("--station", required=True)
+    status.add_argument("--json", action="store_true", help="输出基本信息 JSON，不展开任务事实或秘密")
     identity = commands.add_parser("identity")
     identity.add_argument("--station", required=True)
     for name in ("prune", "repair", "detach", "purge"):
@@ -498,6 +541,8 @@ def main():
             command_pending(args, product_root)
         elif args.command == "list":
             command_list(args, product_root)
+        elif args.command == "status":
+            command_status(args, product_root)
         elif args.command == "identity":
             command_identity(args, product_root)
         elif args.command == "prune":

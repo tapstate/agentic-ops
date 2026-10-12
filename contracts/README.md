@@ -2,6 +2,8 @@
 
 `contracts/` 维护显式 Gate API、声明式 Agent 接线与工位状态的机器合同。本文导航各合同职责与兼容边界；分层与执行保证以[工程架构](../docs/architecture/agenticops-v1-architecture.md)为准。
 
+Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.arguments` 声明，Bootstrap 按参数数组传递，再追加使用者参数，不执行 shell 二次解析。旧 Manifest 不声明时仍使用空参数数组；这不改变工位状态格式或 epoch。Codex 的当前默认值与原生审批含义见[Codex Adapter](../adapters/agents/codex/README.md)。
+
 质量 receipt 增加 deferred 与可选 reason：表示已知未写入，必须说明原因；unknown 表示结果不明，不得盲目重发。同步状态不决定本地阶段通过。issue-versions 输入的 effective 保存 versions、execution_branch 和 proof，observed 保留初始 Jira 快照；版本无需 Jira ID，也不映射分支。旧事件按记录时规则重放，人读评论格式由当前 Project 配置决定。
 
 - `gate-request.schema.json`：Adapter 交给 Gate 的标准操作请求。
@@ -10,6 +12,7 @@
 - `operation-catalog.json`：标准操作名称、类别、语义和是否可作为请求输入。
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
+- `station-layout.json`：工位固定路径、结构角色和合法动作能力，由 Bootstrap 与 Workflow 共同读取，不提供默认清理动作。
 - `station-reset.schema.json`：唯一现役版本 6 的清理范围、保全与规则快照；旧计划必须由原版本退出，不在线转换。历史档案保留，不作为可恢复执行合同。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
@@ -24,6 +27,8 @@ Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求
 工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。该清单只维护单调递增的 `station_state_epoch`：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；升级与回退也只比较这个值，不另设旧 epoch 映射、支持列表或最低 updater protocol。`station-init.schema.json` 要求新工位记录当前 epoch；缺少该字段的工位不受支持，必须由原版本完成任务归档、释放并 purge。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
 
 ## 兼容规则
+
+epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读确认，预检结果使用 `preflight_ready`。PR 提审证据复用当前 run 的 `interactions/pr-ready-input.json`，不新增状态账本；旧客户端不能解释具体 Checks 例外及新评论表示，因此切换版本前必须原版归档释放、purge 后重建。旧质量事件保留原评论生成与严格回读，新增 `human-text-v2` 只生成阶段总结。质量 readback 的可选 `body_representation=literal-markdown-v1` 仅用于已核验为字面文本的 Markdown 转换，不解码原文已有反斜杠或其它转义；缺省保持原严格比较。
 
 项目 `plan_contract.review.environment_version=2` 显式启用环境阶段依赖，缺省或版本1保持全部 missing 阻塞 Q2，未知版本拒绝。质量事件已有 rules 快照承载该声明，历史回放使用当时规则，不按当前配置重解释。新增阶段/检查项声明改变旧客户端的解释能力，独立交付时再次提升 epoch；升级与回退均原版退出并 purge，不在线迁移或补造确认。
 

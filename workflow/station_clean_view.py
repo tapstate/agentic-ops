@@ -5,7 +5,7 @@ import os
 import stat
 from pathlib import Path
 
-from workflow import station_clean_rules, station_directories, station_source, task_store
+from workflow import station_clean_rules, station_directories, station_source, task_store, station_layout
 
 
 def source_inventory(base, task):
@@ -28,7 +28,7 @@ def source_inventory(base, task):
                 for filename in filter(None, station_source.git(repo, *args).stdout.split("\0")):
                     objects.setdefault(filename, []).append(category)
             for filename, categories in sorted(objects.items()):
-                row["objects"].append({"path": "source/" + name + "/" + filename,
+                row["objects"].append({"path": station_layout.relative(base, "repositories", name + "/" + filename),
                     "git_state": categories, "allowed_decisions": ["archive", "export", "discard_with_exact_confirmation"]})
             device = repo.stat().st_dev
             def failed(error):
@@ -49,7 +49,7 @@ def source_inventory(base, task):
                     except OSError as error:
                         failed(error)
         except (ValueError, OSError, subprocess.TimeoutExpired) as error:
-            row["problems"].append({"path": "source/" + name, "reason": str(error)})
+            row["problems"].append({"path": station_layout.relative(base, "repositories", name), "reason": str(error)})
     return result
 
 
@@ -78,6 +78,8 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
             action = decision["action"]
             if action == "preserve":
                 row("retain", name, "retain", "保留规则：" + decision["layer"], ["retain", "separate_request"])
+            elif action == "discard":
+                row("remove_or_reset", name, "remove", "匹配配置的普通文件，按确认规则不归档丢弃", ["confirm", "cancel"])
             elif action == "block" or (action == "remove" and name not in roots):
                 row("unknown", name, "no_action", "类型、归属或清理规则未核验", ["clarify", "cancel"])
         if not plan:
@@ -98,12 +100,15 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
         for entry in plan["directories"]:
             row("remove_or_reset", entry["path"], entry["disposition"], "当前 run 的受管目录", ["confirm", "cancel"],
                 identity=entry, recovery="仅列入成果或报告保全的内容可恢复；缓存及其它生成物可重建")
+        for batch in plan["rules"]["batches"].values():
+            for relative in batch["files"]:
+                row("remove_or_reset", relative, "discard", "冻结规则匹配的普通文件，不归档丢弃", ["confirm", "cancel"], scope=batch["scope"])
         for entry in plan["entries"]:
             row("preserve_before_clear", entry["path"], entry["preservation"]["action"], "源码成果处置", ["archive", "export", "discard_with_exact_confirmation"], evidence=entry)
         for relative in plan["archive_runtime"]:
-            row("preserve_before_clear", "runtime/" + relative, "archive", "仅保存符合归档规则的脱敏日志和报告，不备份整个 runtime", ["confirm", "cancel"])
+            row("preserve_before_clear", station_layout.relative(base, "task-runtime", relative), "archive", "仅保存符合归档规则的脱敏日志和报告，不备份整个 runtime", ["confirm", "cancel"])
         for name, state in plan["source"].items():
-            row("remove_or_reset", "source/" + name, "checkout_baseline", "保全成果后回到已核验开发 SHA，不移动命名分支", ["confirm", "cancel"], source=state)
+            row("remove_or_reset", station_layout.relative(base, "repositories", name), "checkout_baseline", "保全成果后回到已核验开发 SHA，不移动命名分支", ["confirm", "cancel"], source=state)
             if state.get("preserved_ref"):
                 row("retain", name + ":" + state["preserved_ref"], "retain", "计划保留任务 Head", ["retain", "separate_request"], sha=state["preserved_head"])
             try:
@@ -122,7 +127,7 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
                 for problem in repository["problems"]:
                     row("unknown", problem["path"], "no_action", problem["reason"], ["clarify", "cancel"])
         for name, state in task.get("retained_repositories", {}).items():
-            row("retain", "source/" + name, "retain", "未选中持久仓库，保持接管前状态", ["retain", "separate_request"], observation=state)
+            row("retain", station_layout.relative(base, "repositories", name), "retain", "未选中持久仓库，保持接管前状态", ["retain", "separate_request"], observation=state)
     if operation:
         from workflow import station_cleanup_stages
         result["stages"] = station_cleanup_stages.describe(operation)

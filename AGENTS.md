@@ -56,6 +56,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - 不提交 secrets、tokens、private keys、客户数据或原始敏感日志。
 - `.superpowers/` 只属于本机临时状态，不维护、不提交，也不是事实源。
 - Skill 只能指导 Agent 使用现役架构，不得承担可由 Policy 或 Runtime 强制的规则。
+- 受管技能调用遵循[统一帮助合同](docs/skill-maintenance.md#技能调用与帮助)：仅提供技能名而无法确定操作，或明确请求帮助时，按合同展示帮助；已有明确行动意图时继续原技能流程。
 
 ### Markdown 排版
 
@@ -75,7 +76,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 
 ## 测试与验证
 
-运行代码变更必须补充可执行验证。现役固定验证为：
+运行代码变更必须补充可执行验证。普通提交/PR 候选使用 `internal/acceptance.sh affected --change-source staged` 按影响范围正式验收；范围由既有选择器确定，共享实现、契约、安装、门禁/发布、项目配置与 Skill、共享夹具及未知影响回到完整四项，不允许手工缩减检查。现役完整固定验证为：
 
 ```sh
 bash internal/tests/test_runtime.sh
@@ -124,4 +125,4 @@ git commit \
 
 没有可确认的 Jira key 时不得提交。只有用户明确要求提交，或工作项级连续授权覆盖提交时，才可执行 `git commit`；推送同理。工作项级授权必须绑定 Jira 工作项、运行编号、仓库、工作分支、目标分支、修改范围和验证方式。所有权、范围、风险或必要验证变化时授权失效。合并、发布、Tag、直接修改 `main`、强推和历史改写始终需要新的明确授权。
 
-故事候选先执行固定验收，再形成 commit 或 PR 供人工审查。`impact_id` 只用于内部绑定，不是用户确认对象；commit 或 PR Head 变化后旧确认立即失效。
+故事候选先执行按影响范围的正式验收（选择器要求时执行完整四项），再形成 commit 或 PR 供人工审查。`impact_id` 只用于内部绑定，不是用户确认对象；commit 或 PR Head 变化后旧确认立即失效。

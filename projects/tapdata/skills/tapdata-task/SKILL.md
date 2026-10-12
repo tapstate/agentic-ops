@@ -1,11 +1,13 @@
 ---
 name: tapdata-task
-description: 在单任务工位执行 TapData Jira 研发任务，覆盖工程接管、设计、多仓实现、开发运行环境、TapTest 用例生成开发执行、PR/CI 与归档清理。
+description: 在单任务工位执行 TapData Jira 研发任务，覆盖工程接管、设计、多仓实现、开发运行环境、CI 集成测试、按用户选择处理 TapTest、PR/CI 与归档清理。
 metadata:
   product: agenticops
 ---
 
 # TapData 单任务工位
+
+需要按指定连接器编译、注册或编译后注册时，使用 [tapdata-connectors](../tapdata-connectors/SKILL.md)，复用当前工位源码和明确目标环境，不通过重建整套开发环境更新单个连接器。
 
 先读工位 AGENTS、当前 Project Profile、准入规则和本 Skill。以 station.json 的 Product Root 为准，memory 只作历史线索。工位 config/source/runtime 分离配置、完整源码和唯一运行现场；正式档案在 Product Root 的 `.archive/<run-id>`，.agenticops 只保存一个当前任务与操作。
 
@@ -13,13 +15,15 @@ metadata:
 
 ## 接管与恢复
 
-需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。需要 TapTest（t-layer3-test）的用例生成、脚本开发、环境配置或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，由当前 Agent 在既有任务范围内推进，不依赖业务仓 write-xray-test/write-test-script 技能。Java Maven 集成测试才使用 tapdata-ci-test；下文涉及集成测试技能的调用不包含 TapTest。两者分别返回证据，主流程统一处理授权和质量记录。
+用户以 Jira key 要求继续已有任务、跨版本升级后接续，或升级前保全进展时，使用共享 [ao-task-resume](../../../../skills/shared/ao-task-resume/SKILL.md)。Jira/GitHub 保存有效设计、决定、真实历史基线与完整 Head、验证和剩余事项；缺项由 AI 核实并协助用户补齐。该技能只整理可信输入，接管、授权、质量和状态写入仍使用本 Skill 的现役入口，不解析旧 epoch 或复制旧 PASS。
+
+需要配置、部署、更新、检查、切换或卸载工位 Docker 开发环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，任务释放或清理前先卸载该 Skill 管理的容器。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
 
 1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先按确认范围保全、归档并清理，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
-3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。已知需要 t-layer3-test 时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
+3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。用户已选择当前会话处理 TapTest 且需要测试仓时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
 5. 修改仓通过 repository add --repo <repo> --work-branch <branch> --base-branch <PR目标> --scope <范围> --verification <方式> --operation-id <新op-id> --expected-revision <revision> --expected-run-id <run> --issue-key <issue> --dir <station> 登记并准备工作分支；只允许冻结基线内仓库。范围变化使旧授权失效。
 6. 续办原 run 不重写已有基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。追加当前 Profile 允许的可选仓库时，使用[同周期方案返工](../../../../docs/usage/task-authorization.md#同周期方案返工)，保留成果并重新确认受影响方案和授权；更换工程版本或超出支持范围时须归档清理后重接，不能偷改冻结清单。
@@ -49,18 +53,17 @@ metadata:
 
 - 用 `task.py checklist` 获取机读准入要求，不得凭聊天猜测。
 - `defect_fix` 在 Q1 从 `task.py checklist --json` 或 `task.py next` 读取通用 `repair_strategy`。默认只向用户显示一行当前策略，不增加确认；Q2 按 `planning_guidance` 生成方案并披露应用结果。用户要求调整时，在 Q2 确认前使用 `task.py repair-strategy set/clear` 并绑定当前 run；策略不可用、未应用或偏离只报告 warning，不能阻塞主流程或替代根因、范围、验证和授权检查。策略正文只来自中央 Policy，不复制到本 Skill。
-- 缺陷保留 Jira 初始版本；本地经用户确认的正确版本驱动当前 run。影响版本不映射分支，先核验 develop 的同一缺陷；否则独立确认真实实施分支。其它版本的后续合并与验证记录为待办。
-- 缺陷在输出根因、修改范围或修复方案前，必须用已确定的 `primary_branch` 调用 TapData 分支对齐：`python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py show --tapdata-root <tapdata-root> --version <primary_branch> --repository <候选任务仓库> --json`。`--tapdata-root` 是包含各模块仓库的产品目录，必须含主仓但不要求其它仓库齐全。读取顶层 `outcome`、`scope`、`blockers`、`checked_at` 和全部 `rows` 的 `repository`、`local`、`target_branch`、`target_sha`、`target_status`、`reason`、`refs`；模块使用返回的分支，不把主仓 release 名字机械套给 connectors；hazelcast 固定 `release-v5.5.0`。`not_covered`、`absence_unverified` 或 `unresolved` 不可作为目标仓库基线；版本与分支冲突不能以接受风险放行。
+- 缺陷保留 Jira 初始版本；本地经用户确认的正确版本驱动当前 run，影响版本不映射分支。所有 release 修复必须按[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#分支修复与测试维护)先核查 develop，再选择 develop 修复验证后交用户回补，或参考 develop 正确实现直接修复 release；未知结论先补依据。方案明确各仓基线、实施与验证顺序、业务/集成测试提交拆分和用户回补交接；跨分支不得静默改当前 run 基线或复用其它分支授权，复用现有任务、归档与接管机制分别保留各分支成果和待办。
+- 缺陷在输出根因、修改范围或修复方案前，必须用已确定的 `primary_branch` 调用 TapData 分支对齐：`python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py show --tapdata-root <tapdata-root> --version <primary_branch> --repository <候选任务仓库> --cache-file <station>/.agenticops/git-ref-cache-v2.json --json`。`--tapdata-root` 是包含各模块仓库的产品目录，必须含主仓但不要求其它仓库齐全。读取顶层 `outcome`、`scope`、`blockers`、`checked_at` 和全部 `rows` 的 `repository`、`local`、`target_branch`、`target_sha`、`target_status`、`reason`、`refs`；模块使用项目 `version-branch-alignments.json` 与脚本核验返回的分支，不把主仓 release 名字机械套给模块，也不在 Skill 固定分支值。`not_covered`、`absence_unverified` 或 `unresolved` 不可作为目标仓库基线；版本与分支冲突不能以接受风险放行。
 - 分支对齐只证明“该仓库在本次产品修复线应使用哪个分支”，不能单独证明缺陷属于该仓库。结合 Jira 组件/标签、问题现象、堆栈或文件路径、复现结果和目标分支源码，按以下结论展示仓库与分支后才给出方案：有可回查证据唯一指向一个仓库时，输出“建议分析/修复仓库”表，列出仓库、目标分支、SHA、分支推导理由、refs 新鲜度、核验时间和锁定证据；证据指向多个仓库时，输出“问题候选”表，逐项列出上述字段和候选理由；只有版本关系或无法唯一归属时，输出完整对齐列表并请用户确认优先分析的仓库。
-- 在登记目标仓库并完成必要源码分析后、签发任何 `task_execution` 授权前，必须以**一轮方案确认**完整展示并请求明确确认：① 实施方案——缺陷使用根因及证据、修改范围、修复方式、风险和回滚；功能使用目标、实现变化、范围、风险和回滚；② 验收方案——每个检查项的用例或场景、复用/新增、执行方式、预期结果、目标仓库及验证责任人；③ 后续动作及授权范围——确认可执行的编码、测试、提交、推送、PR 和 Jira 回写动作，用户限制优先。验证失败或事实变化时停止相应步骤；Jira 同步失败只记录警告。用户确认前不得记录为已确认方案、签发实施授权或开始实现；用户调整方案时重新完整展示并确认。确认后以同一确认来源固化 Q1/Q2、对应方案事实及 `workflow/authorization.py grant`；不得再为 Q3 的成功事实重复索取“接受首轮验证”。
+- 在登记目标仓库并完成必要源码分析后、签发任何 `task_execution` 授权前，必须以**一轮方案确认**完整展示并请求明确确认：① 实施方案——缺陷使用根因及证据、修改范围、修复方式、风险和回滚；功能使用目标、实现变化、范围、风险和回滚；② 验收方案——每个检查项的用例或场景、复用/新增、执行方式、预期结果、目标仓库及验证责任人；③ 后续动作及授权范围——确认可执行的编码、测试、提交、推送、PR 和 Jira 回写动作，用户限制优先。验证失败或事实变化时停止相应步骤；Jira 同步失败只记录警告。用户确认前不得记录为已确认方案、签发实施授权或开始实现；用户调整方案时展示完整有效方案及变化，复用已明确覆盖该变化的真实决定，只补问未决内容或超出原授权的范围；实际方案绑定变化后仍按现役入口撤销、重新绑定授权。确认后以同一确认来源固化 Q1/Q2、对应方案事实及 `workflow/authorization.py grant`；不得再为 Q3 的成功事实重复索取“接受首轮验证”。
 - 按 `checklist` 返回的 `quality_mode` 处理缺项。缺陷 `recorded_decision` 模式一次列全缺口并继续无依赖的分析，在质量检查点由用户决定处理；其它类型仍按各自准入规则。事实不可信或基线无法确定时停止对应步骤。
 - 每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式。
-- 本地基线完成后分析代码并形成方案；研发工程师确认方案后用 `workflow/authorization.py grant` 签发任务授权。
-- 接管不要求已创建或关联 Test。完成受控基线后，Agent 与用户在 Q2 确认修复方案、验收场景、预期和验证方式；如何定义、编写、创建或复用 Test 由用户与 Agent 处理，AgenticOps 只引导、记录、跟进和核对。缺陷编码完成后再通过 Jira「已链接工作项」创建或关联 Test；功能的 CI 用例随功能代码开发、执行和验收，不要求独立 Jira Test，已有的关联 Test 仍须核对。使用 `quality.py status/apply` 完成 Q1、Q2 的记录与确认，然后进入 implementation。具体输入和恢复方法见 [质量检查与证据](../../../../docs/usage/quality-checkpoints.md)，项目标准来自当前任务选择的质量配置。
-- 功能与缺陷在相关人工节点先按[统一决策包](../../../../docs/usage/quality-checkpoints.md#jira-全流程统一决策包)执行 jira_status collect，一次收集本阶段全部缺项并记录真实确认；未来结果不提前索要。缺陷处理过程中按 Project 转换配置提前采集 Tests Passed 所需属性：Q2 固化分类和根因依据，仓库确认时形成 Module 依据，Q2/Q4 评论分别形成 Issue Analysis/Fix Details 依据，验收方案确认 Tester、自动化属性和 Xray 关联，版本规划只作为选择 Fix Version 的依据。需要责任人选择的枚举、人员、Module、Fix Version ID 和测试例外不得自动猜测；无法可靠补齐时留到状态同步节点跳过并在 PR Ready 提示。
+- 接管不要求已创建或关联 Test。完成受控基线后，Agent 与用户在 Q2 确认修复方案、验收场景、预期和验证方式；如何定义、编写、创建或复用 Test 由用户与 Agent 处理，AgenticOps 只引导、记录、跟进和核对。缺陷编码完成后再通过 Jira「已链接工作项」创建或关联 Test；功能的 CI 用例随功能代码开发、执行和验收，不要求独立 Jira Test，已有的关联 Test 仍须核对。使用 `quality.py status/apply` 完成 Q1、Q2 的记录与确认，然后进入 implementation。关联用例需要新增或修改时，在既有方案讨论中说明缺口，由用户选择当前会话开发或交其它会话/人员处理；外部处理须明确责任和所需结果，保留未完成事实及现有验收条件，继续不依赖它的工作，不默认创建 Xray 或编写 TapTest。具体输入和恢复方法见 [质量检查与证据](../../../../docs/usage/quality-checkpoints.md)，项目标准来自当前任务选择的质量配置。
+- 功能与缺陷在相关人工节点先按[统一决策包](../../../../docs/usage/quality-checkpoints.md#jira-全流程统一决策包)执行 jira_status collect，一次收集本阶段全部缺项并记录真实确认；未来结果不提前索要。缺陷处理过程中按 Project 转换配置提前采集 Tests Passed 所需属性：Q2 固化分类和根因依据，仓库确认时形成 Module 依据，Q2 将实施方案写入 Issue Analysis，Q4 将修复总结写入 Fix Details；评论只做阶段总结，验收方案确认 Tester、自动化属性和 Xray 关联，版本规划只作为选择 Fix Version 的依据。需要责任人选择的枚举、人员、Module、Fix Version ID 和测试例外不得自动猜测；无法可靠补齐时留到状态同步节点跳过并在 PR Ready 提示。
 - 缺陷 Q2 前用 `task.py record --key fix_plan` 记录根因、范围、修复方式、风险与回滚。修复后用例尚未编码时把 `target_revision` 写为 `pending`；先确认稳定用例/方式，执行前用 `item` 绑定精确代码。只补充代码版本不会要求重新选择同一用例；改步骤、预期、范围或方式仍须重新确认。
-- 一个检查项对应一个用例和一种方式；同检查点可有不同方式的多项。修复前不可执行须说明原因，修复后项未到检查点不算失败。`Manual` 由用户执行；`TapTest` 按 [TapTest 开发指引](../../runbooks/taptest-development.md)生成、开发和执行用例；`Unit` 核对产品工程的单元测试和 CI 集成测试。TapCE 当前不纳管，不算通过；若因此无法形成受管验收或 Jira Validator 阻塞，请用户调整 Jira 或验收方案并重新读取事实。AgenticOps 工具不承载用例开发或环境执行器；Agent 使用原生工具按授权编写和执行用例，质量接纳仍使用现有闭环。
-- 新增仓库或修改分支、范围、验证方式后必须重新确认和授权。
+- 一个检查项对应一个用例和一种方式；同检查点可有不同方式的多项。修复前不可执行须说明原因，修复后项未到检查点不算失败。`Manual` 由用户执行；`TapTest` 继续回读关联用例及 Jira 状态，仅在用户选择当前会话开发或执行时读取其指引；`Unit` 核对产品工程的单元测试和 CI 集成测试。TapCE 当前不纳管，不算通过；若因此无法形成受管验收或 Jira Validator 阻塞，请用户调整 Jira 或验收方案并重新读取事实。AgenticOps 工具不承载用例开发或环境执行器；Agent 使用原生工具按授权编写和执行用例，质量接纳仍使用现有闭环。
+- 新增仓库或修改分支、范围、验证方式后展示变化，复用已覆盖变化的有效决定；按现役范围修订或同周期返工入口重新核对受影响质量事实并签发授权。缺少有效决定才补充确认，未变项不重跑。
 - Workflow 检查点失败时展示原因、缺失事实和停止点；先补齐所需事实，不手改状态绕过。原生工具审批由平台处理。
 
 ## 功能任务的 Jira 协作
@@ -75,7 +78,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 4. Q4 确认并进入 ci_validation 后，重新读取当前状态、字段和 transitions，执行 `prepare --trigger tests_passed --operation-id <op-id>`。依据 `field_plan` 提前采集，依据实际缺项补充并原生回填、回读，再重新 prepare。只有 `ready` 才执行返回的转换；混合验收中的人工决定不能由测试结果代替，仅 TapTest 的 Q4 按状态自动汇总。
 5. 每次写入后回读核对字段或目标状态，使用 `interaction-path` 保存当前 issue/run、读取时间、来源和材料，并在 note 引用。已知未发起转换的预检缺项允许补齐后重检；已发起而 failed/unknown 的转换先回读，不能重新 prepare 盲目重放。隐藏 Validator 按服务端实际错误处理，元数据 required=false 不代表没有服务端校验。
 
-Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，审批选项由实际审批人决定，不根据测试 PASS 猜填。Tests Passed 到 PR 提交的转换在实际到达时读取并依现有人工提审规则交接；合并和发布仍需独立授权。
+方案评审时通过现有采集包确认 Story Test Design Review Result，Tests Passed 前复用有效决定并核对变化（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，审批选项由实际审批人决定，不根据测试 PASS 猜填。Tests Passed 到 PR 提交的转换在实际到达时读取并依现有人工提审规则交接；合并和发布仍需独立授权。
 
 这些材料证明外部状态，不能替代 Q1-Q4 和代码验证。同步失败只暂停对应写入，继续无依赖工作并在交接时列全 `jira_status_todos`；不手写账本消除提示。
 
@@ -86,6 +89,8 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 - 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
 - completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
+- 提交与 PR 准备遵循[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#测试与提交边界)：业务及适用普通 `test` 与 `ci-test`（`it`）强制分开提交，前者可合入低版本，后者不得回补；核验合入方式保留回补边界；用户回补后回读实际 release 成果并完成独立功能验证，再创建或更新 PR。不代办跨分支合入，不以 develop 报告替换 release 证据。
+- 创建或提审前端代码 PR 时，按[PR 默认审查人](../../runbooks/build-test-and-local-run.md#pr-默认审查人)应用 Feynman 默认审查安排，核对账号、请求资格及写后回读；用户明确指定的安排优先，未确认账号不猜测。
 - 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)用现有 quality.py verification 动作记录本地测试、来源同步、CI 报告与审查材料；缺失或版本失效时先补齐，不直接改阶段。失败使用 failures.py 原 problem_id 记录 start/finish，替代旧 PR 独立预算入口。
 - 功能与缺陷 Q2 方案确认时都要明确 Wiki 依据的 CI 集成测试级别、判定理由、范围、用例复用/新增/修改和验证安排，按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)记录 integration_tests，与现有方案一次确认。不能只列命令或让研发先交用例清单。
 - 功能与缺陷在方案分析时使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md) 判断集成测试复用、新增或修改及框架可用性；实现后调用其编写、执行、报告分析和修复能力，PR CI 返回后再次调用报告分析。具体测试步骤由该技能及其 Runbook 维护；主流程负责授权、质量记录、阶段、提交推送和 CI 等待，不复制测试步骤。
@@ -97,7 +102,7 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 - 有意义变更且完成第一轮针对性验证后建议 Draft PR；如验证受阻，按项目标准披露现状。Q3 是自动首轮事实检查点，使用 `execute` 导入真实报告、`jira_status` 导入 TapTest 状态，在所有已选修复后项符合合同后执行 `auto_checkpoint`；Q4 才展示验收检查项（含实际关联 Test）、当前 SHA 的执行证据与风险，使用 `decide/checkpoint` 记录用户最终验收。用户可接受风险，不得把未执行、跳过、未知或失败改成通过。
 - 仅对启用 `status_sync` 的任务：Q4 完成并进入 `ci_validation` 后，立即读取 Jira issue、已链接 Test、每个 Test 的 Test Details 和可用 transitions，执行 `jira_status.py prepare --trigger tests_passed --operation-id <op-id>`。Manual/Unit 在 Q4 以同一 `case_ref`、当前用例版本和对应方式记录当前完整 SHA 的 PASS 证据及逐项 `accept`；TapTest 导入 `quality.py` 的 `jira_status` 动作，按[状态依据](../../../../docs/usage/quality-checkpoints.md#taptest-的-jira-状态依据)接纳，不要求本地 PASS 或逐项确认；Q4 总体须满足对应合同。Jira 已是 `Tests Passed` 也先核对这些事实；当前为 `In Progress` 且返回 `ready` 时同步尝试一次并写后回读。缺少 Jira 事实、关联、类型、版本或确认时，工具提示用户补充/调整后可以重新做预检；已发起的 Jira 转换不在同一节点盲目重试。
 - 每个 PR 都要核对目标集成测试是否实际运行；其他 Checks 绿色、未触发、跳过、零用例或缺报告均主动展示具体缺口并请求研发明确处置，不能直接进入下一步或以建票代替确认。使用现有 verification 的原始结果和 decision 记录，确认不等于 PASS，也不解除用例验收、失败、PR Checks 和服务端条件。
-- PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再以同一 Jira 快照运行 `pr_ready.py` 复核。Test 工作项本身无需 Done。所有 PR Checks 明确成功且绑定当前 Head、Q1-Q4 及检查项满足要求后才可称为 PR Ready。状态同步遗留统一提示 Engineering DRI 人工处理；`Pull Request Submitted` 不由 Agent 自动执行。
+- PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再以同一 Jira 快照运行 `pr_ready.py` 复核。Test 工作项本身无需 Done。Checks 全部明确成功或具有绑定当前 Head 及具体缺口的有效提审例外，并满足 Q1-Q4 与检查项时，只表示预检通过。按有效授权使用原生 GitHub 工具推进剩余 PR，结果未知先回读；所有目标 PR 身份、当前 Head、OPEN 及 isDraft=false 回读确认后才可称为 PR Ready。证据与具体例外使用[PR Ready 核对](../../../../docs/usage/quality-checkpoints.md#pr-ready-核对)，不重复索取已覆盖提审的决定。状态同步遗留统一提示 Engineering DRI 人工处理；`Pull Request Submitted` 不由 Agent 自动执行。
 - 使用原生工具取得每个 PR 当前 Head 对应的 CI 运行和实际报告，交 tapdata-ci-test 分析。首次失败先用稳定 check_id、归因及证据 observe，复发复用原 problem_id，再按原授权与累计轮次 start 修复。定向调试后提交候选，在完整提交 SHA 上完成最终本地重验并记录结果，再推送、等待新 CI，将新报告交回技能分析；非当前变更、归因不明或轮数用尽按质量合同交研发处置。返回结果写入现有质量材料，测试总结写 Jira 讨论并回读，不改写任务描述代替报告。Q5、Q6 核对审查及交付事实。接管和 Q4 节点只尝试 Project 明确配置的单次 Jira 状态同步；线上 Validator 与附件冲突需报告确认，禁止用本地质量处置绕过。
 - PR 审查按[审查返工](../../../../docs/usage/quality-checkpoints.md#pr-审查返工)完整回读普通评论及行内线程，逐项修复或说明依据；改变验收预期交研发决定。相同失败沿用原 problem_id，使用失败工具的 review 来源累计轮次，修改后重验当前代码并回读当前 PR CI；不以线程过时或已关闭替代问题核对。
 - PR 合入、发布、Tag、rebase、强推和保护分支写入不被任务授权覆盖。检出来源分支合并到任务工作分支也须明确纳入方案授权，不因需要保持最新而绕过授权。

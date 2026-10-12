@@ -6,7 +6,7 @@
 
 `station-clean.py` 预检返回 `cleanup_scope`：`remove_or_reset` 列目录回收及每仓复位目标，`preserve_before_clear` 列源码成果处置及日志报告保全，`retain` 列配置、仓库及引用、已登记分支/PR、工位接线和正式档案，`unknown` 列尚未核验对象。每项说明原因及允许的决定；保留源码仓库不等于保留工作区修改。
 
-该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码 archive/export/discard；丢弃仍需精确快照确认，删除保留分支或关闭 PR 仍是重置后的独立操作。核心持久目录销毁不是任务清理选项。
+该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码 archive/export/discard；丢弃仍需精确快照确认，分支/PR 默认保留；用户精确确认后可纳入同一次清理计划，在分支/PR 阶段处置，也可在释放后按独立授权处置原档案对象。普通重置授权不包含删除分支或关闭 PR。核心持久目录销毁不是任务清理选项。
 
 恢复展示原计划和已完成/待完成步骤，范围漂移按原 cleanup-amend 处理；运行根内部正常生成物不逐文件重做授权。完成时展示原范围、实际步骤回执及档案引用，空闲预检不执行清理。视图错误不代表已成功的生命周期操作失败，先回读原操作，不重复执行。
 
@@ -59,9 +59,34 @@ python3 <agenticops-root>/workflow/task.py repository amend \
 
 新分支重做必须先 archive/clean 结束旧处理，保留 refs 和档案，再接新 run。不能只换 operation 或修改基线绕过现有占用；旧 PR 不自动关闭，旧验证不借给新候选。
 
+## 从 Jira 任务接续
+
+用户要求继续某个 Jira 任务时，使用共享 [ao-task-resume](../../skills/shared/ao-task-resume/SKILL.md)。入口只需要 Jira key；旧 run、会话或档案用于查缺，不作为必填恢复参数。先核验工位绑定及 current/op：兼容且原 run 可用时沿原操作恢复；旧现场不兼容时先由原版本退出，不用目标版本读取旧状态；空闲工位则依据外部成果建立新 run。用户已选择升级后继续的，不重复询问是否放弃业务任务。
+
+### 持续记录与升级前核对
+
+在方案确认、代码交付、测试总结和暂停节点，复用已有 Jira 字段、评论及 PR 描述更新下列事实，不新增固定表单或每次工具调用后的回写：
+
+| 材料 | 记录与核验 |
+|---|---|
+| 目标、设计、决定、验收 | Jira 现有正文/字段；项目有 Issue Analysis 等字段时优先使用，评论记录变化、决定来源和未决项，不覆盖原需求 |
+| 仓库与代码 | Jira 引用 GitHub 分支/PR，记录仓库、目标分支、真实历史基线、完整 Head 和分开交付的提交；原生回读实际对象 |
+| 验证 | 保留原执行 SHA、方法、结果、用例计数、报告及未覆盖范围；GitHub CI 和 Jira 总结互相引用，本地报告明确位置和保全方式 |
+| 环境与剩余工作 | 已选架构、配置/秘密引用、构建启动依据、实际资源、缺项、已完成和待做事项；不记录秘密明文或将端口存活当验收 |
+
+阶段评论可派生本地分支、历史基线和版本，但不证明已经推送。升级前核对本地未推送提交、未提交修改、未跟踪文件及报告，按有效权限提交/推送或保全并记录位置。GitHub 缺权限、Jira 同步失败或未知结果时明确尚未持久化的成果；先核对未知写入，再决定是否具备安全退出路径，不能声称仅凭 Jira key 可以恢复尚未保存的字节。临时导出旧环境只用于首次补齐，目标版本不保留旧 schema 解析器。
+
+### 读取、补全与重新接管
+
+读取 Jira 当前正文、相关评论、关联测试和链接，沿来源读取 GitHub 分支、PR、提交及 CI；评论多页时读取到覆盖当前设计和最后进展，后续有效决定取代旧决定但不删除历史。核验负责人、任务准入、仓库身份、目标、历史基线、当前 Head、设计范围及未决外部结果。不要把 API 摘要中的评论数量当评论正文，也不要把最新目标分支与任务 Head 的 merge-base 自动当历史基线。
+
+材料缺失时先利用源码、Git 历史、PR 差异、CI 或可访问旧会话核实；不能确定的只问关键缺项，区分事实、推测和用户新决定，继续无依赖准备。缺旧会话不阻止记录充分的任务；缺报告仍是未验证，缺历史基线不猜 SHA。修复后的信息回写同一 Jira，外部写入复用原生意图/回读原则，不建设专用同步队列。
+
+将核验成果转成当前 CLI 输入：`takeover --continuation-input` 使用仓库 ID 对应的 `work_branch/baseline_sha/expected_head`，随后 `repository add --expected-head` 核验并使用保留分支。重新记录本版任务事实、方案与质量材料，复用仍适用的用户设计决定并绑定新授权；不复制旧质量日志、不跳阶段。需要的环境依赖按项目 Runbook 补齐并执行，验收只使用实际执行版本。新 run 的 Jira 总结引用原事实来源，说明本次复用成果、补齐内容及剩余工作。
+
 ## 实施授权
 
-在已冻结源码上形成方案，使用 Q1/Q2 将根因或功能目标、修改范围、风险、回滚、验收项/预期/执行方式和允许后续动作一次性明确确认。未经确认不签发实施授权。之后按 authorization.py grant 的现役参数绑定 issue/run、Agent 和方案版本；所有授权写入须携带 expected-run-id。
+在已冻结源码上形成方案，使用 Q1/Q2 将根因或功能目标、修改范围、风险、回滚、验收项/预期/执行方式和允许后续动作一次性明确确认。未经确认不签发实施授权。已有用户决定明确覆盖当前方案及后续动作时，复用同一真实确认来源；调整后展示完整有效方案和变化，只补问未决内容或超出原授权的范围，不因整理材料再次索取相同决定。之后按 authorization.py grant 的现役参数绑定 issue/run、Agent 和方案版本；所有授权写入须携带 expected-run-id。
 
 范围或方案改变使旧确认失效；必要时 revoke，重新确认和签发，不手改授权文件。改变完整工程版本则先结束当前处理再接管。归档后不再继续开发。
 
@@ -108,7 +133,7 @@ python3 "$agenticops_root/workflow/authorization.py" reconfirm \
 
 功能与缺陷使用相同操作：回读当前任务登记的仓库、work_branch、base_branch 和冻结 base_sha；保留任务独立提交，不能以最新来源替换原始基线。Agent 原生查询已登记 origin 的对应来源分支最新完整 SHA，并保存查询来源与时间；本地 remote-tracking ref 或历史缓存不能冒称最新远端事实。
 
-需要同步时，展示具体仓库、工作分支、来源分支及 SHA，确认本次 Merge 已被明确授权后才原生 fetch/merge。已取得覆盖这些对象的方案授权不重复询问；任务一般授权不能默认为包含 Merge。同一工作分支上的编辑、Merge 和最终验证串行执行。来源已包含时原生 Merge 可返回已是最新，仍记录本次核对的来源 SHA。
+需要同步时，展示具体仓库、工作分支、来源分支及 SHA，确认本次 Merge 已被明确授权后才原生 fetch/merge。来源同步 Merge 不属于普通 task_execution 授权；具体授权可以在方案确认时单独明确，也可以在同步前取得，仍有效且覆盖当前对象与来源 SHA 的决定不重复询问。PR 合入、发布、Tag、保护分支写入、强推和历史改写始终需要新的明确授权，来源同步决定不能覆盖这些动作。同一工作分支上的编辑、Merge 和最终验证串行执行。来源已包含时原生 Merge 可返回已是最新，仍记录本次核对的来源 SHA。
 
 合并完成后调用只读检查：
 
@@ -134,9 +159,7 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 `python3 <agenticops-root>/workflow/station-clean.py --dir <station>` 只读展示当前任务与版本 6 清理计划；未完成任务返回放弃变更问题，不在脚本内部猜测确认或阻塞等待终端输入。预检阻塞仍返回任务与问题，但不提供可执行计划。新清理尚未开始时 `--abandon-changes no` 无副作用退出；已有未完成清理操作时返回恢复提示，不声称撤销此前动作。工位空闲且没有未完成操作时不删除材料。
 
-中央 `policies/station-clean.json` 必须存在，项目 `projects/<project>/station-clean.json` 可省略。两份配置均为 `{"version":1,"preserve":[".idea/"],"clean":[{"pattern":"scratch/","action":"remove"}]}` 的结构，独立读取，按中央白、项目白、中央黑、项目黑顺序判定；全部未匹配时保留并报告，不配置 `other` 或 `unmatched_policy`。模式仅匹配工位根名称，支持 `*`、`?` 和目录后缀 `/`，不支持前导 `/`、深层路径、`**`、否定或方括号语法。源代码子树由 Git 阶段检查，不由名单递归匹配。
-
-黑名单动作限定为 `source-reset`、`clear-children`、`lifecycle-clean` 和 `remove`；前三项分别只适用于 source、runtime、.agenticops。中央默认保留 config、archive、.idea，项目不能通过白名单跳过核心生命周期。初始化接线仍按原 manifest 核验。`remove` 只用于任务独占的普通根目录，生产前使用现有 `station_resources.py` 登记 `kind=directory`、根名称和 producer；Workflow 创建并登记身份。名单不能认领已有非空目录、初始化接线或任意文件，已有空目录采用仍须 `adopt_empty=true`。需要删除其它对象时停止并明确处置，不把规则匹配当成删除授权。
+配置版本 2 的作用域、对象类型、动作、项目优先级和冻结恢复边界统一见[工位合同](../architecture/single-task-station.md#配置化清理规则与结构合同)。中央 `policies/station-clean.json` 必须存在，项目 `projects/<project>/station-clean.json` 可省略。例如项目附属目录规则为 `{"version":2,"rules":[{"scope":"station-root","pattern":"scratch","type":"directory","action":"remove"}]}`；生产前仍通过现有 `station_resources.py` 登记任务归属和 producer，不能靠名单认领已有非空目录或初始化接线。只读清单展示规则匹配路径与不归档丢弃范围，不自行执行删除。
 
 确认请求放在工位外，包含现有 summary、reason、decision_ref、confirmed_digest，另加 `cleanup_version:6`。未完成任务请求增加 `abandon_changes:true`，并使用下列命令明确传递用户的放弃决定；完成任务不需要放弃参数，但仍须现役 terminal proof 和 candidate_digest。归档保留成果，放弃不删除 Git 分支或提交。
 
@@ -154,7 +177,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。所有清理入口仅支持版本 6，旧版本 3–5 的请求、在途计划和接管交接计划均拒绝，不在线转成新计划。旧工位必须由原版本完成退出与 purge 后再切换；历史档案保留，但不恢复为活动清理操作。
 
-工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
+工位根目录的 `.idea/` 默认由中央规则保留，不遍历、归档或删除其内容；项目规则优先于中央规则。同层规则的保留动作优先，不同破坏性动作同时命中时拒绝。规则用显式类型区分目录与同名文件，符号链接按通用安全规则拒绝；完整语义见[配置化清理规则与结构合同](../architecture/single-task-station.md#配置化清理规则与结构合同)。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
 
 未初始化子模块只在索引、当前提交与归位提交的 gitlink 路径和对象完全一致，且路径不存在或为空目录时保留。清理前和归位时均核验，不递归检出子模块；含内容、符号链接、gitlink 变更或冲突时仍停止。此边界不改变工位状态格式或 epoch，也不授权删除子模块内容。
 
@@ -176,7 +199,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 ## 完成预检与等待合并
 
-`task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 只表示具备审查条件，不表示已经合并。合并仍需独立明确授权。
+`task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 表示所有目标 PR 已推进 GitHub Ready for review 并回读确认，不表示已经合并。合并仍需独立明确授权。
 
 预检不写任务、处置或完成证据。`advance` 和未完成任务的 `release` 使用相同完成判定，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。
 

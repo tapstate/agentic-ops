@@ -21,6 +21,7 @@
 | 工位编号 | station_id，工位生成时创建的稳定身份。重新生成工位产生新身份。 |
 | 执行编号 | run_id，一次接管的身份；恢复不变，清理后再接管产生新编号。 |
 | 操作编号 | operation_id，一次可恢复生命周期操作的身份；重试不换编号。 |
+| PR Ready | 全部目标 PR 已推进 GitHub Ready for review，并完成身份、当前 Head、OPEN 与非 Draft 的原生回读确认。预检通过仅表示可提审，不代表提审完成；实现合同见[质量检查与证据](usage/quality-checkpoints.md#pr-ready-核对)。 |
 | 任务授权 | 对特定任务、仓库、工作分支、改动范围和验证方式的明确允许；范围变化后原授权失效。 |
 | Hook | 平台或 Git 的事件入口。使用者通用 Agent Hook 已退役；源码仓库 Git Hook 保留且独立于 Workflow。 |
 | Bootstrap | 安装、更新、回退和工位接线能力，位于 `bootstrap/`；不承载任务流程或规则。 |

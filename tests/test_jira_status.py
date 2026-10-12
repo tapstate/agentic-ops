@@ -397,14 +397,14 @@ class JiraStatusTests(unittest.TestCase):
                 mock.patch.object(pr_ready, "ci_problems", return_value=[]), \
                 mock.patch.object(pr_ready.quality, "config", return_value=rules):
             result = pr_ready.check(self.base, "TAP-123", input_path)
-        self.assertTrue(result["ready"])
+        self.assertTrue(result["preflight_ready"])
         input_path.write_text(json.dumps(linked_test("In Progress", "indeterminate")))
         with mock.patch.object(pr_ready, "quality_problems", return_value=[]), \
                 mock.patch.object(pr_ready, "linked_test_confirmation_problems", return_value=[]), \
                 mock.patch.object(pr_ready, "ci_problems", return_value=[]), \
                 mock.patch.object(pr_ready.quality, "config", return_value=rules):
             result = pr_ready.check(self.base, "TAP-123", input_path)
-        self.assertTrue(result["ready"])
+        self.assertTrue(result["preflight_ready"])
 
     def test_pr_ready_derives_test_tasks_from_issue_links_and_checks_type(self):
         rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
@@ -621,6 +621,141 @@ class TerminalStatusTests(unittest.TestCase):
             self.assertEqual(record["outcome"], "ready")
         with self.assertRaisesRegex(ValueError, "未写入"):
             jira_status.complete(self.base, "TAP-123", "takeover", "not_written", self.snapshot(), "", "op-original-takeover")
+
+
+class SubmissionClosureTests(unittest.TestCase):
+    setUp = JiraStatusTests.setUp
+    snapshot = JiraStatusTests.snapshot
+    feature_snapshot = JiraStatusTests.feature_snapshot
+    def seed_submission(self):
+        from datetime import datetime, timezone
+        self.task.update(stage='ci_validation', repositories=[
+            {'repository': 'owner/first', 'pull_request': 42, 'authorized_endpoint': 'github.com/owner/first',
+             'worktree': {'status': 'removed', 'final_revision': 'a' * 40}},
+            {'repository': 'owner/second', 'pull_request': 43, 'authorized_endpoint': 'github.com/owner/second',
+             'worktree': {'status': 'removed', 'final_revision': 'b' * 40}}])
+        save_station_task(self.base, self.task)
+        self.packet = {'schema_version': 1, 'issue_key': 'TAP-123', 'run_id': self.task['run_id'],
+                       'checks_exceptions': [], 'pull_requests': []}
+        self.observations = []
+        for repo in self.task['repositories']:
+            head = ('a' if repo['repository'] == 'owner/first' else 'b') * 40
+            latest = {'verdict': 'success', 'head': head, 'checks': [{'name': 'build', 'conclusion': 'SUCCESS'}], 'failing': []}
+            self.observations.append({'repository': repo['repository'], 'pr': str(repo['pull_request']), 'history': [latest]})
+            self.packet['pull_requests'].append({'repository': repo['repository'], 'number': repo['pull_request'],
+                'url': 'https://github.com/%s/pull/%s' % (repo['repository'], repo['pull_request']),
+                'headRefOid': head, 'state': 'OPEN', 'isDraft': False, 'source_ref': 'fixture:github/readback',
+                'observed_at': datetime.now(timezone.utc).isoformat()})
+        self.input_path = task_store.interaction_path(self.base, 'TAP-123', self.task['run_id'], 'pr-ready-input.json', create=True)
+        self.proof = {'actor': '用户', 'source': 'user_message', 'reference': 'fixture:accepted-checks-and-submit',
+                      'at': datetime.now(timezone.utc).isoformat()}
+
+    def packet_write(self):
+        self.input_path.write_text(json.dumps(self.packet))
+        return pr_ready.submission_input(self.base, self.task)
+
+    def closure(self):
+        snapshot = self.base / 'pr-jira.json'; snapshot.write_text(json.dumps(self.snapshot()))
+        rules = {'task_classes': [], 'pr_ready': {'required_verification': []}}
+        with mock.patch.object(pr_ready, 'local_head', side_effect=lambda r: ('a' if r['repository'] == 'owner/first' else 'b') * 40), \
+             mock.patch.object(pr_ready.quality, 'config', return_value=rules), \
+             mock.patch.object(pr_ready, '_jira_test_tasks', return_value=([], 'fixture:jira', [], [])), \
+             mock.patch.object(pr_ready, 'linked_test_confirmation_problems', return_value=[]), \
+             mock.patch.object(pr_ready, 'quality_problems', return_value=[]), \
+             mock.patch.object(pr_ready.ci, 'current_states', return_value=self.observations):
+            return pr_ready.check(self.base, 'TAP-123', snapshot)
+
+    def test_preflight_never_claims_ready_without_readback(self):
+        self.seed_submission()
+        result = self.closure()
+        self.assertTrue(result['preflight_ready']); self.assertFalse(result['ready'])
+        self.assertEqual('pending', result['submission_status'])
+        self.assertEqual(2, len(result['remaining']))
+        self.packet_write()
+        result = self.closure()
+        self.assertTrue(result['ready']); self.assertEqual('confirmed', result['submission_status'])
+
+    def test_multi_repository_partial_and_unknown_write_recovery(self):
+        self.seed_submission()
+        self.packet['pull_requests'][1]['isDraft'] = True
+        self.packet_write(); result = self.closure()
+        self.assertFalse(result['ready']); self.assertTrue(result['pull_requests'][0]['confirmed'])
+        self.assertEqual(['owner/second'], [r['repository'] for r in result['remaining']])
+        # 原生 ready 超时后不推定成功；只回读同一 PR，补齐后恢复。
+        self.packet['pull_requests'][1]['isDraft'] = False
+        self.packet_write(); self.assertTrue(self.closure()['ready'])
+
+    def test_readback_identity_head_state_and_time_are_required(self):
+        import copy
+        self.seed_submission(); original = copy.deepcopy(self.packet)
+        for field, bad in [('url', 'https://github.com/foreign/repo/pull/42'), ('headRefOid', 'c' * 40),
+                           ('state', 'CLOSED'), ('isDraft', True), ('isDraft', 0),
+                           ('source_ref', ''), ('observed_at', '2026-10-09T10:00:00')]:
+            with self.subTest(field=field, bad=bad):
+                self.packet = copy.deepcopy(original); self.packet['pull_requests'][0][field] = bad
+                self.packet_write(); self.assertFalse(self.closure()['ready'])
+        for field, bad in [('number', 999), ('repository', 'foreign/repo')]:
+            self.packet = copy.deepcopy(original); self.packet['pull_requests'][0][field] = bad
+            with self.assertRaises(ValueError): self.packet_write()
+        self.packet = copy.deepcopy(original); self.packet['run_id'] = 'other-run'
+        with self.assertRaises(ValueError): self.packet_write()
+
+    def test_specific_checks_exception_preserves_original_and_rejects_drift(self):
+        import copy
+        self.seed_submission()
+        latest = self.observations[0]['history'][-1]
+        latest.update(verdict='skipped', checks=[{'name': 'deploy', 'conclusion': 'SKIPPED'}])
+        before = copy.deepcopy(self.observations)
+        self.packet_write(); self.assertFalse(self.closure()['preflight_ready'])
+        exception = {'repository': 'owner/first', 'pr': 42, 'head': 'a' * 40,
+            'checks_digest': pr_ready.checks_digest(latest), 'reason': '接受 deploy 跳过，使用已有应用测试提审',
+            'decision': 'accept_checks_and_submit', 'proof': self.proof}
+        self.packet['checks_exceptions'] = [exception]
+        self.packet_write(); self.assertTrue(self.closure()['ready'])
+        self.assertEqual(before, self.observations)
+        for verdict in ('failure', 'start_timeout', 'none'):
+            latest['verdict'] = verdict; exception['checks_digest'] = pr_ready.checks_digest(latest)
+            self.packet_write(); self.assertTrue(self.closure()['ready'])
+        latest['checks'].append({'name': 'new-failure', 'conclusion': 'FAILURE'})
+        self.assertFalse(self.closure()['preflight_ready'])
+        exception['checks_digest'] = pr_ready.checks_digest(latest); exception['head'] = 'c' * 40
+        self.packet_write(); self.assertFalse(self.closure()['preflight_ready'])
+        exception['head'] = 'a' * 40
+        for verdict in ('pending', 'finish_timeout', 'unknown'):
+            latest['verdict'] = verdict; exception['checks_digest'] = pr_ready.checks_digest(latest)
+            self.packet_write(); self.assertFalse(self.closure()['preflight_ready'])
+        exception['decision'] = 'risk-only'
+        with self.assertRaises(ValueError): self.packet_write()
+        # 完成预检的仓库子集复用同 run 全仓证据，不误拒其它仓库的回读。
+        exception['decision'] = 'accept_checks_and_submit'; latest['verdict'] = 'skipped'
+        exception['checks_digest'] = pr_ready.checks_digest(latest); self.packet_write()
+        with mock.patch.object(pr_ready.ci, 'current_states', return_value=self.observations), \
+             mock.patch.object(pr_ready, 'local_head', return_value='a' * 40):
+            candidate = dict(self.task, repositories=self.task['repositories'][:1])
+            self.assertEqual([], pr_ready.ci_problems(self.base, candidate))
+
+    def test_story_review_collected_at_design_and_reused_at_acceptance(self):
+        from workflow import jira_collect
+        snapshot = self.feature_snapshot()
+        self.task['facts']['implementation_plan'] = {'objective': '保持统计语义', 'changes': ['替换接口']}
+        save_station_task(self.base, self.task)
+        values = {'customfield_10413': {'id': 'approved', 'value': 'Approved'}, 'fixVersions': [{'id': 'develop'}]}
+        snapshot['transitions'][0]['fields'] = {
+            'customfield_10413': {'name': 'Story Test Design Review Result', 'schema': {'type': 'option'},
+                                  'allowedValues': [values['customfield_10413']]},
+            'fixVersions': {'schema': {'type': 'array'}, 'allowedValues': values['fixVersions']}}
+        for transition in snapshot['transitions']:
+            transition['fields'] = snapshot['transitions'][0]['fields']
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot, values)
+        self.assertIn('customfield_10413', packet['pending'])
+        self.assertIn('保持统计语义', packet['fields']['customfield_10092']['suggestions'][0]['value'])
+        jira_collect.confirm(self.base, 'TAP-123', self.task['run_id'], 'design_review', snapshot, values,
+            {key: packet['fields'][key]['digest'] for key in values}, self.proof if hasattr(self, 'proof') else
+            {'actor': '用户', 'source': 'user_message', 'reference': 'fixture:approved', 'at': '2026-10-09T10:00:00+08:00'})
+        reused = jira_collect.collect(self.base, self.task, 'acceptance', snapshot)
+        self.assertIn('customfield_10413', reused['confirmed'])
+        self.task['facts']['implementation_plan']['objective'] = '范围改变'; save_station_task(self.base, self.task)
+        self.assertIn('customfield_10413', jira_collect.collect(self.base, self.task, 'acceptance', snapshot)['pending'])
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workflow import station_context
 from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, station_source, task_checks, task_store  # noqa: E402
 
 STAGES = [
@@ -186,15 +187,15 @@ def cmd_repository_list(args):
 
 
 def repository_context(base, task):
-    from workflow import archive_store, station_operation
+    from workflow import archive_store, station_operation, station_layout
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "revision": task["_revision"],
             "operation": station_operation.read(base),
             "station": str(Path(base).resolve()), "engineering_baseline": task["engineering_baseline"],
             "task_repositories": task["task_repositories"],
             "repositories": task.get("repositories", []),
-            "paths": {"source": str(Path(base).resolve() / "source"),
-                      "config": str(Path(base).resolve() / "config"),
-                      "runtime": str(Path(base).resolve() / "runtime"),
+            "paths": {"source": str(Path(base).resolve() / station_layout.station_name(base, "repositories")),
+                      "config": str(Path(base).resolve() / station_layout.station_name(base, "configuration")),
+                      "runtime": str(Path(base).resolve() / station_layout.station_name(base, "task-runtime")),
                       "archive": str(archive_store.root(base))}}
 
 
@@ -519,7 +520,7 @@ def cmd_runtime_path(args):
             raise ValueError("任务已归档或非进行中，不能继续取得 runtime 路径")
         path = station_directories.runtime_child(args.dir, task, args.name)
         station = Path(args.dir).resolve()
-        station_id = json.loads((task_store.state_path(args.dir) / "station.json").read_text(encoding="utf-8"))["station_id"]
+        station_id = station_context.read_binding(args.dir)["station_id"]
         print(json.dumps({"station": str(station), "station_id": station_id,
                           "run_id": task["run_id"], "local_repository": str(path)},
                          ensure_ascii=False, indent=2))

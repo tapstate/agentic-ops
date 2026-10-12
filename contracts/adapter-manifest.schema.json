@@ -33,6 +33,7 @@
       "properties": {
         "mode": { "enum": ["command", "manual"] },
         "command": { "type": ["string", "null"] },
+        "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "message": { "type": "string" }
       }
     },

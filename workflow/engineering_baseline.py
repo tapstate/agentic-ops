@@ -81,6 +81,8 @@ def freeze(profile, catalog, resolutions, resolution_input, optional=()):
         raise ValueError("解析结果必须覆盖且只覆盖完整工程仓库")
     if not isinstance(resolution_input, dict) or not resolution_input:
         raise ValueError("缺少版本解析输入")
+    from workflow import station_layout
+    source_root = station_layout.name("repositories")
     entries = {}
     for name in selected:
         row = resolutions[name]
@@ -106,7 +108,7 @@ def freeze(profile, catalog, resolutions, resolution_input, optional=()):
             "ref_kind": row["ref_kind"], "ref_name": ref, "commit_sha": sha,
             "resolution_source": source,
             "rule_version": text(row.get("rule_version"), "rule_version"),
-            "path": "source/" + name,
+            "path": source_root + "/" + name,
         }
         entries[name] = entry
     result = {
@@ -130,11 +132,13 @@ def validate(baseline):
     entries = baseline.get("repositories")
     if not isinstance(entries, dict) or not entries:
         raise ValueError("工程基线缺少仓库")
+    from workflow import station_layout
+    source_root = station_layout.name("repositories")
     for name, entry in entries.items():
         repository_id(name)
         if not isinstance(entry, dict) or entry.get("repository_id") != name:
             raise ValueError("工程基线仓库身份不匹配")
-        if entry.get("path") != "source/" + name:
+        if entry.get("path") != source_root + "/" + name:
             raise ValueError("工程基线仓库路径不匹配")
         if not isinstance(entry.get("commit_sha"), str) or not SHA.fullmatch(entry["commit_sha"]):
             raise ValueError("工程基线 SHA 无效")
@@ -218,7 +222,8 @@ def verify_local_repository(station, repository, origin, ref_kind, ref, sha):
     else:
         ref_name(ref)
     root = Path(station).resolve(strict=True)
-    path = root / "source" / repository
+    from workflow import station_layout
+    path = root / station_layout.name("repositories") / repository
     chain = path.relative_to(root).parts
     current = root
     for part in chain + (".git",):
@@ -267,7 +272,7 @@ def verify_local_repository(station, repository, origin, ref_kind, ref, sha):
     reference = {"branch": "refs/remotes/origin/", "tag": "refs/tags/", "commit": ""}[ref_kind] + ref
     if git("rev-parse", "--verify", reference + "^{commit}") != sha:
         raise ValueError("本地引用已变化或与核验 SHA 不一致")
-    return {"repository_id": repository, "commit_sha": sha, "path": "source/" + repository}
+    return {"repository_id": repository, "commit_sha": sha, "path": station_layout.name("repositories") + "/" + repository}
 
 
 def verify_local_baseline(station, value):

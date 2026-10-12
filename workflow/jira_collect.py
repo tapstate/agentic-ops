@@ -142,6 +142,14 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
                    suggestions=[{"source": path, "value": get(task, path)} for path in rule["source"] if present(get(task, path))],
                    auto_extract=rule["auto_extract"], current_jira_value=current,
                    metadata_verified=bool(meta), valid_value=valid_value(value, schema, options))
+        if due and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
+            from workflow.quality_write import jira_field_body
+            for logical in rule["logical_keys"]:
+                if logical in ("issue_analysis", "fix_details"):
+                    proposal = jira_field_body(base, task, logical)
+                    if proposal:
+                        row["suggestions"] = [{"source": "plan_proposal" if logical == "issue_analysis" else "actual_verification",
+                                                "value": proposal}]
         result["fields"][key] = row
         if key.startswith("unresolved:"):
             result["unknown"].append({"field": key, "due": due and needed, "reason": "字段 ID 未核验，不猜填；取得元数据后再确认值"})

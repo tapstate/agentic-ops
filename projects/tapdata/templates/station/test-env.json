@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "nodes": {
+    "node1": [
+      "TM",
+      "FE"
+    ]
+  },
+  "image": "eclipse-temurin:17-jre-jammy",
+  "platform": "",
+  "mongo_uri_file": "tapdata-test-env/local/mongodb-uri",
+  "ports": {
+    "node1": {
+      "tm": 13030,
+      "api": null,
+      "license": "secrets/tapdata-test-env/local/license.txt"
+    }
+  },
+  "java": {
+    "tm": "-Xmx1G -Xms256M",
+    "engine": "-Xmx2G -Xms512M"
+  }
+}

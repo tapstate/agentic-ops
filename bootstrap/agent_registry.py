@@ -74,6 +74,9 @@ def discover(product_root):
         command = launch.get("command")
         if not isinstance(launch.get("message"), str):
             raise ValueError("Agent 启动提示无效：%s" % agent_id)
+        arguments = launch.get("arguments", [])
+        if not isinstance(arguments, list) or any(not isinstance(value, str) or not value or "\0" in value for value in arguments):
+            raise ValueError("Agent 默认启动参数无效：%s" % agent_id)
         if mode == "command" and (not isinstance(command, str) or not command.strip()):
             raise ValueError("Agent 启动命令无效：%s" % agent_id)
         if mode == "manual" and command is not None:
@@ -125,6 +128,7 @@ def main():
     resolve = sub.add_parser("resolve-launch")
     resolve.add_argument("agent")
     resolve.add_argument("--station")
+    resolve.add_argument("--json", action="store_true", help="返回命令与默认参数，保持参数边界")
     args = parser.parse_args()
     try:
         manifests = discover(args.product_root)
@@ -148,7 +152,10 @@ def main():
         launch = manifests[args.agent].get("launch", {})
         if launch.get("mode") != "command" or not launch.get("command"):
             raise ValueError(launch.get("message") or "该 Agent 不支持本地命令启动")
-        print(launch["command"])
+        if args.json:
+            print(json.dumps({"command": launch["command"], "arguments": launch.get("arguments", [])}))
+        else:
+            print(launch["command"])
         return 0
     except ValueError as error:
         parser.error(str(error))

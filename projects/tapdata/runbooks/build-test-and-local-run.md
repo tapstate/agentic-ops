@@ -43,6 +43,41 @@ python3 <agenticops-root>/workflow/task.py runtime-path \
 
 目标分支的 `pom.xml`、`package.json`、构建脚本和 CI 是事实源。手册示例与目标分支不一致时，不得猜测或强行套用。
 
+## 分支修复与测试维护
+
+本节是 TapData 分支修复顺序、测试维护及可回补提交的权威操作指引。任务技能负责基线、授权与用户交接，集成测试技能负责用例分析、开发和报告；结果绑定与缺口处置遵循[共同验证材料](../../../docs/usage/quality-checkpoints.md#共同验证材料)，不新增任务状态或免测规则。
+
+### release 修复路径
+
+所有 release 修复在实施前都必须确认 develop 是否存在同一问题。使用已核验的 develop 源码版本、真实调用链和适用复现或测试依据判断；CI 绿色、无法复现或暂时读不到源码不能单独证明不受影响。未能确认时继续无依赖的分析和复现准备，暂停 release 修复实施，不自动选择先修 release。各仓版本按既有分支对齐结果核验，不把主仓分支名称套给配套仓库。
+
+- develop 存在问题：先在基于 develop 的任务分支完成业务修复、适用集成用例和修复验证及回归，取得绑定实际提交的有效结果，再引导用户把业务提交合入对应 release 的任务分支。没有先修 release 的紧急例外；验证失败或缺少必要证据时不交接为可回补成果。
+- develop 不存在问题：分析并说明其不受影响的原因，包括已修复、实现不同或场景不适用等源码依据；参考其正确实现，在 release 的任务分支形成最小修复。核对接口与依赖差异，不盲目复制 develop 代码，也不为本问题修改 develop。无法解释不受影响的原因时继续分析，不凭绿色检查猜结论。
+
+回补前给用户提供各仓业务提交的完整 SHA、顺序、必要前置依赖、对应 release 分支、适配或冲突风险和验证方法。用户负责跨分支合入；Agent 不自动 cherry-pick 或代办合并，不把实施授权解释成合入授权。目标是 release 的任务分支，不是直接写受保护分支。回补依赖过重或实现差异明显时，先说明差异并形成适用于 release 的最小适配方案；实质范围或风险变化按原任务授权合同处理。
+
+用户完成后，回读实际仓库、任务分支、提交和差异，核验业务修复及依赖完整，允许适用普通 `test`，没有带入 `ci-test`（`it`）或无关功能。对回补或直接修复后的 release 实际代码/构建产物做功能验证和必要回归，最终证据绑定实际完整 SHA，再按已有授权创建或更新 release PR。回补结果未知或源码版本不符时只暂停依赖步骤，不假定成功。develop 结果不能代替 release 验证；跨分支待办和对应关系记录在现有 Jira、PR 与任务材料中，不新增台账。
+
+### 测试与提交边界
+
+本节区分普通 `test` 与 `ci-test`（`it`），不是禁止所有测试进入低版本。普通 `test`（通常为 `src/test/java`、`src/test/resources`）可随适用业务变更合入低版本 release，须核对目标版本 API、依赖和测试入口并验证；不因它在 CI 中执行就归为 `ci-test`。`ci-test`（`it`）指项目的 CI 集成测试用例及其专用 fixture、配置和框架（例如经 POM 核验的 `src/it` 或独立 `it` 模块），新增或修改集中在基于 develop 的任务分支，经 PR 进入 develop，不得回补低版本；也不主动删除 release 已有测试。目录名称、Surefire/Failsafe 插件及是否在 CI 运行都只是线索，分类须结合实际用途、POM 与 CI 入口；混合目录逐项核对，无法确定时先说明具体文件和依据，不能一概排除普通 `test` 或将 `it` 改名后回补。release 缺少集成入口时采用目标版本适用的复现、单元测试、功能验证和回归，明确未覆盖范围；替代验证不能冒充集成测试 PASS，也不自动解除已有验收条件或具体缺口处置。
+
+业务变更与集成测试变更必须分开提交，不得混在同一个 commit 中。业务提交包含功能/修复代码、必要生产配置及适用普通 `test`；`ci-test`（`it`）提交包含 CI 集成用例、专用 fixture、测试配置及框架调整。同一文件包含两类修改时按用途拆分。业务提交必须能独立构建和运行，不依赖集成测试提交；核对其完整生产依赖。两类提交在同一任务和 PR 中关联审查，集成测试提交依赖哪些业务提交须明确，最终 develop 验证覆盖两者组成的完整 PR Head。
+
+PR 合入后仍须保留可独立回补的业务提交，不得 squash 混合两类提交。开始实施时回读仓库合并设置；只能 squash 时拆成业务 PR 与集成测试 PR，明确关联和依赖。拆 PR 不表示可以跳过组合候选的验证：业务 PR 用已有能力验证，组合候选及最终 develop Head 核验目标集成测试；无法在仓库合入方式下保留提交边界时先完成可审查的拆分方案，不到 release 回补时临时删测试。合入、rebase、强推仍需既有独立授权，不为整理提交擅自改写历史。
+
+### 验收与失败处理
+
+核对两分支都受影响、仅 release 受影响、develop 判断未知、回补冲突或依赖缺失、混合提交及 squash 限制等适用场景。缺陷尽可能以同一场景证明目标版本修复前失败、修复后通过；编译或环境失败不算缺陷复现。release 必须核验实际加载的目标 Jar/产物及相关回归，develop 必须核验目标用例实际执行和有效断言。零用例、跳过、缺报告、旧版本报告不算通过。
+
+CI 失败先区分产品缺陷、合法预期变化、用例错误及环境问题，依据归因修改对应对象；只有预期变化或用例错误时修正用例，保持集成测试独立提交，不放宽断言换取绿色。CI 通过仍检查新增行为是否有有效覆盖。已有质量合同要求的未覆盖范围处置保留真实 NOT_RUN/SKIPPED/UNKNOWN，不以建票、develop 通过或本策略代替具体任务的决定及验收。
+
+## PR 默认审查人
+
+TapData 前端代码 PR 默认请求 Feynman 审查，适用于功能、缺陷及其他前端变更；当前登记的前端仓库为 `tapdata/tapdata-web`。其他仓库包含前端代码时，按实际差异判断是否适用，不把该默认值扩展为后端 PR 的唯一审查人。用户明确指定的审查安排优先；混合前后端 PR 保留必要的其他审查人，不覆盖已有请求或审查记录。
+
+在已授权的 PR 创建或提审流程中应用默认值。请求前核对 Feynman 的准确 GitHub 用户名和目标仓库可请求审查资格；显示名不能当作账号，映射未确认时仅暂停该审查请求并提示补齐，不阻塞无依赖的 PR 准备。PR 作者为 Feynman 时不能请求本人审查，交研发指定替代人。使用原生 GitHub 工具请求后回读 `requested_reviewers` 或对应审查记录，失败或结果未知如实披露，不盲目重发，不把设置审查人当作已通过审查。本规则本身不授权对既有 PR 发出通知。
+
 ## 用例缺口判断
 
 功能与缺陷共用此步骤。Agent 在方案分析时建立判断，在代码完成、报告返回或来源分支同步后按最新差异更新；不要求研发列出需要补充的用例。依据包括冻结基线到当前代码的差异、已确认验收场景、受影响 Maven 模块及上层 Jar 消费模块、现有用例的实际断言，以及目标分支的测试框架配置。
@@ -67,7 +102,7 @@ python3 <agenticops-root>/workflow/task.py runtime-path \
 
 ## CI 用例开发与质量核对
 
-框架支持且判断需要新增/修改时，Agent 在当前功能或缺陷任务的已授权工作树内完成，不等待研发补充实现细节，不建立独立 CI 用例任务。复用目标模块已有框架、fixture、命名和报告入口；不以任务便利为理由安装另一套测试框架。TapTest 继续使用其已有独立任务闭环。
+按[分支修复与测试维护](#分支修复与测试维护)确认 develop 测试维护路径后，框架支持且判断需要新增/修改时，Agent 在对应功能或缺陷任务的已授权 develop 工作树内完成，不等待研发补充实现细节，不建立独立 CI 用例任务。复用目标模块已有框架、fixture、命名和报告入口；不以任务便利为理由安装另一套测试框架。Jira 关联测试用例仍须检查；是否在当前会话开发由用户决定。TapTest 仅在用户选择当前会话开发或执行时读取其指引，不强制另建任务。
 
 1. 先从确认预期定义输入、可观察结果、边界与失败条件，再写断言；明确用例验证的行为及其验收来源。新增行为至少覆盖正常路径及与本次变更相关的异常或边界，数量按风险判断，不机械凑数。
 2. 用例与代码在同一工作树开发。检查真实调用链、断言、初始化与清理、等待超时和环境隔离；Mock 掉被验证行为的用例不能证明该行为的集成验证。数据库写入使用授权测试资源，失败也应清理本次数据。
@@ -263,6 +298,10 @@ tapdata-common-lib
 <absolute-mvn> -Dmaven.repo.local=<local_repository> clean package -T1C -pl <connector-module> -am
 ```
 
+企业版同时启用目标分支现役的 `enterprise`、`idaas` Profile，例如在原 Maven 参数中加入 `-Penterprise,idaas`。`enterprise` 选择企业实现，`idaas` 选择本地企业版 TM 的资源与运行模式；只启用前者仍可能打入默认 DFS 开发配置。IDE 勾选后刷新 Maven 依赖；CLI 用相同 Profile 重新解析并构建，核验有效 POM、可执行 Jar 内企业模块及生成的配置，不以 Jar 名称判断版本。依赖顺序仍是公共库 → 核心安装 → 企业消费模块；当前分支的原生整包入口可承担同等步骤。
+
+知识来源：[TapData 产品研发指南（v3.5.4+）](https://tapdata.feishu.cn/docx/CJz0dl9x1oJe6kxlx3wcZZL5n1b)的企业版编译与运行章节，2026-10-10 回读并与当前 POM 核对。该指南同时包含历史版本说明；JDK、Node、端口与 OpenSSL 参数以目标源码为准，不将旧示例固定为本版要求。
+
 `-pl` 指定模块，`-am` 同时构建该模块依赖的模块。只有确有反向消费验证需要时才使用 `-amd`。
 
 `-DskipTests` 可以用于临时打包或定位编译问题，但不能作为验证结果。使用该参数后，必须单独执行与变更范围匹配的测试。
@@ -288,6 +327,22 @@ Sonar 等质量检查必须通过环境变量读取服务地址和凭据：
 
 不得把服务地址、token、密码或研发工程师本机路径写入项目资产、提交信息或运行证据。
 
+### 连接器 CLI 与 Mac Debezium
+
+连接器选择、编译、注册使用 [tapdata-connectors](../skills/tapdata-connectors/SKILL.md)，命令与回读见[开发指引](tapdata-development.md#连接器编译与注册)。先核对本分支 `tapdata-cli` 是否在根 POM reactor 中；未启用时在 CLI 模块独立构建，不修改根 POM 来凑 `-pl`。模块没有继承根 POM 时，根仓库声明与 profile 不会自动传播。依赖解析失败先核对当前模块有效仓库与实际版本坐标，使用已核验仓库准备其声明依赖，保留用户原生 settings，不替换消费版本或拿其它版本 Jar 冒充。
+
+Mac 的 Debezium 失败先定位实际插件和有效配置，不直接排除模块。已在 `tapdata-connectors` 提交 `0b30754dea3685cac6f8edb232d0f886dff47249`、Apple Silicon、JDK 17 验证：PostgreSQL 的 `protoc-jar-maven-plugin:3.8.0` 自动识别 `osx-aarch_64`，因内置 `protoc 3.8.0` 没有该平台二进制失败；根 `apple-silicon` profile 的 `os.detected.classifier=osx-x86_64` 没有解决此插件的检测。该 profile 不能当作所有 Debezium 模块的通用修复，也不能把其它 protobuf 插件的 classifier 配置套给 protoc-jar。
+
+该插件原生支持 `-DprotocCommand=<已核验可执行文件绝对路径>`。本机使用插件 Jar 内 `bin/3.8.0/protoc-3.8.0-osx-x86_64.exe`，先执行 `--version` 确认 `libprotoc 3.8.0`，再通过此参数使 PostgreSQL、HighGo 两个模块及依赖的 `generate-sources` 全部成功。此结论只覆盖 protobuf 源码生成，不代表完整编译或测试通过。其它 Mac 需先核对插件版本、POM 指定 protobuf 版本及 x86_64 执行支持；不能执行时暂停此步骤，不自动安装 Rosetta 或替换 protoc 版本。Agent 可从当前任务 Maven 仓库内已下载的匹配插件 Jar 提取二进制到 runtime 私有工具目录，保留原插件；不使用共享缓存或把二进制提交入 Git。
+
+```sh
+<absolute-mvn> -Dmaven.repo.local=<local_repository> \
+  -pl connectors-common/debezium-bucket/debezium-connector-postgres,connectors-common/debezium-bucket/debezium-connector-highgo \
+  -am generate-sources -DprotocCommand=<absolute-protoc>
+```
+
+连接器脚本的 `--protoc-command <absolute-protoc>` 将同一原生参数传入完整构建。项目其它模块或插件需要其它参数时，先验证实际 POM 接口，再复用现有 Maven 执行指引，不把一次失败处理扩展为默认全项目参数。
+
 ## 前端构建与运行
 
 前端必须使用目标分支 `package.json` 声明的包管理器和脚本。当前仓库使用 pnpm 时，可按仓库脚本执行：
@@ -303,7 +358,7 @@ pnpm dev:daas
 
 ## FE 与 TM 本地运行
 
-应用启动顺序、运行目录、命令结构、运行核验与排障统一见 [TapData 开发指引](tapdata-development.md)。本页保留下面的配置输入和模板依据，不再维护独立的启动说明。TapTest 用例生成、脚本开发与执行见 [TapTest 指引](taptest-development.md)，不由 Java CI 测试流程替代。
+应用启动顺序、运行目录、命令结构、运行核验与排障统一见 [TapData 开发指引](tapdata-development.md)。本页保留下面的配置输入和模板依据，不再维护独立的启动说明。仅在用户选择当前会话处理时，TapTest 用例开发与执行见 [TapTest 指引](taptest-development.md)，不由 Java CI 测试流程替代。
 
 ## 本地工位配置输入
 

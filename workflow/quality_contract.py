@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent / "contracts"
 KEYWORDS = {"$schema", "$id", "$defs", "$ref", "title", "description", "anyOf",
             "type", "const", "enum", "properties", "required", "additionalProperties",
-            "items", "minimum", "minLength", "minItems", "pattern"}
+            "items", "minimum", "minLength", "minItems", "pattern", "allOf", "not", "uniqueItems"}
 
 
 def validate(value, schema, document=None, path="$", root=ROOT):
@@ -27,6 +27,16 @@ def validate(value, schema, document=None, path="$", root=ROOT):
         if ref.startswith("#/$defs/"):
             return validate(value, document["$defs"][ref[8:]], document, path, root)
         return validate(value, ref, path=path, root=root)
+    for option in schema.get("allOf", []):
+        validate(value, option, document, path, root)
+    if "not" in schema:
+        try:
+            validate(value, schema["not"], document, path, root)
+        except ValueError as error:
+            if "未支持" in str(error):
+                raise
+        else:
+            raise ValueError("%s 命中禁止的格式" % path)
     if "anyOf" in schema:
         # 操作使用 action 判别；报告匹配分支的字段错误，避免吞掉有效诊断。
         if isinstance(value, dict) and "action" in value:
@@ -68,6 +78,10 @@ def validate(value, schema, document=None, path="$", root=ROOT):
             elif isinstance(extra, dict):
                 validate(item, extra, document, path + "." + key, root)
     if isinstance(value, list):
+        if schema.get("uniqueItems"):
+            encoded = [json.dumps(item, sort_keys=True, ensure_ascii=False) for item in value]
+            if len(encoded) != len(set(encoded)):
+                raise ValueError("%s 数组项重复" % path)
         if len(value) < schema.get("minItems", 0):
             raise ValueError("%s 数组项数低于下限" % path)
         if "items" in schema:

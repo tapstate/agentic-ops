@@ -26,11 +26,13 @@
             "facts.implementation_plan"
           ],
           "required_when": true,
-          "collect_at": "acceptance",
+          "collect_at": "design_review",
           "decision_owner": "Engineering DRI",
           "auto_extract": false,
           "confirm_when": "value-options-dependencies-owner-change",
-          "depends_on": []
+          "depends_on": [
+            "facts.implementation_plan"
+          ]
         },
         "fix_versions": {
           "jira_id": "fixVersions",
@@ -78,6 +80,42 @@
           "depends_on": [
             "facts.acceptance_criteria"
           ]
+        },
+        "issue_analysis": {
+          "jira_id": "customfield_10092",
+          "aliases": [
+            "customfield_10092",
+            "Issue Analysis"
+          ],
+          "value_type": "string",
+          "source": [
+            "facts.implementation_plan"
+          ],
+          "required_when": false,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.implementation_plan"
+          ]
+        },
+        "fix_details": {
+          "jira_id": "customfield_10093",
+          "aliases": [
+            "customfield_10093",
+            "Fix Details"
+          ],
+          "value_type": "string",
+          "source": [
+            "repositories"
+          ],
+          "required_when": false,
+          "collect_at": "acceptance",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
         }
       },
       "transitions": [

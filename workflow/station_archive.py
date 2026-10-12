@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 
+from workflow import station_context
 from workflow import archive_store, engineering_baseline as baseline, project_rules, station_operation as operations, station_source, task_store
 
 
@@ -69,7 +70,7 @@ def verify(base, reference, task):
     if not isinstance(record, dict) or not isinstance(record.get("files"), dict):
         raise ValueError("档案正文结构无效")
     try:
-        binding = json.loads((task_store.state_path(base) / "station.json").read_text(encoding="utf-8"))
+        binding = station_context.read_binding(base)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("工位绑定无法读取") from error
     if not isinstance(binding, dict):
@@ -142,7 +143,7 @@ def publish(base, task, request, inventory, operation, check_stable=None):
     if recorded is None:
         from workflow import station_resources
         station_resources.verify_known_external(base, task)
-        binding = json.loads((task_store.state_path(base) / "station.json").read_text())
+        binding = station_context.read_binding(base)
         data = summary.encode("utf-8")
         evidence = _evidence(base, task)
         from workflow import station_artifacts

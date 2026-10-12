@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 import tempfile
 
+from workflow import station_context
 from workflow import project_rules
 
 
 def pool_path(station, name, origin):
-    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
+    binding = station_context.read_binding(station)
     return pool_path_at_root(binding["source_pool"], name, origin)
 
 
@@ -56,7 +57,7 @@ def identity(path, origin, git):
 
 @contextmanager
 def refreshed(station, name, origin, git):
-    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
+    binding = station_context.read_binding(station)
     with refreshed_at_root(binding["source_pool"], name, origin, git) as path:
         yield path
 

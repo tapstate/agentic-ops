@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 
+from workflow import station_context
 from workflow import project_rules, task_store
 
 
@@ -67,7 +68,7 @@ def reserve(base, issue_key, run_id):
     os.chmod(reservations, 0o700)
     if (archive_root / run_id).exists() or (archive_root / run_id).is_symlink():
         raise FileExistsError(run_id)
-    binding = json.loads((task_store.state_path(base) / "station.json").read_text(encoding="utf-8"))
+    binding = station_context.read_binding(base)
     station_id = binding.get("station_id")
     if not isinstance(station_id, str) or not station_id:
         raise ValueError("工位绑定缺少 station_id")

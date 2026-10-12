@@ -714,6 +714,13 @@
               "type": "string",
               "minLength": 1,
               "pattern": "\\S"
+            },
+            "body_representation": {
+              "type": "string",
+              "enum": [
+                "exact-text",
+                "literal-markdown-v1"
+              ]
             }
           },
           "required": [

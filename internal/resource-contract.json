@@ -6,6 +6,7 @@
     ".gitignore",
     ".python-version",
     "AGENTS.md",
+    "CLAUDE.md",
     "README.md",
     "adapters",
     "agenticops",

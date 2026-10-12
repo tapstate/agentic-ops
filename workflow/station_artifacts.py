@@ -10,7 +10,7 @@ import subprocess
 import stat
 import tempfile
 
-from workflow import project_rules, station_source as source
+from workflow import project_rules, station_source as source, station_layout
 from workflow.file_digest import sha256_file
 from workflow.git_environment import git_environment
 
@@ -40,7 +40,7 @@ def patch(repository, filenames, cached=False):
 
 def safe_source(base, name, filename):
     from workflow.station_resources import resource_path
-    return resource_path(base, "source/" + name + "/" + filename, leaf_link=True)
+    return resource_path(base, station_layout.relative(base, "repositories", name + "/" + filename), leaf_link=True)
 
 
 def contents(path):
@@ -81,7 +81,7 @@ def verify_special_entries(repository, reset_sha="HEAD"):
             raise ValueError("submodule 已初始化或包含内容，不支持自动重置")
 
 
-def snapshot(base, name, roots, decisions, reset_sha="HEAD", include_ignored=False):
+def snapshot(base, name, roots, decisions, reset_sha="HEAD", include_ignored=False, rules=None):
     from workflow.station_resources import fingerprint
     from workflow.station_directories import covered
     repository = source.repository_path(base, name)
@@ -97,12 +97,17 @@ def snapshot(base, name, roots, decisions, reset_sha="HEAD", include_ignored=Fal
         if include_ignored:
             untracked.add(filename)
             continue
-        if not covered("source/" + name + "/" + filename, roots):
+        if not covered(station_layout.relative(base, "repositories", name + "/" + filename), roots):
             raise ValueError("源码含未登记 ignored 产物：%s" % filename)
+    from workflow import station_clean_rules
+    rules = rules or {}
     entries = []
     head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
     for filename in sorted(changed | untracked):
-        relative = "source/" + name + "/" + filename
+        if (rules and filename not in changed and station_layout.relative(base, "repositories", name + "/" + filename) not in decisions
+                and source.untracked_discard(repository, filename, rules, reset_sha)):
+            continue
+        relative = station_layout.relative(base, "repositories", name + "/" + filename)
         if covered(relative, roots):
             if filename in changed:
                 raise ValueError("生成目录包含源码修改")

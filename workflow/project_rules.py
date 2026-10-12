@@ -78,10 +78,8 @@ def validate_project_id(project):
 
 
 def _station_binding(station):
-    path = Path(station).resolve() / ".agenticops" / "station.json"
-    if not path.is_file():
-        raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
-    return read_json_object(path)
+    from workflow import station_context
+    return station_context.read_binding(station)
 
 
 def _binding_project(binding):
