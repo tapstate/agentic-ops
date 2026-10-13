@@ -424,7 +424,10 @@ def command_detach(args, product_root, purge=False):
             purge=purge,
             allow_product_lifecycle=args.lifecycle_held,
         )
-    print("已%s %s 个工位。" % ("彻底清理" if purge else "解绑", len(targets)))
+    for station in targets:
+        if str(station) in load_registry(product_root) or (station / '.agenticops/station.json').exists():
+            raise ValueError('受管注销结果未核验：' + str(station))
+    print('已%s %s 个工位；保留 source/config 与正式档案，工程目录未删除。' % ('注销' if purge else '解绑', len(targets)))
 
 
 def command_pending(args, product_root):

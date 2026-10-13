@@ -7,17 +7,17 @@ import re
 STATE_FILE = re.compile(r"quality-[0-9a-f]{24}\.json$")
 
 
-def snapshot(model, rules, ctx, checkpoint=None):
+def snapshot(model, rules, ctx, checkpoint=None, *, check_artifacts=True):
     if checkpoint:
-        view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+        view = quality.checkpoint_view(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
         return quality.digest([view["digest"], view["decision"], view["reviewed"]])
     return quality.digest({"items": model["items"], "checkpoints": model["checkpoints"],
                            "verification": model.get("verification", {}),
                            "context": ctx, "rules": rules})
 
 
-def checkpoint_body(model, checkpoint, rules, ctx):
-    view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+def checkpoint_body(model, checkpoint, rules, ctx, *, check_artifacts=True):
+    view = quality.checkpoint_view(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
     if not view["reviewed"]:
         raise ValueError("检查点尚未有效确认，不能生成已确认评论")
     if rules.get("comment_format") == "human-text-v2":
@@ -128,7 +128,7 @@ def checkpoint_body(model, checkpoint, rules, ctx):
     return "\n\n".join(lines)
 
 
-def reduce(model, command, rules, ctx):
+def reduce(model, command, rules, ctx, *, check_artifacts=True):
     action, p = command["action"], command["payload"]
     records = model["publications"]
     key = p["id"]
@@ -137,9 +137,9 @@ def reduce(model, command, rules, ctx):
         if previous and previous["status"] in ("intent", "unknown", "created", "verified"):
             raise ValueError("该草稿已准备发送或已发送，保留现场；不得覆盖")
         cp = p.get("checkpoint")
-        if cp and p["body"] != checkpoint_body(model, cp, rules, ctx):
+        if cp and p["body"] != checkpoint_body(model, cp, rules, ctx, check_artifacts=check_artifacts):
             raise ValueError("检查点评论必须使用 status 返回的完整 publication_body，不能省略已确认方案或风险")
-        records[key] = {"body": p["body"], "status": "draft", "snapshot": snapshot(model, rules, ctx, cp),
+        records[key] = {"body": p["body"], "status": "draft", "snapshot": snapshot(model, rules, ctx, cp, check_artifacts=check_artifacts),
                         "site": rules["jira"]["site"], "issue_key": ctx["issue_key"]}
         if cp:
             records[key]["checkpoint"] = cp
@@ -149,7 +149,7 @@ def reduce(model, command, rules, ctx):
     if not record:
         raise ValueError("草稿不存在")
     if action in ("confirm", "prepare_write"):
-        if p["digest"] != record["digest"] or record["snapshot"] != snapshot(model, rules, ctx, record.get("checkpoint")):
+        if p["digest"] != record["digest"] or record["snapshot"] != snapshot(model, rules, ctx, record.get("checkpoint"), check_artifacts=check_artifacts):
             raise ValueError("草稿正文或质量事实已变化，需要重新生成并确认")
         if action == "confirm":
             if record["status"] not in ("draft", "confirmed"):

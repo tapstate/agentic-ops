@@ -1,12 +1,26 @@
 # 任务接管与授权
 
+本版任务档案只保存会话与处理状态，运行日志和报告正文不入档。会话来源、原文覆盖及截止点以[工位合同](../architecture/single-task-station.md#会话输入与覆盖)为准。未提交源码通过独立 export 或精确 discard 处置，不把摘要当成源码备份。默认清理输出聚合摘要，`--details` 查看完整精确清单；`station_export.py --input <JSON>` 接受精确 path/output 数组并沿用原单文件格式、意图及回执。
+
+归档可行性预检、有界失败输出、声明来源覆盖、收尾输入及最小退出回执以[统一退出优化目标](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)为准。当前源码使用 epoch 29；原安装须独立核验版本。范围盘点成功不能代替正文容量、内容和覆盖验收。原版清理中制品移除导致日志读取异常时，先使用匹配版本的兼容修复恢复原操作，不重建制品、手改状态或切新版解析旧任务；[质量读取边界](quality-checkpoints.md#历史重放与清理收尾读取)区分历史可读与当前有效。
+
+clean/release 默认要求完整可见原文，显式 `require_complete_conversation=false` 不豁免缺口；无法取得时须提供导出，或以 `accept_conversation_digest` 和真实 `decision_ref` 接受当前覆盖。每份会话输入不超过16MiB，会话与任务正文编码后总量64MiB；控制 JSON 按专用读取器校验后投影，不套用会话输入限额。原 epoch27 修复候选可用 `station-clean.py --archive-runtime none --details` 预览，再由 `cleanup-amend` 精确确认原计划子集；新版不解析旧 epoch 的现场。
+
 本页说明单工位脚本操作。实际 Jira 事实须由已配置原生工具读取，本地 takeover 不替代 Jira 准入。完整四操作、退出与精确清单输入见[项目任务 Skill](../../projects/tapdata/skills/tapdata-task/SKILL.md)；质量输入见[质量检查与证据](quality-checkpoints.md)。
+
+## 材料预检与收尾录入
+
+`station-clean.py --dir <station> --check` 只读检查实际材料；与 `--input <工位外确认请求.json>` 组合可核验确认请求。分别读取 `scope_complete`、`archive_ready`、`execution_ready`，范围盘点成功不表示可归档或可执行。默认输出最多64KiB；`--details --output <工位外私有新文件>` 保存完整清单，不覆盖已有文件，也不能写入工位或产品根目录。
+
+先准备来源范围和 conversation 分块，格式见[会话来源与截止点合同](../architecture/single-task-station.md#会话来源与最小退出回执)。工位外清单包含 `schema_version:1`、`issue_key`、`run_id` 和 `files` 数组，每项填写 `kind`（conversation/conversation-scope）、绝对 `path`、实际 `size` 和完整 `sha256`。使用 `station-clean.py --dir <station> --check --conversation-input <工位外清单.json>` 只读预览；去掉 `--check` 并提供当前 `--issue-key`、`--expected-run-id`、`--expected-revision` 后仅录入，仍不确认或执行退出。
+
+completed 收尾可用 `task.py interaction-path --purpose exit` 分配当前 run 的普通输入位置。未完成 archive/clean/release 的输入清单另须绑定原 `operation_id`、当前任务 `revision`、原 `plan_digest`；interaction-path 对应提供 `--operation-id`、`--expected-revision`、`--expected-plan-digest`。冻结前补录若改变范围，须沿原 cleanup-amend 确认；未发布的冻结草稿只能使用 `cleanup-amend --conversation-input <同一外部清单>` 持锁修订。正式档案发布后禁止补写正文，后续实际结果进入 receipts。部分写入中断后复用同一清单恢复，不能新建操作或改原请求绕过。
 
 ## 清理范围决策视图
 
-`station-clean.py` 预检返回 `cleanup_scope`：`remove_or_reset` 列目录回收及每仓复位目标，`preserve_before_clear` 列源码成果处置及日志报告保全，`retain` 列配置、仓库及引用、已登记分支/PR、工位接线和正式档案，`unknown` 列尚未核验对象。每项说明原因及允许的决定；保留源码仓库不等于保留工作区修改。
+`station-clean.py` 预检返回 `cleanup_scope`：`remove_or_reset` 列目录回收及每仓复位目标，`preserve_before_clear` 列源码独立保全处置，`retain` 列配置、仓库及引用、已登记分支/PR、工位接线和正式档案，`unknown` 列尚未核验对象。每项说明原因及允许的决定；保留源码仓库不等于保留工作区修改。
 
-该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码 archive/export/discard；丢弃仍需精确快照确认，分支/PR 默认保留；用户精确确认后可纳入同一次清理计划，在分支/PR 阶段处置，也可在释放后按独立授权处置原档案对象。普通重置授权不包含删除分支或关闭 PR。核心持久目录销毁不是任务清理选项。
+该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码独立 export/discard；丢弃仍需精确快照确认，分支/PR 默认保留；用户精确确认后可纳入同一次清理计划，在分支/PR 阶段处置，也可在释放后按独立授权处置原档案对象。普通重置授权不包含删除分支或关闭 PR。核心持久目录销毁不是任务清理选项。
 
 恢复展示原计划和已完成/待完成步骤，范围漂移按原 cleanup-amend 处理；运行根内部正常生成物不逐文件重做授权。完成时展示原范围、实际步骤回执及档案引用，空闲预检不执行清理。视图错误不代表已成功的生命周期操作失败，先回读原操作，不重复执行。
 
@@ -119,6 +133,8 @@ python3 "$agenticops_root/workflow/authorization.py" reconfirm \
 
 执行前核对 `show --digest` 的原授权摘要与 `quality.py status` 的已确认 Q2 摘要。命令只替换 Q2 绑定，追加 `reconfirmations` 历史；有效期、Agent、实施范围、基线、质量执行记录和阶段保持不变。旧授权与目标 Q2 任一变化、Q2 未确认、原授权到期或撤销、Q1 或实施绑定变化时拒绝。重复请求不会覆盖历史；结果不明时先回读再判断，不能自动刷新摘要重放。
 
+原授权同时到期时，已有明确决定覆盖当前验收方案及续签的，可复用该真实确认来源，在上述 `reconfirm` 请求增加 `--renew-ttl-hours <小时数>`。该显式参数只允许忽略原有效期已过，仍核验原授权摘要、当前已确认的 Q2、run、实施计划、仓库及 Project endpoint；Q1 默认仍必须一致。新有效期必须为有限的未来时间且晚于原有效期。重新绑定与续期在同一工位锁内一次原子写入，在同一 `reconfirmations` 条目保留旧、新有效期；任何检查失败不写入。未提供参数仍拒绝过期授权，普通 `renew` 仍拒绝 Q2 变化。不得通过先改状态或自动重放完成恢复。
+
 项目配置更正导致 Q1 摘要变化时，先核对接管事实并通过质量 CLI 重新确认 Q1，再显式提供 `--expected-q1-digest <已确认的当前Q1摘要>`。该参数只允许绑定已经有效确认的目标 Q1，并追加旧、新 Q1 摘要；未提供时仍要求 Q1 不变。实施计划事实与完整仓库绑定仍必须一致，不能用配置修复扩大范围。有效事实和用户决定可复用，执行证据不得改写。
 
 该入口不扩大实施授权。新增可选历史字段兼容既有工位 epoch；不迁移旧任务，旧授权与仅续签的回归继续保留。确认来源只记录可回查决定，不提供身份认证。
@@ -167,7 +183,7 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --abandon-changes yes
 ```
 
-预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样默认归档；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
+预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样须明确独立导出或精确丢弃；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
 
 停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source；按计划快进开发分支并回收列明的受管基线引用，不追随远端最新提交。
 
@@ -193,7 +209,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 意图包含稳定 disposition_id、phase=intent、object_id、resource_type、action、before、真实 decision_ref 和不含 confirmed_digest 的意图摘要 confirmed_digest；回读包含同一 disposition_id/object_id、phase=readback、intent_digest、实际 readback_ref，以及 deleted/closed 状态。记录工具不代替远端操作，也不把本地夹具回读当作真实 GitHub 验证。
 
-关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
+运行日志与报告正文不进入任务档案，必要验证结果和报告引用进入任务状态；具体内容与边界以工位合同为准。
 
 重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。不兼容工位先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；解绑成功后才切换产品并重新初始化，详见[更新与回退](update-and-rollback.md)。目标版本不解析或迁移旧任务，repair 不跨代际采用。
 

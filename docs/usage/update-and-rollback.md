@@ -1,8 +1,24 @@
 # 更新与回退
 
-PR Ready 回读闭环与新评论表示使用 epoch 27。epoch 26 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
+当前会话准入、来源范围和收尾输入使用 epoch 29。epoch 28 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
+
+## 同 epoch 恢复与跨 epoch 切换的目标入口
+
+“原版无法退出，而修复版跨 epoch”的完整解法及定点更新、原版本维护恢复、预检和有限续接入口由[工位合同](../architecture/single-task-station.md#同-epoch-恢复与跨-epoch-切换目标设计)统一维护，属于[完整退出优化](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)的产品切换部分，本页不另定义规则。当前源码已提供入口；旧安装是否具备能力须回读实际提交与帮助，源码可用不代表旧安装已应用。无参 update 仍跟随原记录分支，定点更新不能换通道。原版纯历史重放及合法退出修复先在原 epoch 验收，新默认会话准入不混入兼容补丁，不要求旧现场先升 epoch 才能清理。
+
+当前遇到此循环时，先核实原版本退出缺陷和适用的兼容修复，复用原版本维护成果；尚无受信、可验证的应用路径时保全旧现场并停在恢复应用之前。不要手改 epoch、复制新版文件覆盖安装、删除登记，或把独立新版启动当作旧工位已退出。补丁应用、真实退出和最终升级分别核验，工作进展及待验证项记录在 Jira。
+
+安装入口支持以下参数，命令中的 SHA 必须由修复、审查及验收证据选定：
+
+```sh
+<product-root>/agenticops update --to-ref <目标完整SHA> --expected-current-ref <原完整SHA> --check
+<product-root>/agenticops update --to-ref <目标完整SHA> --expected-current-ref <原完整SHA> --writers-stopped
+<product-root>/agenticops recover-install --source-branch <维护分支> --to-ref <补丁完整SHA> --expected-current-ref <原完整SHA> --check
+```
+
+定点或维护恢复有登记工位时，执行前核验全部共享产品调用停写并声明 `--writers-stopped`。安装中断只用原模式、来源及原/目标 SHA 加 `--resume` 续接；它不恢复业务任务。第一次旧客户端没有入口时，从已审查的匹配候选执行 `python3 <候选>/bootstrap/installation_update.py --product-root <原安装> --mode update|recover-install`，加同样的完整参数；只支持已回归的 product.json schema 2、单 epoch 清单及 stations.json schema 1，不在线迁移旧状态。
 
 ## 共享 Skill 资源与接线
 

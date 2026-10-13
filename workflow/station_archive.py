@@ -1,4 +1,4 @@
-"""正式档案原子发布与回读；只保存经过敏感检查的显式总结，不复制会话日志。"""
+"""正式档案原子发布与回读；保存会话与任务状态；原子发布和追加终态回执。"""
 from __future__ import annotations
 
 import hashlib
@@ -30,27 +30,46 @@ def redact_evidence(rules, value, key=""):
     return value
 
 
-def _evidence(base, task):
+def _evidence(base, task, overrides=None, documents_input=None):
     rules = project_rules.load_admission(station=base)
     def redact(value):
         return redact_evidence(rules, value)
     documents = {"current": redact({key: value for key, value in task.items() if key not in ("_revision", "repositories")})}
-    directory = task_store.state_path(base) / "evidence"
-    if directory.is_symlink():
-        raise ValueError("活动证据目录不能是符号链接")
-    if directory.exists():
-        for path in sorted(directory.glob("*.json")):
-            if path.is_symlink() or not path.is_file():
-                raise ValueError("活动证据不是普通文件")
-            if path.stat().st_size > 16 * 1024 * 1024:
-                raise ValueError("证据过大，请先生成脱敏摘要")
-            documents[path.name] = redact(json.loads(path.read_text(encoding="utf-8")))
+    from workflow import station_records, station_resources, quality, jira_status, jira_watermark, external_sync
+    documents_input = station_records.read_documents(base, task, overrides) if documents_input is None else documents_input
+    coverage = station_records.conversations(base, task, documents_input)
+    for name, row in documents_input.items():
+        value = row['value']
+        if name.startswith('conversation'):
+            documents[name] = redact(station_records.conversation_projection(value) if value.get('kind') == 'conversation' else station_records.validate_scope(value, task))
+        else:
+            if name == 'resources.json':
+                station_resources.inventory(base, task)
+            elif value is not None:
+                if not isinstance(value, dict) or not isinstance(value.get('run_id'), str):
+                    raise ValueError('已知控制证据结构无效：' + name)
+                related = dict(task, run_id=value['run_id'])
+                module = quality if name.startswith('quality-') else jira_status if name.startswith('jira-status-') else jira_watermark if name.startswith('jira-watermark-') else external_sync
+                state_path = module.state_path(base, related)
+                if state_path.name != name:
+                    raise ValueError('控制证据文件名与 run 不匹配')
+                if module in (quality, external_sync):
+                    module.load(base, related)
+                else:
+                    module.load_state(base, related)
+            documents[name] = {'source_ref': 'evidence/' + name, 'sha256': row['sha256'], 'size': row['bytes'],
+                'state': redact(station_records.evidence_projection(name, value, task))}
     authorization = task_store.state_path(base) / "authorization.json"
     if authorization.is_symlink():
         raise ValueError("授权文件不能是符号链接")
     if authorization.exists():
         documents["authorization"] = redact(json.loads(authorization.read_text(encoding="utf-8")))
-    return json.dumps(documents, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+    from workflow import station_records
+    documents["conversation_coverage"] = coverage
+    data = json.dumps(documents, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+    if len(data) > station_records.MAX_TOTAL_BYTES:
+        raise ValueError("任务记录超过归档总量上限")
+    return data
 
 
 def verify(base, reference, task):
@@ -129,6 +148,46 @@ def recover_published(base, task, operation):
     return reference
 
 
+def record_metadata(base, task, summary, reason, inventory, data, evidence, artifacts, logs):
+    binding = station_context.read_binding(base)
+    return {"schema_version": 1, "station_id": binding["station_id"],
+                "issue_key": task["issue_key"], "run_id": task["run_id"],
+                "task_result": "completed" if task.get("outcome") == "completed" and task.get("terminal_proof") else "incomplete",
+                "stage": task["stage"], "reason": reason,
+                "engineering_baseline_digest": task.get("engineering_baseline", {}).get("digest"),
+                "source_observation": station_source.inspect(base, task["engineering_baseline"]) if task.get("engineering_baseline", {}).get("status") == "frozen" else {},
+                "resource_inventory_digest": inventory.get("digest"),
+                "resource_inventory": [{"id": baseline.digest(entry), "disposition": entry.get("action", "unknown")} for entry in inventory.get("entries", [])],
+                "terminal_proof_digest": baseline.digest(task.get("terminal_proof")),
+                "evidence_policy": "保存脱敏会话与任务状态；正文为归档截止点快照，终态由同 run/op 回执补全",
+                "files": {"summary.md": {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()},
+                          "evidence.json": {"size": len(evidence), "sha256": hashlib.sha256(evidence).hexdigest()},
+                          "source-artifacts.json": {"size": len(artifacts), "sha256": hashlib.sha256(artifacts).hexdigest()},
+                          "runtime-evidence.json": {"size": len(logs), "sha256": hashlib.sha256(logs).hexdigest()}}}
+
+
+def prepare_material(base, task, request, inventory, overrides=None, *, require_source_choices=True):
+    """正式归档与无写入预检共享同一材料准入、脱敏和实际编码预算。"""
+    summary = baseline.text(request.get('summary'), '归档总结')
+    reason = baseline.text(request.get('reason'), '归档原因')
+    if project_rules.scan_sensitive(project_rules.load_admission(station=base), summary + '\n' + reason):
+        raise ValueError('总结或原因包含敏感内容，请先脱敏')
+    from workflow import station_records, station_logs, station_resources
+    station_resources.verify_known_external(base, task)
+    if require_source_choices:
+        station_records.verify_source_choices(inventory)
+    inputs = station_records.read_documents(base, task, overrides)
+    coverage = (station_records.verify_decision(base, task, request, inputs)
+        if require_source_choices or request.get('require_complete_conversation') or request.get('accept_conversation_digest')
+        else station_records.conversations(base, task, inputs))
+    material = {'summary': summary.encode('utf-8'), 'evidence': _evidence(base, task, overrides, inputs),
+                'artifacts': station_records.artifact_manifest(base, task, inventory),
+                'logs': station_logs.material(base, task, inventory), 'coverage': coverage}
+    material['record'] = record_metadata(base, task, summary, reason, inventory,
+        *(material[key] for key in ('summary', 'evidence', 'artifacts', 'logs')))
+    return material
+
+
 def publish(base, task, request, inventory, operation, check_stable=None):
     if task.get("archive_ref"):
         verify(base, task["archive_ref"], task)
@@ -144,26 +203,11 @@ def publish(base, task, request, inventory, operation, check_stable=None):
         from workflow import station_resources
         station_resources.verify_known_external(base, task)
         binding = station_context.read_binding(base)
-        data = summary.encode("utf-8")
-        evidence = _evidence(base, task)
-        from workflow import station_artifacts
-        artifacts = station_artifacts.material(base, task, inventory)
-        from workflow import station_logs
-        logs = station_logs.material(base, task, inventory)
-        recorded = {"schema_version": 1, "station_id": binding["station_id"],
-                    "issue_key": task["issue_key"], "run_id": task["run_id"],
-                    "task_result": "completed" if task.get("outcome") == "completed" and task.get("terminal_proof") else "incomplete",
-                    "stage": task["stage"], "reason": reason,
-                    "engineering_baseline_digest": task.get("engineering_baseline", {}).get("digest"),
-                    "source_observation": station_source.inspect(base, task["engineering_baseline"]) if task.get("engineering_baseline", {}).get("status") == "frozen" else {},
-                    "resource_inventory_digest": inventory.get("digest"),
-                    "resource_inventory": [{"id": baseline.digest(entry), "disposition": entry.get("action", "unknown")} for entry in inventory.get("entries", [])],
-                    "terminal_proof_digest": baseline.digest(task.get("terminal_proof")),
-                    "evidence_policy": "保存脱敏结构化证据与总结；原始日志及交互材料不进入档案",
-                    "files": {"summary.md": {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()},
-                              "evidence.json": {"size": len(evidence), "sha256": hashlib.sha256(evidence).hexdigest()},
-                              "source-artifacts.json": {"size": len(artifacts), "sha256": hashlib.sha256(artifacts).hexdigest()},
-                              "runtime-evidence.json": {"size": len(logs), "sha256": hashlib.sha256(logs).hexdigest()}}}
+        from workflow import station_records
+        material = prepare_material(base, task, station_records.effective_request(operation), inventory,
+                                    require_source_choices=operation['kind'] != 'archive')
+        data, evidence, artifacts, logs = (material[key] for key in ('summary', 'evidence', 'artifacts', 'logs'))
+        recorded = material['record']
         operation["archive_logs"] = logs.decode("utf-8")
         operation["archive_artifacts"] = artifacts.decode("utf-8")
         operation["archive_evidence"] = evidence.decode("utf-8")

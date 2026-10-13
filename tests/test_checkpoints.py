@@ -299,6 +299,51 @@ class CheckpointTests(unittest.TestCase):
                     with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
                 self.assertEqual(before, (self.auth_path.read_bytes(), self.read()))
 
+    def test_expired_reconfirm_with_explicit_renewal_is_atomic_and_replay_safe(self):
+        record = self.confirmation("ci_validation", expired=True)
+        args = self.renewal(record, expected_q2_digest="new-q2", renew_ttl_hours=4)
+        before = self.read()
+        with mock.patch.object(authorization.quality, "q2_digest", return_value="new-q2"):
+            with mock.patch.object(task_store, "_write_json_atomic", side_effect=OSError("write failed")):
+                with self.assertRaises(OSError): authorization.cmd_reconfirm(args)
+            self.assertEqual(json.loads(self.auth_path.read_text()), record)
+            self.assertEqual(authorization.cmd_reconfirm(args), 0)
+            with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+        updated = json.loads(self.auth_path.read_text())
+        self.assertEqual(self.read(), before)
+        self.assertGreater(updated["expires_at_epoch"], time.time())
+        for key in record:
+            if key not in ("approved_q2_digest", "expires_at_epoch"):
+                self.assertEqual(updated[key], record[key])
+        self.assertEqual(updated["reconfirmations"][0]["previous_expires_at_epoch"], record["expires_at_epoch"])
+        self.assertEqual(updated["reconfirmations"][0]["expires_at_epoch"], updated["expires_at_epoch"])
+
+    def test_expired_reconfirm_renewal_rejects_drift_and_invalid_ttl_without_writes(self):
+        for change in ("revoked", "scope", "plan", "q1", "q2", "unconfirmed", "endpoint",
+                       "zero", "nan", "infinity", "shorter"):
+            with self.subTest(change=change):
+                record = self.confirmation("ci_validation", expired=change != "shorter")
+                args = self.renewal(record, expected_q2_digest="new-q2", renew_ttl_hours=4)
+                if change == "revoked": record["status"] = "revoked"
+                elif change == "scope": self.state["repositories"][0]["approved_scope"] = "expanded"
+                elif change == "plan": self.state["facts"]["fix_plan"] = "changed"
+                elif change == "q1": record["approved_q1_digest"] = "changed"
+                elif change == "q2": args.expected_q2_digest = "stale"
+                elif change == "zero": args.renew_ttl_hours = 0
+                elif change == "nan": args.renew_ttl_hours = float("nan")
+                elif change == "infinity": args.renew_ttl_hours = float("inf")
+                elif change == "shorter": args.renew_ttl_hours = 0.01
+                self.save()
+                task_store._write_json_atomic(self.auth_path, record)
+                args.expected_authorization_digest = authorization.record_digest(record)
+                before = self.auth_path.read_bytes(), self.read()
+                with mock.patch.object(authorization.quality, "q2_digest", return_value="new-q2",
+                                       side_effect=ValueError("unconfirmed") if change == "unconfirmed" else None), \
+                        mock.patch.object(authorization, "check_catalog_bindings",
+                                          side_effect=ValueError("endpoint drift") if change == "endpoint" else None):
+                    with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+                self.assertEqual(before, (self.auth_path.read_bytes(), self.read()))
+
     def test_reconfirm_q1_requires_explicit_current_digest_and_preserves_original_scope(self):
         record = self.confirmation("ci_validation")
         args = self.renewal(record, expected_q2_digest="new-q2")

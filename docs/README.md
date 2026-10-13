@@ -1,5 +1,9 @@
 # AgenticOps 文档总纲
 
+归档、清理与升级按完整退出场景统一设计，目标是保留会话和任务状态、一次明确处置并可靠退出，再按需要升级。[工位合同的统一退出优化目标](architecture/single-task-station.md#归档清理与升级的统一退出优化目标)维护材料预检、会话覆盖、收尾输入、外部意图核验、PR 与最终验收一致性、注销及结果解释的唯一设计；其中[升级恢复部分](architecture/single-task-station.md#同-epoch-恢复与跨-epoch-切换目标设计)维护 Bootstrap 的定点更新、原版本维护恢复和首次旧客户端边界。[质量指引](usage/quality-checkpoints.md#历史重放与清理收尾读取)负责历史重放与实时核验的职责区分，操作指引导航使用入口，PROD-001/003 分别维护升级及退出验收。Jira AO-238 管理合并方案，AO-239/240 分别管理兼容恢复与后续退出合同；源码入口不作为原安装已应用或业务工位处置授权，不改变现役 update 的跟踪分支及兼容检查。
+
+任务退出优化以“保存会话与任务处理状态，并安全重置工位”为目标，范围包括归档内容、独立源码保全、一次处置确认、预检和失败恢复。[工位合同的目标设计](architecture/single-task-station.md#任务记录归档与重置的目标设计)保存唯一设计正文，并区分现役行为、原版本兼容修复与后续不兼容变更；任务授权指引负责操作用法，PROD-003 负责场景验收。实施工作、评审意见及真实现场恢复证据由 Jira AO-235、AO-236 和 AO-237 管理，不在文档树维护执行计划。本版合同不授权直接清理旧 epoch 工位，旧现场仍由原版本处理。
+
 受管技能的调用与帮助交互由 [Skill 维护规范](skill-maintenance.md#技能调用与帮助)统一定义，覆盖源码维护根和业务工位的维护、共享、项目技能。源码 `AGENTS.md`、只引用它的 `CLAUDE.md` 与工位模板负责导航到同一合同；操作与示例取自现役技能，不建立第二份技能操作清单。
 
 TapData 指定连接器的编译和注册由 [连接器能力](../projects/tapdata/skills/tapdata-connectors/SKILL.md)进入，[项目开发指引](../projects/tapdata/runbooks/tapdata-development.md#连接器编译与注册)维护操作、制品和回读合同。可独立编译、独立注册或组合执行，复用当前工位源码、Maven 隔离和命名开发环境，不重建整套环境。
@@ -8,7 +12,7 @@ TapData 指定连接器的编译和注册由 [连接器能力](../projects/tapda
 
 任务中途升级后的接续以 Jira 任务为入口，GitHub 保存远端代码、PR 和 CI 成果；目标见[项目目标](strategy/project-goals.md)，本地运行与外部成果的边界见[工位合同](architecture/single-task-station.md#从任务事实接续)。[任务授权指引](usage/task-authorization.md#从-jira-任务接续)负责记录、缺项补全和重新接管，[更新与回退](usage/update-and-rollback.md#任务处理中升级后继续)负责产品切换顺序，共享 [ao-task-resume](../skills/shared/ao-task-resume/SKILL.md) 指导 Agent 使用现役入口。各文档不维护逐 epoch 迁移规则或独立交接台账。
 
-[质量检查与证据](usage/quality-checkpoints.md)维护阶段评论、Issue Analysis 实施方案、Fix Details 修复总结和 GitHub PR Ready 回读闭环；提审含具体 Checks 例外，仍保留真实结果与独立合并授权。新客户端的兼容边界为 epoch 27，旧工位退出与重建遵循[更新与回退](usage/update-and-rollback.md)。
+[质量检查与证据](usage/quality-checkpoints.md)维护阶段评论、Issue Analysis 实施方案、Fix Details 修复总结和 GitHub PR Ready 回读闭环；提审含具体 Checks 例外，仍保留真实结果与独立合并授权。当前兼容边界以[机器清单](../contracts/station-state-compatibility.json)为准，旧工位退出与重建遵循[更新与回退](usage/update-and-rollback.md)。
 
 TapData 工位 Docker 开发环境以统一运行配置、多份命名环境和唯一活动现场为目标：[开发环境 Skill](../projects/tapdata/skills/tapdata-test-env/SKILL.md)负责收集架构与运行配置、执行生命周期及验收，[开发环境指引](../projects/tapdata/runbooks/test-environment.md)维护输入、命名、外部 MongoDB、同一 Compose 项目和恢复合同。[TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md#3-构建并装配)负责 Agent 内部的工具准备、源码构建、完整 Launcher 装配及项目辅助脚本；[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven/Profile、原生 CLI 仓库继承及 Mac Debezium protoc 参数等项目知识；编译兼容性结论注明实际验证范围。运行配置与 Agent 管理的 preparation 文件分离，旧版完整配置继续读取，不自动迁移；不改变 `.agenticops/` 状态或 station_state_epoch，不建立环境池。
 

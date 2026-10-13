@@ -208,7 +208,7 @@ def cmd_watch(args):
         if verdict in ("unknown", "skipped"):
             _log(state, args, verdict, head, [], checks)
             save_state(args.dir, issue, args.pr, state)
-            print("检查含未知或跳过结果，需用户核对目标用例并决定处理。")
+            print("检查含未知或跳过结果：先核对项目要求、触发条件和目标用例实际执行；复用覆盖当前 Head 与检查集合的有效决定，只有真实缺口需要补充决定。")
             return 3
         if verdict == "failure":
             _log(state, args, "failure", head, failing, checks)

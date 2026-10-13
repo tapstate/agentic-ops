@@ -55,7 +55,7 @@ def verify_receipt(base, task, entry):
         raise ValueError('源码导出回执与当前决定不一致')
 
 
-def export(base, issue, run, relative, destination, expected_operation_id=None):
+def export(base, issue, run, relative, destination, expected_operation_id=None, *, _plan=None, _defer=False):
     from workflow import station_resources as resources
     with task_store.task_state_lock(base):
         task = task_store.check_expected_run(base, issue, run)
@@ -75,7 +75,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         from workflow import station_operation
         operation = station_operation.read(base) or {}
         version = operation.get("cleanup_plan", {}).get("schema_version", 6)
-        plan = resources.plan(base, task, version=version, decisions_override={relative: {"action": "archive"}})
+        plan = _plan if _plan is not None else resources.plan(base, task, version=version, decisions_override={relative: {"action": "archive"}})
         entry = next((item for item in plan['entries'] if item['path'] == relative), None)
         if entry is None:
             raise ValueError('导出路径不属于当前源码成果')
@@ -123,7 +123,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         if sha256_file(target) != checksum:
             raise ValueError('导出文件回读失败，拒绝登记保存决定')
         # 写出期间源码有任何变化时，不把刚生成的旧成果当成当前成果。
-        if resources.plan(base, task, version=version, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
+        if not _defer and resources.plan(base, task, version=version, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
             raise ValueError('导出期间源码变化，请保留导出并重新核对')
         choice = {'action': 'export', 'path': str(target), 'sha256': checksum, 'snapshot': proof,
                   'readback_ref': receipt_reference(base, task, path)}
@@ -131,9 +131,57 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         if path.exists() and json.loads(path.read_text()) != receipt:
             raise ValueError('导出回执不可覆盖')
         task_store._write_json_atomic(path, receipt)
-        resources.register(base, issue, run, [{'kind': 'source-disposition', 'producer': 'workflow-export',
-                                             'path': relative, 'preservation': choice}], expected_operation_id)
+        if not _defer:
+            resources.register(base, issue, run, [{'kind': 'source-disposition', 'producer': 'workflow-export',
+                                                 'path': relative, 'preservation': choice}], expected_operation_id)
         return {'source': relative, 'path': str(target), 'sha256': checksum, 'readback_ref': choice['readback_ref']}
+
+
+def export_batch(base, issue, run, items, expected_operation_id=None):
+    """逐项沿原格式发布；末次全范围核验后才一次登记删除覆盖。"""
+    from workflow import station_resources as resources
+    with task_store.task_state_lock(base):
+        task = task_store.check_expected_run(base, issue, run)
+        resources.registration_state(base, task, expected_operation_id)
+        if not isinstance(items, list) or not items:
+            raise ValueError('批量导出需要非空精确路径数组')
+        if any(not isinstance(row, dict) or set(row) != {'path', 'output'}
+               or not all(isinstance(v, str) and v for v in row.values()) for row in items):
+            raise ValueError('每项必须提供 path/output')
+        if len({row['path'] for row in items}) != len(items) or len({str(Path(row['output']).resolve()) for row in items}) != len(items):
+            raise ValueError('批量导出路径或目标重复')
+        overrides = {row['path']: {'action': 'archive'} for row in items}
+        plan = resources.plan(base, task, decisions_override=overrides)
+        entries = {row['path']: row for row in plan['entries']}
+        if not set(overrides) <= set(entries):
+            raise ValueError('批量路径不属于当前源码成果')
+        result = []
+        for row in items:
+            result.append(export(base, issue, run, row['path'], row['output'], expected_operation_id, _plan=plan, _defer=True))
+        current = resources.plan(base, task, decisions_override=overrides)
+        # 导出自身的意图/回执写入 evidence；只排除本批已核验的精确文件。
+        owned = set()
+        for row in result:
+            proof = {k: entries[row['source']][k] for k in ('head', 'before', 'before_index', 'index_patch', 'worktree_patch')}
+            receipt = receipt_path(base, task, row['source'], proof, row['path'])
+            if task_store.state_path(base) in receipt.parents:
+                owned.update(str(p.relative_to(task_store.state_path(base))) for p in (receipt, receipt.with_suffix('.intent.json')))
+        def stable(value):
+            value = copy.deepcopy(value)
+            value.pop('digest', None)
+            for path in owned:
+                value['active_state']['files'].pop(path, None)
+            return value
+        if stable(current) != stable(plan):
+            raise ValueError('导出期间源码或范围变化；保留成功文件，不登记当前覆盖')
+        registration = []
+        for row in result:
+            proof = {k: entries[row['source']][k] for k in ('head', 'before', 'before_index', 'index_patch', 'worktree_patch')}
+            registration.append({'kind': 'source-disposition', 'producer': 'workflow-export', 'path': row['source'],
+                                 'preservation': {'action': 'export', 'path': row['path'], 'sha256': row['sha256'],
+                                                  'snapshot': proof, 'readback_ref': row['readback_ref']}})
+        resources.register(base, issue, run, registration, expected_operation_id)
+        return result
 
 
 def main():
@@ -141,12 +189,21 @@ def main():
     parser.add_argument('--dir', required=True)
     parser.add_argument('--issue-key', required=True)
     parser.add_argument('--expected-run-id', required=True)
-    parser.add_argument('--path', required=True)
-    parser.add_argument('--output', required=True)
+    parser.add_argument('--path')
+    parser.add_argument('--input', help='批量精确 path/output JSON 数组')
+    parser.add_argument('--output')
     parser.add_argument('--expected-operation-id')
     args = parser.parse_args()
     try:
-        print(json.dumps(export(args.dir, args.issue_key, args.expected_run_id, args.path, args.output, args.expected_operation_id), ensure_ascii=False))
+        if args.input:
+            if args.path or args.output:
+                raise ValueError('批量 input 不能与 path/output 混用')
+            result = export_batch(args.dir, args.issue_key, args.expected_run_id, json.loads(Path(args.input).read_text()), args.expected_operation_id)
+        else:
+            if not args.path or not args.output:
+                raise ValueError('单份导出需要 path/output')
+            result = export(args.dir, args.issue_key, args.expected_run_id, args.path, args.output, args.expected_operation_id)
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     except (OSError, ValueError) as error:
         print('错误：%s' % error, file=sys.stderr)

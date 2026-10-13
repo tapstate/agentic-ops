@@ -105,7 +105,7 @@ def cmd_lifecycle(args):
                    plan_digest=plan.get("digest"), retained=plan.get("retained", []))
     from workflow import station_clean_view
     summary["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), plan or None, result)
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    station_clean_view.emit(summary, details=getattr(args, 'details', False))
     return 0
 
 
@@ -126,7 +126,9 @@ def cmd_cleanup_preflight(args):
     from workflow import station_resources
     with task_store.task_state_lock(args.dir):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
-        print(json.dumps(station_resources.preflight(args.dir, task), ensure_ascii=False, indent=2))
+        from workflow import station_clean, station_clean_view, station_operation
+        station_clean_view.emit(station_clean.check(args.dir, task, operation=station_operation.read(args.dir)),
+                                details=getattr(args, 'details', False))
     return 0
 
 
@@ -153,11 +155,13 @@ def cmd_source_readiness(args):
 
 
 def cmd_cleanup_amend(args):
-    from workflow import station
-    request = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    request["expected_plan_revision"] = args.expected_plan_revision
-    print(json.dumps(station.amend_cleanup(args.dir, args.issue_key, args.expected_run_id,
-        args.expected_revision, args.operation_id, args.expected_plan_digest, request), ensure_ascii=False, indent=2))
+    from workflow import station, station_clean_view
+    request = json.loads(Path(args.input).read_text(encoding='utf-8'))
+    request['expected_plan_revision'] = args.expected_plan_revision
+    result = station.amend_cleanup(args.dir, args.issue_key, args.expected_run_id,
+        args.expected_revision, args.operation_id, args.expected_plan_digest, request,
+        getattr(args, 'conversation_input', None))
+    station_clean_view.emit(result, details=getattr(args, 'details', False))
     return 0
 
 
@@ -500,8 +504,19 @@ def cmd_block(args):
     return 0
 
 
-@task_store.task_mutation
 def cmd_interaction_path(args):
+    if getattr(args, 'purpose', 'development') == 'exit':
+        from workflow import station_exit_inputs
+        path = station_exit_inputs.interaction(args.dir, args.issue_key, args.expected_run_id, args.name,
+            getattr(args, 'operation_id', None), getattr(args, 'expected_revision', None),
+            getattr(args, 'expected_plan_digest', None))
+        print(path)
+        return 0
+    return _cmd_development_interaction(args)
+
+
+@task_store.task_mutation
+def _cmd_development_interaction(args):
     task = load(args.dir, args.issue_key)
     if task is None:
         raise ValueError("任务状态缺失：%s" % args.issue_key)
@@ -677,8 +692,13 @@ def cmd_branch(args):
 def cmd_status(args):
     try:
         task = load(args.dir, args.issue_key)
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
+    except (ValueError, OSError) as error:
+        if args.cmd in ('archive', 'release', 'clean', 'cleanup-amend', 'cleanup-preflight'):
+            from workflow import station_clean_view
+            station_clean_view.emit({'status': 'needs_attention', 'problems': [str(error)],
+                'boundary': '先回读原操作；未完成不报告已释放'}, details=getattr(args, 'details', False))
+        else:
+            print('错误：%s' % error, file=sys.stderr)
         return 2
     if task is None:
         print("无任务状态。")
@@ -766,6 +786,7 @@ def main():
         p.add_argument("--operation-id", required=True)
         p.add_argument("--input", required=True)
         p.add_argument("--dir", default=".")
+        p.add_argument("--details", action="store_true")
         p.set_defaults(func=cmd_lifecycle)
     p = sub.add_parser("cleanup-plan")
     p.add_argument("--issue-key", required=True)
@@ -776,6 +797,7 @@ def main():
     p.add_argument("--issue-key", required=True)
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--dir", default=".")
+    p.add_argument('--details', action='store_true')
     p.set_defaults(func=cmd_cleanup_preflight)
     p = sub.add_parser("source-readiness", help="编码前刷新引用、检查工作区及分支关系")
     p.add_argument("--issue-key", required=True)
@@ -792,6 +814,8 @@ def main():
     p.add_argument("--operation-id", required=True)
     p.add_argument("--expected-plan-digest", required=True)
     p.add_argument("--expected-plan-revision", required=True, type=int)
+    p.add_argument("--conversation-input", help="工位外会话输入清单；仅修订未发布草稿")
+    p.add_argument("--details", action="store_true")
     p.add_argument("--input", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_cleanup_amend)
@@ -927,6 +951,10 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--dir", default=".")
+    p.add_argument('--purpose', choices=('development', 'exit'), default='development')
+    p.add_argument('--operation-id')
+    p.add_argument('--expected-revision', type=int)
+    p.add_argument('--expected-plan-digest')
     p.set_defaults(func=cmd_interaction_path)
 
     p = sub.add_parser("runtime-path", help="只读核验当前 run 的受管 runtime 子路径")

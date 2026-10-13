@@ -12,7 +12,8 @@ usage() {
   agenticops agents
   agenticops version
   agenticops station <init|status|doctor|repair|start|list|identity|prune|clean|detach|purge|source-update> [参数]
-  agenticops update
+  agenticops update [--to-ref <完整SHA> --expected-current-ref <完整SHA>] [--check|--resume] [--writers-stopped]
+  agenticops recover-install --source-branch <维护分支> --to-ref <完整SHA> --expected-current-ref <完整SHA> [--check|--resume] [--writers-stopped]
   agenticops rollback
 
 用户目录：
@@ -278,8 +279,10 @@ PY
     start_agent "$@"
     ;;
   update)
-    test "$#" -eq 0 || { usage >&2; exit 2; }
-    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh" "$@"
+    ;;
+  recover-install)
+    exec python3 "$product_root/bootstrap/installation_update.py" "$@" --product-root "$product_root" --mode recover-install
     ;;
   rollback)
     test "$#" -eq 0 || { usage >&2; exit 2; }

@@ -260,7 +260,7 @@ def record(model, p, ctx, rules=None):
     model.setdefault("verification", {}).setdefault(p["repository"], {})[p["kind"]] = value
 
 
-def problems(model, ctx, kinds, rules=None):
+def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
     if not kinds:
         return []
     if not isinstance(kinds, list) or not set(kinds) <= KINDS:
@@ -284,7 +284,7 @@ def problems(model, ctx, kinds, rules=None):
                 if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
                     result.append("%s 的 %s 验证方案已变化，重新核对报告和缺口决定" % (repo, kind))
                 result.extend(coverage_problems(p, rules, ctx))
-            if kind == "local":
+            if kind == "local" and check_artifacts:
                 for jar in p.get("jars", []):
                     try:
                         valid = all(artifact_matches(jar[side + "_path"], jar[side + "_sha256"], ctx) for side in ("built", "consumed"))

@@ -33,17 +33,21 @@ metadata:
 
 先向用户展示 `cleanup_scope` 的清理/复位、保全、保留、未知四类实际对象及允许的决定，再请求确认；不要只问“是否放弃变更”。保留源码仓不等于保留当前工作区修改。部分清单或阻塞不授权执行；恢复展示原范围、完成回执与变化，结束展示实际结果及剩余材料。用户要求处理保留项时遵守独立处置边界，不扩大普通清理授权。
 
-用户要求清理时，新操作先调用 `workflow/station-clean.py --dir <station>` 只读预检；两层名单、版本 6 请求及结果标准见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用 clean/release；已有确认仍覆盖当前范围时复用。未提交及 ignored 内容先选择保全或精确丢弃，保留 config/source/archive 和命名分支、PR。源码复位不依赖 Maven/npm 清理命令；完成任务仍核对 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
+结果分别报告最终 PR/提交及验收、归档覆盖、实际释放和注销；有档案不等于工位已退出。最终完成检查复用当前 Head/Checks 的已有具体例外，提交或实际缺口变化只补核受影响证据，不把同一决定再次改为“所有 Checks 全绿”。业务 completed 暂不能可靠证明时，明确保留已交付、已验收和待核验项，可在原范围决定及安全条件满足后如实 clean 腾空，不补造 PASS 或 completed。缺陷收尾说明根因、实际修改、候选与安装版本、验证及遗留事项，区分代码修复和原工位恢复。
+
+用户要求清理时，新操作先调用 `workflow/station-clean.py --check --dir <station>` 只读预检；两层名单、版本 6 请求及结果标准见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用 clean/release；已有确认仍覆盖当前范围时复用。未提交及 ignored 内容先选择独立导出或精确丢弃，保留 config/source/archive 和命名分支、PR。源码复位不依赖 Maven/npm 清理命令；完成任务仍核对 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
 停止写入者后按确认范围执行；默认脚本先保全再清理。脚本异常时核对已完成与剩余动作，在相同授权内接管；也可用 `--prepare-only` 保全后直接交给 Agent。完成后原请求增加 `--verify-result`，按实际成果验收并正式解绑，不要求补成功退出码或重跑原脚本。基线、保全、权限和未知外部结果仍须核验；范围变化补充确认，不手改状态。源码回到 Profile 开发分支的已确认 SHA，按清单回收受管临时基线引用，不联网追新；空闲工位才可使用 source-update 刷新。
 
 可迁出的运行产物优先放 runtime；源码内构建输出不要求生产前登记，也不按 target 等名称判定可删。退出时按实际清单确认，关键报告和敏感材料先保全。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
-默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接只保存链接文本、不跟随目标；冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
+任务档案只保存会话与处理状态；通过原生读取或用户导出生成带来源、覆盖边界及截止点的 conversation 证据，摘要不得标成完整会话。未提交源码和必要新文件须先登记 source-disposition，精确 export/discard 和当前快照，不把状态摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接只保存链接文本、不跟随目标；冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
 
 清理默认自动经过准入、归档、源码、分支/PR、资源、释放六阶段，出口检查实际成果；仅遇到 needs_attention 时处理 problems，随后恢复同一操作。分支/PR 默认保留；用户明确删除时在原计划登记精确对象和决定，本地分支 location=local 由固定逻辑处理。远端分支和 PR 在 cleanup_disposition 阶段使用原生工具，先 station_disposition intent，后实际回读 readback，再恢复原清理；未知结果先回读，不重发，不把删除失败静默改为保留。完整用法见[阶段式清理](../../../../docs/architecture/single-task-station.md#阶段式清理)。
 
 中断恢复同一 issue/run/revision/operation-id 和原请求；旧 schema 3–5 或旧 epoch 只能由原产品版本退出，不用现役入口恢复。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
+
+会话来源、截止点、明确接受缺口及退出输入遵循[统一退出合同](../../../../docs/architecture/single-task-station.md#会话来源与最小退出回执)。正文截止点在范围确认前固定，确认与后续事实由状态及回执补全，不反复回灌正文。源码完整清单用 `--details --output <工位外私有新文件>`，不保存到正在盘点的 runtime/evidence。会话输入通过 `station-clean.py --conversation-input <工位外清单>` 仅录入；completed 使用 interaction-path 的显式 `--purpose exit`，pending 绑定原 operation/revision/plan。冻结草稿只能沿 cleanup-amend 的同一参数持锁修订，正式正文不能补写；具体参数以绑定版本帮助及[授权指引](../../../../docs/usage/task-authorization.md)为准。
 
 ## 准入、设计和多仓库
 

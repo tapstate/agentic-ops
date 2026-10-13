@@ -15,6 +15,12 @@ test -f "$state_path" || {
   exit 2
 }
 
+# 安装生命周期使用同一实现；源码无参更新继续维护依赖及受信 Hook。
+update_mode="$(python3 "$state_tool" --product-root "$product_root" read --field mode)"
+if [ "$update_mode" = "installed" ] || [ "$#" -gt 0 ]; then
+  exec python3 "$product_root/bootstrap/installation_update.py" "$@" --product-root "$product_root" --mode update
+fi
+
 # shellcheck source=bootstrap/lifecycle-common.sh
 . "$product_root/bootstrap/lifecycle-common.sh"
 mode="$(python3 "$state_tool" --product-root "$product_root" read --field mode)"

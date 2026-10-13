@@ -24,9 +24,12 @@ class StationCleanTests(unittest.TestCase):
     execute = fixture.ResourceTests.execute
 
     def result_request(self, task):
-        return dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
+        from workflow import station_records
+        request = dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
                     cleanup_version=6, abandon_changes=True,
+                    accept_conversation_digest=station_records.conversations(self.ws, task)['digest'],
                     confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
+        return fixture.prepare_exports(self, task, request)
 
     def test_plan_still_rejects_frozen_origin_different_from_catalog(self):
         import copy
@@ -110,7 +113,7 @@ class StationCleanTests(unittest.TestCase):
     def test_creation_device_change_does_not_block_new_plan(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         path = directories.registry_path(self.ws, task)
         original = json.loads(path.read_text())
         changed = json.loads(path.read_text())
@@ -127,7 +130,7 @@ class StationCleanTests(unittest.TestCase):
     def test_confirmed_identity_change_requires_amendment(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -149,7 +152,7 @@ class StationCleanTests(unittest.TestCase):
     def test_amend_cannot_redelete_completed_runtime(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(27, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -199,7 +202,8 @@ class StationCleanTests(unittest.TestCase):
         self.assertFalse((self.repo / "build-output").exists())
         archive = archive_store.from_reference(self.ws, result["archive_ref"])
         saved = json.loads((archive / "source-artifacts.json").read_text())
-        self.assertIn("build-output/report.txt", saved["repositories"][self.name]["untracked"])
+        self.assertNotIn("build-output/report.txt", saved["repositories"][self.name]["untracked"])
+        self.assertTrue(any(json.loads(p.read_text())["path"].endswith("/build-output/report.txt") for p in (self.root/"source-exports").glob("*.json")))
 
     def test_agent_cleanup_can_finish_without_executor_receipts(self):
         task = self.ready()
@@ -500,7 +504,7 @@ class StationCleanTests(unittest.TestCase):
         before = json.dumps(plan, sort_keys=True)
         view = station_clean_view.describe(self.ws, task, plan)
         self.assertTrue(view["complete"])
-        self.assertTrue(view["executable"], view)
+        self.assertFalse(view["executable"], view)
         self.assertEqual(view["plan_digest"], plan["digest"])
         self.assertEqual(before, json.dumps(plan, sort_keys=True))
         retained = {row["target"] for row in view["retain"]}
@@ -723,6 +727,11 @@ class StationCleanTests(unittest.TestCase):
                                   '--expected-run-id', task['run_id'], '--expected-revision', str(task['_revision']),
                                   '--operation-id', 'op-cli-cleanup', '--input', str(request), '--abandon-changes', 'yes'])
         self.assertEqual('done', json.loads(output.getvalue())['status'])
+        report = json.loads(output.getvalue())
+        self.assertEqual(task['run_id'], report['run_id'])
+        self.assertEqual('interrupted', report['cleanup_scope']['results']['task']['outcome'])
+        self.assertTrue(report['cleanup_scope']['results']['release']['released'])
+        self.assertFalse(report['cleanup_scope']['results']['purge']['unregistered'])
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_cli_failed_takeover_handoff_and_resume(self):
@@ -737,7 +746,7 @@ class StationCleanTests(unittest.TestCase):
         self.assertEqual(before, station_operation.path(self.ws).read_bytes())
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
             station_clean.main(['--dir', str(self.ws)])
-        self.assertIn('cleanup_plan', json.loads(output.getvalue()))
+        self.assertIn('plan_digest', json.loads(output.getvalue())['cleanup_scope'])
         path = self.root/'handoff-request.json'
         self.write(path, self.result_request(task))
         args = ['--dir', str(self.ws), '--issue-key', task['issue_key'], '--expected-run-id', task['run_id'],
@@ -911,8 +920,9 @@ class CleanupStagesTests(unittest.TestCase):
     reset_request = fixture.ResourceTests.reset_request
 
     def args(self, task):
+        request = fixture.prepare_exports(self, task, self.reset_request(task))
         return (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'],
-                'op-stages-cleanup', self.reset_request(task))
+                'op-stages-cleanup', request)
 
     def test_all_stages_complete_without_agent(self):
         task = self.ready()
@@ -936,7 +946,7 @@ class CleanupStagesTests(unittest.TestCase):
         self.assertEqual('outside preserved', outside.read_text())
         self.assertFalse((self.repo/'untracked-link').is_symlink())
         archived = archive_store.from_reference(self.ws, result['archive_ref'])
-        bundle = json.loads((archived/'source-artifacts.json').read_text())['repositories'][self.name]
+        bundle = next(json.loads(p.read_text())['bundle'] for p in (self.root/'source-exports').glob('*.json') if json.loads(p.read_text())['path'].endswith('/untracked-link'))
         self.assertTrue(bundle['untracked']['untracked-link']['fingerprint']['link'])
 
     def test_target_link_directory_transition(self):
@@ -1090,7 +1100,7 @@ class CleanupStagesTests(unittest.TestCase):
         current = task_store.read_task(self.ws); op = operations.read(self.ws)
         updated = resources.plan(self.ws,current)
         station.amend_cleanup(self.ws,task['issue_key'],task['run_id'],current['_revision'],args[5],
-            op['cleanup_plan']['digest'],{'confirmed_digest':updated['digest'],'expected_plan_revision':0})
+            op['cleanup_plan']['digest'],{'confirmed_digest':updated['digest'],'expected_plan_revision':0,'decision_ref':'fixture:user'})
         self.assertEqual('done',station.execute(*args)['status'])
 
     def test_committed_directory_replaced_by_baseline_link_does_not_touch_target(self):

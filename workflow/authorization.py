@@ -140,7 +140,10 @@ def cmd_renew(args):
 
 @task_store.task_mutation
 def cmd_reconfirm(args):
-    """同一实施范围内重新绑定已确认的 Q2，保留原授权与有效期。"""
+    """同一实施范围内重新绑定已确认的 Q2，可显式同时续期。"""
+    renew_ttl = getattr(args, "renew_ttl_hours", None)
+    if renew_ttl is not None and (not math.isfinite(renew_ttl) or renew_ttl <= 0):
+        raise ValueError("renew-ttl-hours 必须为有限正数")
     issue = task_store.resolve_active_issue(args.dir, args.issue_key)
     task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
     if task.get("stage") not in ("design_review", "implementation", "pr_review", "ci_validation"):
@@ -158,7 +161,7 @@ def cmd_reconfirm(args):
     if type(expiry) not in (int, float) or not math.isfinite(expiry):
         raise ValueError("原授权有效期无效")
     valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
-                                                engine.load_policy())
+                                                engine.load_policy(), now=expiry if renew_ttl is not None else None)
     if not valid:
         raise ValueError("原授权不能重新绑定：%s" % "；".join(reasons))
     old_q2 = record.get("approved_q2_digest")
@@ -179,6 +182,9 @@ def cmd_reconfirm(args):
     new_q2 = quality.q2_digest(args.dir, task)
     if new_q2 != args.expected_q2_digest or (new_q2 == old_q2 and current_q1 == record["approved_q1_digest"]):
         raise ValueError("目标 Q2 已变化或与原授权相同，重新核对确认对象")
+    renewed_expiry = None if renew_ttl is None else time.time() + renew_ttl * 3600
+    if renewed_expiry is not None and (not math.isfinite(renewed_expiry) or renewed_expiry <= expiry):
+        raise ValueError("续签有效期必须晚于原有效期")
     history = record.setdefault("reconfirmations", [])
     if not isinstance(history, list):
         raise ValueError("原授权重新确认历史无效")
@@ -190,6 +196,9 @@ def cmd_reconfirm(args):
         history[-1].update(previous_q1_digest=record["approved_q1_digest"], approved_q1_digest=current_q1)
         record["approved_q1_digest"] = current_q1
     record["approved_q2_digest"] = new_q2
+    if renewed_expiry is not None:
+        history[-1].update(previous_expires_at_epoch=expiry, expires_at_epoch=renewed_expiry)
+        record["expires_at_epoch"] = renewed_expiry
     task_store._write_json_atomic(path, record)
     print("已重新绑定当前 run 经人工确认的验收方案：%s" % path)
     return 0
@@ -339,6 +348,8 @@ def main():
     p_reconfirm.add_argument("--expected-q1-digest")
     p_reconfirm.add_argument("--confirmed-by", required=True)
     p_reconfirm.add_argument("--confirmation-ref", required=True)
+    p_reconfirm.add_argument("--renew-ttl-hours", type=float,
+                             help="显式同时续期；允许原授权过期，但仍核验原实施范围和已确认方案")
     p_reconfirm.add_argument("--dir", default=".")
     p_reconfirm.set_defaults(func=cmd_reconfirm)
 

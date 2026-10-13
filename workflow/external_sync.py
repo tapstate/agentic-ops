@@ -61,7 +61,8 @@ def record_readback(base, task, payload):
     return record
 
 
-def warnings(base, task, report=None):
+def existing_warnings(base, task):
+    """只核验已登记外部意图/回读；清理不重新判断当前质量准入。"""
     result = []
 
     def add(kind, status, reason, reference="", run_id=None):
@@ -77,7 +78,44 @@ def warnings(base, task, report=None):
         add("agenticops_version", "unknown" if unresolved else "deferred",
             watermark.get("reason", "水印未同步"), watermark.get("source_ref", ""))
     attempts = jira_status.load_state(base, task)["attempts"]
+    for node, record in attempts.items():
+        if (not isinstance(record, dict) or record.get("outcome") not in
+                ("ready", "unknown", "failed", "not_written", "skipped", "satisfied", "succeeded") or
+                record.get("run_id", task["run_id"]) != task["run_id"] or
+                record.get("issue_key", task["issue_key"]) != task["issue_key"]):
+            raise ValueError("Jira 状态同步意图损坏或不属于当前 task/run")
+        if record["outcome"] not in ("satisfied", "succeeded"):
+            add("jira_status:" + node, "unknown" if record["outcome"] in ("ready", "unknown", "failed") else "deferred",
+                record.get("reason", "状态尚未同步"), record.get("source_ref", ""))
+    from workflow.quality_write import STATE_FILE
+    for path in sorted(task_store.task_directory(base, task["issue_key"]).glob("quality-*.json")):
+        if not STATE_FILE.fullmatch(path.name):
+            continue
+        state = json.loads(path.read_text(encoding="utf-8"))
+        quality.quality_contract.validate(state, "quality-state.schema.json")
+        old_task = dict(task, run_id=state["run_id"])
+        if path != quality.state_path(base, old_task):
+            raise ValueError("质量日志文件名与 run 不匹配")
+        state = quality.load(base, old_task)
+        for key, record in quality.replay(state)["publications"].items():
+            if state["run_id"] != task["run_id"] and record["status"] not in ("intent", "unknown", "created"):
+                continue
+            if record["status"] != "verified":
+                add("comment:" + key, "unknown" if record["status"] in ("intent", "unknown", "created") else "deferred",
+                    record.get("reason", "评论状态：" + record["status"]), record.get("source_ref", ""), state["run_id"])
+    return result
+
+
+def warnings(base, task, report=None):
+    result = existing_warnings(base, task)
+
+    def add(kind, status, reason, reference=""):
+        result.append({"kind": kind, "status": status, "reason": reason,
+                       "source_ref": reference, "run_id": task["run_id"],
+                       "recovery": "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
+
     from workflow import project_rules
+    attempts = jira_status.load_state(base, task)["attempts"]
     status_rules = project_rules.load_profile(station=base).get("jira", {}).get("status_sync", {})
     if task["task_class"] in status_rules.get("task_classes", []):
         due = ["takeover"] if task.get("stage") != "waiting_takeover" else []
@@ -86,10 +124,6 @@ def warnings(base, task, report=None):
         for node in due:
             if node not in attempts:
                 add("jira_status:" + node, "deferred", "本节点尚无同步记录")
-    for node, record in attempts.items():
-        if record["outcome"] not in ("satisfied", "succeeded"):
-            add("jira_status:" + node, "unknown" if record["outcome"] in ("ready", "unknown", "failed") else "deferred",
-                record.get("reason", "状态尚未同步"), record.get("source_ref", ""))
     plan = task.get("facts", {}).get("issue_version_plan", {})
     version_receipt = load(base, task).get("problem_version", {})
     if plan.get("sync_status") == "pending" and version_receipt.get("fact_digest") != quality.digest(task.get("facts", {}).get("problem_version")):
@@ -103,18 +137,6 @@ def warnings(base, task, report=None):
     for checkpoint, view in report["checkpoints"].items():
         if view["reviewed"] and not view["published"]:
             add("checkpoint:" + checkpoint, "deferred", "检查点已确认，当前评论尚未回读验证")
-    from workflow.quality_write import STATE_FILE
-    for path in sorted(task_store.task_directory(base, task["issue_key"]).glob("quality-*.json")):
-        if not STATE_FILE.fullmatch(path.name):
-            continue
-        state = json.loads(path.read_text(encoding="utf-8"))
-        quality.quality_contract.validate(state, "quality-state.schema.json")
-        for key, record in quality.replay(state)["publications"].items():
-            if state["run_id"] != task["run_id"] and record["status"] not in ("intent", "unknown", "created"):
-                continue
-            if record["status"] != "verified":
-                add("comment:" + key, "unknown" if record["status"] in ("intent", "unknown", "created") else "deferred",
-                    record.get("reason", "评论状态：" + record["status"]), record.get("source_ref", ""), state["run_id"])
     return result
 
 
