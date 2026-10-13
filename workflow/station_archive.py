@@ -1,4 +1,4 @@
-"""正式档案原子发布与回读；只保存经过敏感检查的显式总结，不复制会话日志。"""
+"""正式档案原子发布与回读；保存会话与任务状态；原子发布和追加终态回执。"""
 from __future__ import annotations
 
 import hashlib
@@ -44,13 +44,25 @@ def _evidence(base, task):
                 raise ValueError("活动证据不是普通文件")
             if path.stat().st_size > 16 * 1024 * 1024:
                 raise ValueError("证据过大，请先生成脱敏摘要")
-            documents[path.name] = redact(json.loads(path.read_text(encoding="utf-8")))
+            value = json.loads(path.read_text(encoding="utf-8"))
+            from workflow import station_records
+            if isinstance(value, dict) and value.get('kind') == 'conversation':
+                documents[path.name] = redact(station_records.conversation_projection(value))
+            else:
+                documents[path.name] = {'source_ref': str(path.relative_to(task_store.state_path(base))),
+                    'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'size': path.stat().st_size,
+                    'state': redact(station_records.evidence_projection(path.name, value, task))}
     authorization = task_store.state_path(base) / "authorization.json"
     if authorization.is_symlink():
         raise ValueError("授权文件不能是符号链接")
     if authorization.exists():
         documents["authorization"] = redact(json.loads(authorization.read_text(encoding="utf-8")))
-    return json.dumps(documents, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+    from workflow import station_records
+    documents["conversation_coverage"] = station_records.conversations(base, task)
+    data = json.dumps(documents, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+    if len(data) > station_records.MAX_TOTAL_BYTES:
+        raise ValueError("任务记录超过归档总量上限")
+    return data
 
 
 def verify(base, reference, task):
@@ -147,7 +159,11 @@ def publish(base, task, request, inventory, operation, check_stable=None):
         data = summary.encode("utf-8")
         evidence = _evidence(base, task)
         from workflow import station_artifacts
-        artifacts = station_artifacts.material(base, task, inventory)
+        from workflow import station_records
+        if operation['kind'] != 'archive':
+            station_records.verify_source_choices(inventory)
+        station_records.verify_decision(base, task, station_records.effective_request(operation))
+        artifacts = station_records.artifact_manifest(base, task, inventory)
         from workflow import station_logs
         logs = station_logs.material(base, task, inventory)
         recorded = {"schema_version": 1, "station_id": binding["station_id"],
@@ -159,7 +175,7 @@ def publish(base, task, request, inventory, operation, check_stable=None):
                     "resource_inventory_digest": inventory.get("digest"),
                     "resource_inventory": [{"id": baseline.digest(entry), "disposition": entry.get("action", "unknown")} for entry in inventory.get("entries", [])],
                     "terminal_proof_digest": baseline.digest(task.get("terminal_proof")),
-                    "evidence_policy": "保存脱敏结构化证据与总结；原始日志及交互材料不进入档案",
+                    "evidence_policy": "保存脱敏会话与任务状态；正文为归档截止点快照，终态由同 run/op 回执补全",
                     "files": {"summary.md": {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()},
                               "evidence.json": {"size": len(evidence), "sha256": hashlib.sha256(evidence).hexdigest()},
                               "source-artifacts.json": {"size": len(artifacts), "sha256": hashlib.sha256(artifacts).hexdigest()},

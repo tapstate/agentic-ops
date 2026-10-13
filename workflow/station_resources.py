@@ -101,6 +101,12 @@ def active_files(base):
                 raise ValueError("活动材料含符号链接或特殊对象")
             if path.is_file():
                 data = path.read_bytes()
+                if path.suffix == '.json' and path.parent == root / 'evidence':
+                    from workflow import sync_recovery
+                    document = json.loads(data)
+                    if isinstance(document, dict):
+                        document = sync_recovery.scope_state(path.name, document)
+                        data = json.dumps(document, sort_keys=True, ensure_ascii=False).encode('utf-8')
                 if path == root / "evidence/resources.json":
                     document = json.loads(data)
                     document.setdefault("schema_version", 1)
@@ -116,7 +122,7 @@ def active_files(base):
 def task_fingerprint(task):
     """排除本次退出自身产生的 outcome/archive/revision，绑定开发事实与范围。"""
     return baseline.digest({"issue_key": task["issue_key"], "run_id": task["run_id"],
-        "facts": task.get("facts"), "pending": task.get("pending"), "history": task.get("history"),
+        "facts": task.get("facts"), "pending": task.get("pending"),
         "engineering_baseline": task.get("engineering_baseline"),
         "reset_baseline": task.get("reset_baseline"),
         "bindings": {name: {key: binding.get(key) for key in ("work_branch", "target_branch", "approved_scope", "verification_method", "baseline_entry_digest")}
@@ -226,7 +232,27 @@ def require_cleanup_version(version):
         raise ValueError("仅支持清理计划版本 6；旧清理合同必须由原版本退出，不在线迁移")
 
 
-def plan(base, task, version=None, decisions_override=None):
+def archive_runtime_selection(task, operation, selection=None):
+    """只继承同一运行的已确认列表；预览与显式修订只能收缩。"""
+    current = operation.get("cleanup_plan")
+    active = (operation.get("run_id") == task["run_id"] and operation.get("kind") in ("archive", "clean", "release")
+              and operation.get("status") in ("running", "failed") and current)
+    if active:
+        confirmed = operation.get("confirmation_digest", operation.get("request", {}).get("confirmed_digest"))
+        if confirmed != current.get("digest") and operation.get("kind") != "archive":
+            raise ValueError("运行证据选择缺少原计划确认")
+        allowed = current["archive_runtime"]
+    else:
+        allowed = []
+    if selection is None:
+        return list(allowed)
+    if (not active or not isinstance(selection, list) or any(not isinstance(x, str) for x in selection)
+            or len(set(selection)) != len(selection) or not set(selection) <= set(allowed)):
+        raise ValueError("运行证据选择只能显式收缩当前操作的已确认列表")
+    return [x for x in allowed if x in selection]
+
+
+def plan(base, task, version=None, decisions_override=None, archive_runtime=None):
     require_cleanup_version(6 if version is None else version)
     # 操作读取器统一拒绝旧计划（含 handoff 和计划修订），不在线转换。
     operation = operations.read(base) or {}
@@ -301,7 +327,7 @@ def plan(base, task, version=None, decisions_override=None):
                 external.append(dict({k: v for k, v in item.items() if k not in ("status", "readback_ref")}, action=action))
             else:
                 external.append({k: v for k, v in item.items() if k not in ("status", "readback_ref")})
-    logs = ["logs", "reports"]
+    logs = archive_runtime_selection(task, operation, archive_runtime)
     for relative in logs:
         directories.path_at(base, station_layout.relative(base, "task-runtime", relative))
     value = {"schema_version": 6, "run_id": task["run_id"], "directories": list(roots.values()), "archive_runtime": logs,

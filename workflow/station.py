@@ -456,9 +456,12 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
         from workflow import station_directories
         station_directories.verify_completed_roots(base, task, operation)
         _resources().verify_completed_batches(base, task, operation)
-        plan = _resources().plan(base, task, version=current["schema_version"])
+        plan = _resources().plan(base, task, version=current["schema_version"], archive_runtime=request.get("archive_runtime"))
+        from workflow import station_records
+        coverage_request = station_records.effective_request(operation, request)
+        station_records.verify_decision(base, task, coverage_request)
         confirmed = request.get("confirmed_digest")
-        if not confirmed or confirmed != plan["digest"]:
+        if not confirmed or confirmed != plan["digest"] or not request.get("decision_ref"):
             raise ValueError("必须明确确认当前补充清理计划摘要")
         discarded = [entry for entry in plan["entries"] if entry["preservation"]["action"] == "discard"]
         if discarded and request.get("discard_digest") != baseline.digest(discarded):
@@ -488,15 +491,21 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
             operation.pop("cleanup_manifest", None)
         operation.setdefault("amendment_receipts", []).append({"plan_revision": generation + 1,
             "plan": plan, "confirmation_digest": confirmed, "amendment_digest": amendment_digest})
-        operation["last_amendment"] = dict(amendment, digest=amendment_digest)
+        operation["last_amendment"] = dict(amendment, digest=amendment_digest,
+            conversation_decision={key: coverage_request[key] for key in
+                ("require_complete_conversation", "accept_conversation_digest", "decision_ref") if key in coverage_request})
         # 保留原始请求身份与已完成中立状态，不能让 release 重新判定或改写结果。
         operations.save(base, operation)
         _flush_amendment_receipts(base, task, operation)
         return operation
 
 
-def _verify_cleanup_decision(base, task, request):
+def _verify_cleanup_decision(base, task, request, kind=None):
     plan = _resources().plan(base, task, version=request.get("cleanup_version", 6))
+    from workflow import station_records
+    if kind != 'archive':
+        station_records.verify_source_choices(plan)
+    station_records.verify_decision(base, task, request)
     if request.get("confirmed_digest") != plan["digest"] or not request.get("decision_ref"):
         raise ValueError("请展示重置范围并确认 confirmed_digest 与真实 decision_ref")
     discard = [e for e in plan["entries"] if e["preservation"]["action"] == "discard"]
@@ -540,7 +549,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             if kind == "clean" and request.get("abandon_changes") is not True:
                 raise ValueError("未完成任务需要明确放弃变更，未写入状态")
             if kind in ("archive", "clean", "release"):
-                prepared_plan = _verify_cleanup_decision(base, task, request)
+                prepared_plan = _verify_cleanup_decision(base, task, request, kind)
             if not task.get("archive_ref"):
                 baseline.text(request.get("summary"), "归档总结")
                 baseline.text(request.get("reason"), "归档原因")

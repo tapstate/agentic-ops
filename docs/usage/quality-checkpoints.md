@@ -8,7 +8,7 @@ Agent 在当前授权内处理动作；缺少授权时先询问对应动作范�
 
 状态、水印和字段按各自入口核验，不自动改写任务描述或猜填审批字段。接管状态同步允许在 task_intake/design_review/implementation 补查；更晚阶段交接人工，不回退 Jira 状态。同步失败明确原因及后续动作，不阻止无依赖的本地工作；unknown 或无法证明未写入的 failed 先核清。安全退出判定不消费容错展示结果。
 
-completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md#外部同步回执恢复)：清理确认或归档证据已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
+completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md#外部同步回执恢复)：epoch 28 在冻结前可回读已确认范围内的原意图；归档草稿、冻结证据或发布意图已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
 
 已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置，但仅 `checkpoint` 主动生成接管及检查点动作。
 
@@ -243,6 +243,8 @@ python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$
 PR Ready 的定义以[术语表](../glossary.md)为准：所有目标 PR 已原生推进到 GitHub Ready for review，并回读确认。`pr_ready.py` 不执行外部写入，`preflight_ready=true` 仅表示提审前置条件满足；`ready=true` 还要求每个 PR 的身份、当前完整 Head、OPEN 和 isDraft=false 均已回读确认。`submission_status` 返回 blocked/pending/confirmed，`remaining` 只列未完成项。未发起或未回读时不能报告“已发起审查”或“等待审查”。GitHub Ready 不保证已存在审查人，回读后按已授权安排核对并补齐，不提前要求所有仓人工指定。
 
 原生工具使用现有任务授权执行 ready，结果未知先回读同一 PR；确认已退出 Draft 的仓库不重复写入，其余仓逐个处理。回读证据使用 `task.py interaction-path --name pr-ready-input.json` 在当前 run 分配的文件，根字段为 schema_version=1、issue_key、run_id、checks_exceptions、pull_requests。`pull_requests` 每项提供 repository、number、url、headRefOid、state、isDraft、source_ref、observed_at（带时区）。工具只验证提供的证据，不认证来源或保证之后外部状态不变；Agent 在执行前及最终报告前取得实时原生回读。保留历史原始回读，在该输入文件更新当前观察；不新增状态账本。退出码 0 表示已回读 Ready，3 表示未完成（看 preflight_ready 区分阻塞与待执行），4 表示输入错误。
+
+先核对当前 workflow/run/Head 与触发条件，区分预期未运行、真实缺口、失败或未知。预期 SKIPPED 不是失败，也不自动改成 success；复用覆盖同一 Head 与实际检查集合的已有精确例外，仅在缺口变化或没有有效决定时补充决策，不重推或重跑已核验 CI。
 
 用户明确接受本次具体 Checks 缺口并要求提审时，将决定放入 `checks_exceptions`：repository、pr、完整 head、checks_digest、decision=accept_checks_and_submit、reason 和原有 proof（决定者、真实决定来源、带时区时间）。checks_digest 使用 `pr_ready.checks_digest` 对当前 CI history 最新项的 head/verdict/checks/failing 生成；每次重新观察后核对实际集合，时间戳变化不单独使同一决定失效。仅接纳 none/start_timeout、skipped、failure；pending/finish_timeout、未知事实及缺少当前 Head 的观察不支持例外。未取得真实来源、权限不足或外部写结果不明时停止受影响操作。原始 Checks 不改成 success，例外不豁免关联用例、必要质量验证、服务端保护或合并授权。Head 或实际缺口变化需要新决定；已有精确决定覆盖提审时不重复询问。
 

@@ -14,6 +14,9 @@ def main(argv=None):
     parser.add_argument("--expected-revision", type=int)
     parser.add_argument("--operation-id")
     parser.add_argument("--input", help="工位外确认请求 JSON；省略时只读预检")
+    parser.add_argument("--details", action="store_true", help="显示完整精确清单；默认聚合展示")
+    parser.add_argument("--archive-runtime", choices=("none", "logs", "reports", "logs,reports"),
+                        help="只读预览：收缩原操作的运行证据保全列表；用 cleanup-amend 确认后生效")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--prepare-only", action="store_true", help="确认并保全，不执行清理，交由 Agent 接力")
     modes.add_argument("--verify-result", action="store_true", help="只验收已完成的清理成果并正式解绑，不要求脚本回执")
@@ -27,6 +30,8 @@ def main(argv=None):
     pending = operation and operation["status"] != "done"
     takeover = pending and operation["kind"] == "takeover"
     new_cleanup = not pending or (takeover and task and not operation.get("handoff"))
+    if args.archive_runtime is not None and (args.input or new_cleanup or not task):
+        raise ValueError("运行证据选择仅用于当前退出操作的只读修订预览")
     if args.abandon_changes == "no" and task and task.get("outcome") != "completed" and new_cleanup:
         print(json.dumps({"status": "cancelled", "message": "保留当前变更，未执行清理"}, ensure_ascii=False))
         return 0
@@ -53,6 +58,17 @@ def main(argv=None):
             except (ValueError, OSError) as exc:
                 result["blockers"].append(str(exc))
         original_plan = (operation or {}).get("cleanup_plan") if not new_cleanup else result.get("cleanup_plan")
+        if args.archive_runtime is not None:
+            selection = [] if args.archive_runtime == "none" else args.archive_runtime.split(",")
+            original_plan = station_resources.plan(args.dir, task, archive_runtime=selection)
+            result["amendment_preview"] = {"archive_runtime": selection,
+                "expected_plan_digest": operation["cleanup_plan"]["digest"],
+                "expected_plan_revision": len(operation.get("plan_revisions", [])),
+                "confirmed_digest": original_plan["digest"], "cleanup_plan": original_plan}
+            discarded = [e for e in original_plan["entries"] if e["preservation"]["action"] == "discard"]
+            if discarded:
+                from workflow.engineering_baseline import digest
+                result["amendment_preview"]["discard_digest"] = digest(discarded)
         result["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task, original_plan,
             operation if not new_cleanup else None, result.get("blockers", []))
         if pending and original_plan:
@@ -60,6 +76,16 @@ def main(argv=None):
                 station_resources.verify_station_inventory(args.dir, original_plan.get("rules", {}), allow_pending=True)
             except (ValueError, OSError, KeyError) as error:
                 result["cleanup_scope"]["blockers"].append("当前范围需核验：" + str(error))
+        if not args.details:
+            result.pop('cleanup_plan', None)
+            scope = result['cleanup_scope']
+            for key in ('preserve_before_clear', 'remove_or_reset'):
+                rows = scope.get(key, [])
+                scope[key + '_count'] = len(rows)
+                scope[key] = rows[:10]
+            scope['details_command'] = 'station-clean.py --details'
+            if 'amendment_preview' in result:
+                result['amendment_preview'].pop('cleanup_plan', None)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if any(value is None for value in (args.issue_key, args.expected_run_id, args.expected_revision, args.operation_id)):

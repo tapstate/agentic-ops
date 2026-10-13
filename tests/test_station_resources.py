@@ -17,6 +17,23 @@ from workflow import station, station_resources as resources, station_directorie
 from workflow import archive_store, station_artifacts as artifacts, station_operation as operations, station_archive, task_store
 
 
+def prepare_exports(self, task, request):
+    # 场景夹具显式保存需要复位的成果；新版任务档案不再备份源码。
+    operation = operations.read(self.ws) or {}
+    if operation.get('kind') not in ('clean', 'release', 'archive') or operation.get('status') == 'done':
+        plan = resources.plan(self.ws, task)
+        if request.get('confirmed_digest') == plan['digest']:
+            rows = [e for e in plan['entries'] if e['preservation']['action'] == 'archive']
+            if rows:
+                from workflow import station_export
+                target = (self.root / 'source-exports').resolve()
+                target.mkdir(mode=0o700, exist_ok=True)
+                station_export.export_batch(self.ws, task['issue_key'], task['run_id'],
+                    [{'path': e['path'], 'output': str(target / (resources.baseline.digest(e['path']) + '.json'))} for e in rows])
+                request['confirmed_digest'] = resources.plan(self.ws, task)['digest']
+    return request
+
+
 class ResourceTests(unittest.TestCase):
     setUp = lifecycle.StationTests.setUp
     prepare_engineering = lifecycle.StationTests.prepare_engineering
@@ -37,6 +54,7 @@ class ResourceTests(unittest.TestCase):
         return dict(cleanup_version=6, abandon_changes=True, summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
 
     def execute(self, task, request, kind='clean', op='op-resource-reset'):
+        prepare_exports(self, task, request)
         return station.execute(self.ws, kind, task['issue_key'], task['run_id'], task['_revision'], op, request)
 
     def register_root(self, task, path='target'):
@@ -271,9 +289,11 @@ class ResourceTests(unittest.TestCase):
         with mock.patch.object(artifacts, 'snapshot', side_effect=old_snapshot):
             self.execute(task, self.reset_request(task))
         saved = json.loads((archive_store.run_directory(self.ws, task['run_id']) / 'source-artifacts.json').read_text())
-        self.assertIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertNotIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertTrue(any(json.loads(p.read_text())['bundle']['untracked'].get('.DS_Store') for p in (self.root/'source-exports').glob('*.json')))
         self.assertFalse(path.exists())
-        artifacts.verify_reconstruction(self.repo, saved['repositories'][self.name])
+        for p in (self.root/'source-exports').glob('*.json'):
+            artifacts.verify_reconstruction(self.repo, json.loads(p.read_text())['bundle'])
 
     def test_metadata_cleanup_preserves_aborted_replan_fingerprint(self):
         task = self.ready()
@@ -350,7 +370,8 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual('archive', plan['entries'][0]['preservation']['action'])
         self.execute(task, self.reset_request(task))
         saved = json.loads((archive_store.run_directory(self.ws, task['run_id'])/'source-artifacts.json').read_text())
-        self.assertIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertNotIn('.DS_Store', saved['repositories'][self.name]['untracked'])
+        self.assertTrue(any(json.loads(p.read_text())['bundle']['untracked'].get('.DS_Store') for p in (self.root/'source-exports').glob('*.json')))
         self.assertFalse((self.repo/'.DS_Store').exists())
 
     def test_preserve_does_not_hide_initialized_wiring_drift(self):
@@ -504,7 +525,8 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual([], list((self.ws/'execution').iterdir()))
         self.assertFalse((self.ws/'runtime').exists())
         saved = json.loads((archive_store.run_directory(self.ws, task['run_id'])/'source-artifacts.json').read_text())
-        self.assertIn('report.txt', saved['repositories'][self.name]['untracked'])
+        self.assertNotIn('report.txt', saved['repositories'][self.name]['untracked'])
+        self.assertTrue(any(json.loads(p.read_text())['path'].endswith('/report.txt') for p in (self.root/'source-exports').glob('*.json')))
 
     def test_ignored_file_requires_preservation_in_confirmed_plan(self):
         task = self.ready()
@@ -524,7 +546,9 @@ class ResourceTests(unittest.TestCase):
         self.execute(task,request)
         archive = archive_store.run_directory(self.ws, task['run_id'])
         value = json.loads((archive/'source-artifacts.json').read_text())
-        artifacts.verify_reconstruction(self.repo,value['repositories'][self.name])
+        self.assertFalse(value['repositories'][self.name]['entries'])
+        for path in (self.root/'source-exports').glob('*.json'):
+            artifacts.verify_reconstruction(self.repo, json.loads(path.read_text())['bundle'])
         self.assertEqual((self.repo/'file.txt').read_text(),'baseline\n')
         self.assertFalse((self.repo/'new.bin').exists())
 
@@ -545,7 +569,8 @@ class ResourceTests(unittest.TestCase):
     def test_source_archive_failure_keeps_code_and_runtime(self):
         task = self.ready(); (self.repo/'file.txt').write_text('keep')
         request = self.reset_request(task)
-        with mock.patch.object(artifacts,'MAX_FILE_BYTES',1), self.assertRaisesRegex(ValueError,'上限'):
+        from workflow import station_records
+        with mock.patch.object(station_records,'MAX_TOTAL_BYTES',1), self.assertRaisesRegex(ValueError,'上限'):
             self.execute(task,request)
         self.assertEqual((self.repo/'file.txt').read_text(),'keep')
         self.assertIsNotNone(task_store.read_task(self.ws))
@@ -703,7 +728,7 @@ class ResourceTests(unittest.TestCase):
             self.execute(task,{'confirmed_digest':'old'})
         self.assertIsNotNone(task_store.read_task(self.ws))
 
-    def test_key_logs_archived_and_late_logs_appended(self):
+    def test_logs_and_late_logs_are_not_archived(self):
         from workflow import station_logs
         task = self.ready()
         logs = self.ws/'runtime/logs'; logs.mkdir(exist_ok=True)
@@ -713,24 +738,22 @@ class ResourceTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         archive = archive_store.from_reference(self.ws, task['archive_ref'])
         saved = json.loads((archive/'runtime-evidence.json').read_text())
-        self.assertEqual(saved['files']['runtime/logs/build.log']['text'], 'build passed\n')
+        self.assertEqual(saved['files'], {})
         (logs/'build.log').write_text('build passed\nstop completed\n')
         station_logs.verify_current(self.ws, task, resources.plan(self.ws, task))
         attachments = list((archive/'receipts').glob('runtime-evidence-*.json'))
-        self.assertEqual(len(attachments), 1)
-        self.assertIn('stop completed', attachments[0].read_text())
+        self.assertEqual(len(attachments), 0)
         self.execute(task, self.reset_request(task))
         self.assertEqual(list((self.ws/'runtime').iterdir()), [])
         self.assertTrue((archive/'runtime-evidence.json').exists())
 
-    def test_invalid_report_prevents_reset(self):
+    def test_runtime_binary_is_cleared_without_text_archiving(self):
         task = self.ready()
         reports = self.ws/'runtime/reports'; reports.mkdir(exist_ok=True)
         (reports/'binary').write_bytes(b'\xff\xfe')
-        with self.assertRaisesRegex(ValueError, 'UTF-8'):
-            self.execute(task, self.reset_request(task))
-        self.assertTrue((reports/'binary').exists())
-        self.assertIsNotNone(task_store.read_task(self.ws))
+        self.execute(task, self.reset_request(task))
+        self.assertFalse((reports/'binary').exists())
+        self.assertIsNone(task_store.read_task(self.ws))
 
     def test_generated_root_becoming_tracked_is_archived_before_reset(self):
         task = self.ready()

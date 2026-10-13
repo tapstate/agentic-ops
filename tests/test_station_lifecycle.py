@@ -114,6 +114,9 @@ class StationTests(unittest.TestCase):
             request.setdefault("decision_ref", "fixture:user-continue")
             if "confirmed_digest" not in request:
                 request["confirmed_digest"] = station_resources.plan(base, task)["digest"]
+            if kind != "archive":
+                import test_station_resources
+                test_station_resources.prepare_exports(self, task, request)
         return station.execute(base, kind, issue, run, revision, operation, request)
 
     def test_takeover_full_engineering_and_idempotency(self):
@@ -499,11 +502,11 @@ class StationTests(unittest.TestCase):
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/late.log", "producer": "fixture"}], expected_operation_id="op-amend-evidence")
         second = station_resources.plan(self.ws, current)
         with self.assertRaisesRegex(ValueError, "再次产生"):
-            station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+            station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0})
         preserved = self.root / "preserved-late.log"
         late.rename(preserved)
         second = station_resources.plan(self.ws, current)
-        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0})
         self.assertEqual(preserved.read_text(), "late report")
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-amend-evidence", request)
         self.assertIsNone(task_store.read_task(self.ws))
@@ -534,7 +537,7 @@ class StationTests(unittest.TestCase):
         snapshot={k:entry[k] for k in ("head","before","before_index","index_patch","worktree_patch")}
         station_resources.register(self.ws,task["issue_key"],task["run_id"],[{"kind":"source-disposition","producer":"user","path":entry["path"],"preservation":{"action":"discard","snapshot":snapshot}}],expected_operation_id="op-release-amend")
         second=station_resources.plan(self.ws,current)
-        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-release-amend", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0,"discard_digest":baseline.digest(second["entries"])})
+        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-release-amend", first["digest"], {"confirmed_digest": second["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0,"discard_digest":baseline.digest(second["entries"])})
         self.execute(self.ws, "release", task["issue_key"], task["run_id"], task["_revision"], "op-release-amend", request)
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual(file.read_text(), "baseline\n")
@@ -568,7 +571,7 @@ class StationTests(unittest.TestCase):
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text("identical regenerated output")
         self.assertEqual(station_resources.plan(self.ws, current)["digest"], plan["digest"])
-        amendment = {"confirmed_digest": plan["digest"], "expected_plan_revision": 0}
+        amendment = {"confirmed_digest": plan["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0}
         with self.assertRaisesRegex(ValueError, "再次产生"):
             station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-repeat-plan", plan["digest"], amendment)
         preserved = self.root / "preserved-logs"
@@ -602,7 +605,7 @@ class StationTests(unittest.TestCase):
         old_record = (draft / "record.json").read_bytes()
         file.write_text("changed before publication")
         second = station_resources.plan(self.ws, current)
-        operation = station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-draft-amend", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        operation = station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-draft-amend", first["digest"], {"confirmed_digest": second["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0})
         self.assertEqual(operation["archive_drafts"][0]["record"], json.loads(old_record))
         self.assertNotIn("archive_record", operation)
         self.assertEqual((draft / "record.json").read_bytes(), old_record)
@@ -638,7 +641,7 @@ class StationTests(unittest.TestCase):
         old_record = (target / "record.json").read_bytes()
         file.write_text("later output")
         second = station_resources.plan(self.ws, current)
-        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-published-amend", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-published-amend", first["digest"], {"confirmed_digest": second["digest"], "decision_ref": "fixture:user-amend", "expected_plan_revision": 0})
         self.assertIsNotNone(task_store.read_task(self.ws)["archive_ref"])
         self.assertEqual((target / "record.json").read_bytes(), old_record)
 
@@ -670,7 +673,7 @@ class StationTests(unittest.TestCase):
         late.write_text("known producer late output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/archive-late.log", "producer": "build"}], expected_operation_id="op-archive-refresh")
         plan = station_resources.plan(self.ws, current)
-        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-archive-refresh", original_plan, {"expected_plan_revision": 0, "confirmed_digest": plan["digest"]})
+        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-archive-refresh", original_plan, {"decision_ref": "fixture:user-amend", "expected_plan_revision": 0, "confirmed_digest": plan["digest"]})
         with mock.patch.object(station_resources, "clean", side_effect=AssertionError("archive must not delete")):
             self.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-archive-refresh", request)
         archived = task_store.read_task(self.ws)
@@ -987,7 +990,7 @@ class StationTests(unittest.TestCase):
         self.assertTrue(station_resources.plan(self.ws, current)["digest"])
         self.assertEqual(result, station_replan.abort(self.ws, task["issue_key"], task["run_id"], args[4], "fixture:abort"))
         cleanup = station_resources.plan(self.ws, current, version=6)
-        station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-aborted-replan',
+        self.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-aborted-replan',
             {'summary': '保留部分准备仓并退出', 'reason': 'fixture', 'decision_ref': 'fixture:cleanup',
              'cleanup_version': 6, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
         self.assertIsNone(task_store.read_task(self.ws))
@@ -1076,7 +1079,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual('implementation', current['stage'])
         self.assertEqual('preserved feature work', path.read_text())
         cleanup = station_resources.plan(self.ws, current, version=6)
-        station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-feature-cycle',
+        self.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-feature-cycle',
             {'summary': '结束隔离演练', 'reason': '夹具完成', 'decision_ref': 'fixture:cleanup',
              'cleanup_version': 6, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
         self.assertIsNone(task_store.read_task(self.ws))

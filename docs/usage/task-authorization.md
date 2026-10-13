@@ -1,12 +1,16 @@
 # 任务接管与授权
 
+本版任务档案只保存会话与处理状态，运行日志和报告正文不入档。会话来源、原文覆盖及截止点以[工位合同](../architecture/single-task-station.md#会话输入与覆盖)为准。未提交源码通过独立 export 或精确 discard 处置，不把摘要当成源码备份。默认清理输出聚合摘要，`--details` 查看完整精确清单；`station_export.py --input <JSON>` 接受精确 path/output 数组并沿用原单文件格式、意图及回执。
+
+`require_complete_conversation=true` 要求完整可见原文；无法取得时须提供导出，或以 `accept_conversation_digest` 和真实 `decision_ref` 接受当前覆盖。每份证据不超过16MiB、总量64MiB，不静默截断。原 epoch27 修复候选可用 `station-clean.py --archive-runtime none --details` 预览，再由 `cleanup-amend` 精确确认原计划子集；新版不解析旧 epoch 的现场。
+
 本页说明单工位脚本操作。实际 Jira 事实须由已配置原生工具读取，本地 takeover 不替代 Jira 准入。完整四操作、退出与精确清单输入见[项目任务 Skill](../../projects/tapdata/skills/tapdata-task/SKILL.md)；质量输入见[质量检查与证据](quality-checkpoints.md)。
 
 ## 清理范围决策视图
 
-`station-clean.py` 预检返回 `cleanup_scope`：`remove_or_reset` 列目录回收及每仓复位目标，`preserve_before_clear` 列源码成果处置及日志报告保全，`retain` 列配置、仓库及引用、已登记分支/PR、工位接线和正式档案，`unknown` 列尚未核验对象。每项说明原因及允许的决定；保留源码仓库不等于保留工作区修改。
+`station-clean.py` 预检返回 `cleanup_scope`：`remove_or_reset` 列目录回收及每仓复位目标，`preserve_before_clear` 列源码独立保全处置，`retain` 列配置、仓库及引用、已登记分支/PR、工位接线和正式档案，`unknown` 列尚未核验对象。每项说明原因及允许的决定；保留源码仓库不等于保留工作区修改。
 
-该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码 archive/export/discard；丢弃仍需精确快照确认，分支/PR 默认保留；用户精确确认后可纳入同一次清理计划，在分支/PR 阶段处置，也可在释放后按独立授权处置原档案对象。普通重置授权不包含删除分支或关闭 PR。核心持久目录销毁不是任务清理选项。
+该视图不生成第二份执行计划，不读取保留配置正文、不扫描整机或远端资源；远端状态未查询时明确标注未核验。预检阻塞时仍返回部分清单，但不允许确认执行。用户可选源码独立 export/discard；丢弃仍需精确快照确认，分支/PR 默认保留；用户精确确认后可纳入同一次清理计划，在分支/PR 阶段处置，也可在释放后按独立授权处置原档案对象。普通重置授权不包含删除分支或关闭 PR。核心持久目录销毁不是任务清理选项。
 
 恢复展示原计划和已完成/待完成步骤，范围漂移按原 cleanup-amend 处理；运行根内部正常生成物不逐文件重做授权。完成时展示原范围、实际步骤回执及档案引用，空闲预检不执行清理。视图错误不代表已成功的生命周期操作失败，先回读原操作，不重复执行。
 
@@ -169,7 +173,7 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --abandon-changes yes
 ```
 
-预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样默认归档；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
+预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样须明确独立导出或精确丢弃；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
 
 停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source；按计划快进开发分支并回收列明的受管基线引用，不追随远端最新提交。
 
@@ -195,7 +199,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 意图包含稳定 disposition_id、phase=intent、object_id、resource_type、action、before、真实 decision_ref 和不含 confirmed_digest 的意图摘要 confirmed_digest；回读包含同一 disposition_id/object_id、phase=readback、intent_digest、实际 readback_ref，以及 deleted/closed 状态。记录工具不代替远端操作，也不把本地夹具回读当作真实 GitHub 验证。
 
-关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
+运行日志与报告正文不进入任务档案，必要验证结果和报告引用进入任务状态；具体内容与边界以工位合同为准。
 
 重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。不兼容工位先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；解绑成功后才切换产品并重新初始化，详见[更新与回退](update-and-rollback.md)。目标版本不解析或迁移旧任务，repair 不跨代际采用。
 

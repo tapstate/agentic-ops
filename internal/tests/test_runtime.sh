@@ -53,6 +53,8 @@ run_general_suite() {
 
 run_general_suite
 run_product tests/test_station_resources.py
+run_product tests/test_station_archive_selection.py
+run_product tests/test_station_records.py
 run_product tests/test_station_clean.py
 run_product tests/test_station_development_reset.py
 run_product tests/test_station_terminal_redaction.py

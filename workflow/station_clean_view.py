@@ -121,6 +121,21 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
             group = "retain" if entry["action"] == "retain" else "remove_or_reset"
             row(group, entry["id"], entry["action"], "已登记外部资源；不是本次已执行结果", ["retain", "separate_request"] if group == "retain" else ["confirm", "cancel"], evidence=entry)
     if task:
+        from workflow import station_records
+        try:
+            result['conversation'] = station_records.conversations(base, task)
+        except (ValueError, OSError) as error:
+            result['blockers'].append(str(error))
+        if plan:
+            groups = {}
+            for entry in plan['entries']:
+                key = (entry['repository'], entry['preservation']['action'])
+                group = groups.setdefault(key, {'repository': key[0], 'action': key[1], 'count': 0, 'bytes': 0})
+                group['count'] += 1
+                group['bytes'] += (entry.get('before') or {}).get('size', 0)
+            result['source_summary'] = list(groups.values())
+            if any(e['preservation']['action'] == 'archive' for e in plan['entries']):
+                result['blockers'].append('源码保全尚未决定：先 export 或精确确认 discard；任务档案不保存源码正文')
         if not plan:
             result["source_inventory"] = source_inventory(base, task)
             for repository in result["source_inventory"]:
