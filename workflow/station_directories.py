@@ -89,8 +89,8 @@ def create(base, task, relative, producer, adopt=False):
     if station_generated:
         from workflow import station_clean_rules
         decision = station_clean_rules.classify(station_clean_rules.load(base), relative, True)
-        if decision["action"] != "remove":
-            raise ValueError("工位附属目录必须由清理黑名单声明 remove")
+        if decision["action"] != "generated":
+            raise ValueError("工位附属目录必须由清单声明 generated")
         init = json.loads((store.state_path(base) / "init.json").read_text())
         if any(e["path"] == relative or e["path"].startswith(relative + "/") for e in init.get("artifacts", [])):
             raise ValueError("不能登记初始化接线为清理目录")
@@ -106,7 +106,8 @@ def create(base, task, relative, producer, adopt=False):
         name = names[0]
         rule = recipe(base, task)
         local = relative[len(station_layout.relative(base, "repositories", name + "/")):]
-        if not any(Path(local).match(pattern) for pattern in rule.get("generated_directories", [])):
+        from workflow import station_clean_rules
+        if station_clean_rules.classify(station_clean_rules.load(base), local, True, "repository", name)["action"] != "generated":
             raise ValueError("生成目录未由 Project 配方声明")
         repository = source.repository_path(base, name)
         if source.git(repository, "ls-files", "-z", "--", local).stdout:
@@ -226,83 +227,3 @@ def validate(base, entry, missing=False):
     if not entry.get("identity") or identity(path) != entry["identity"]:
         raise ValueError("受管目录身份变化或创建未完成")
     return path
-
-
-def cleanup_paths(base, task, entry, operation):
-    from workflow import archive_store
-    directory = archive_store.receipts(base, task["archive_ref"], create=True)
-    stem = operation["operation_id"] + "-root-v%s-" % len(operation.get("plan_revisions", [])) + baseline.digest(entry)
-    return tuple(directory / (stem + suffix) for suffix in ("-intent.json", "-done.json"))
-
-
-def verify_completed_roots(base, task, operation):
-    """重新确认不允许把已完成目录的新内容纳入再次删除。"""
-    if not task.get("archive_ref"):
-        return
-    plans = [(row["revision"], row["plan"]) for row in operation.get("plan_revisions", [])]
-    plans.append((len(operation.get("plan_revisions", [])), operation["cleanup_plan"]))
-    for revision, plan in plans:
-        prior = dict(operation, plan_revisions=[None] * revision)
-        for entry in plan["directories"]:
-            intent, receipt = cleanup_paths(base, task, entry, prior)
-            if intent.is_symlink() or receipt.is_symlink():
-                raise ValueError("目录回执不能是链接")
-            if not receipt.exists():
-                continue
-            expected = {"run_id": task["run_id"], "operation_id": operation["operation_id"], "root": entry}
-            if not intent.exists() or json.loads(intent.read_text()) != expected or json.loads(receipt.read_text()) != expected:
-                raise ValueError("目录清理回执不匹配")
-            path = path_at(base, entry["path"])
-            if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):
-                raise ValueError("回收后目录再次产生内容，拒绝重删")
-
-
-def precheck(base, task, entry, operation):
-    """所有目录在源码副作用之前回读身份、缺失事实和已有回执。"""
-    version = operation.get("cleanup_plan", {}).get("schema_version")
-    if type(version) is not int or version != 6:
-        raise ValueError("目录清理仅接受版本 6 计划")
-    intent_path, receipt_path = cleanup_paths(base, task, entry, operation)
-    for p in (intent_path, receipt_path):
-        if p.is_symlink():
-            raise ValueError("目录回执不能是链接")
-    intended = intent_path.exists()
-    path = validate(base, entry, missing=True)
-    # 预检已明确绑定提前缺失的事实；回执不声称本操作删除了该目录。
-    expected = {"run_id": task["run_id"], "operation_id": operation["operation_id"], "root": entry}
-    if intended:
-        if json.loads(intent_path.read_text()) != expected:
-            raise ValueError("目录清理意图不匹配")
-    if receipt_path.exists():
-        if not intended or json.loads(receipt_path.read_text()) != expected or (path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir()))):
-            raise ValueError("回收后目录再次产生内容，拒绝重删")
-    return path, expected
-
-
-def reset(base, task, entry, operation):
-    """正式档案内按目录保存回执；文件数量不会增加 operation 的大小或写入次数。"""
-    path, expected = precheck(base, task, entry, operation)
-    intent_path, receipt_path = cleanup_paths(base, task, entry, operation)
-    intent_path.parent.mkdir(exist_ok=True)
-    if not intent_path.exists():
-        store._write_json_atomic(intent_path, expected)
-    if receipt_path.exists():
-        return
-    if path.exists():
-        fd = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            opened = os.fstat(fd)
-            if {"device": opened.st_dev, "inode": opened.st_ino} != entry["identity"]:
-                raise ValueError("目录在打开时被替换")
-            _walk(fd, opened.st_dev)  # 在任何删除之前检查不支持的节点。
-            _walk(fd, opened.st_dev, delete=True)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        validate(base, entry)
-        if any(path.iterdir()):
-            raise ValueError("清理后仍有写入者")
-        if entry["disposition"] == "delete_root":
-            path.rmdir()
-            sync(path.parent)
-    store._write_json_atomic(receipt_path, expected)

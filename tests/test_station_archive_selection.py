@@ -1,55 +1,32 @@
-"""原计划运行证据选择的兼容修订与恢复。"""
-import json
+#!/usr/bin/env python3
+"""两份清单的纯规则测试，不创建 Git 工程。"""
+import sys
+from pathlib import Path
 import unittest
-from unittest import mock
-
-import test_station_lifecycle as lifecycle
-import test_station_resources as resource_tests
-from workflow import archive_store, station, station_resources as resources, station_operation as operations, task_store
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from workflow import station_clean_rules as rules
 
 
-class ArchiveSelectionTests(unittest.TestCase):
-    setUp = lifecycle.StationTests.setUp
-    prepare_engineering = lifecycle.StationTests.prepare_engineering
-    write = lifecycle.StationTests.write
-    git = lifecycle.StationTests.git
-    takeover = lifecycle.StationTests.takeover
-    ready = resource_tests.ResourceTests.ready
-    reset_request = resource_tests.ResourceTests.reset_request
-    execute = resource_tests.ResourceTests.execute
+class SelectionTests(unittest.TestCase):
+    def test_preservation_wins_across_both_manifests(self):
+        row = {'scope':'repository','pattern':'**/target','type':'directory','action':'generated'}
+        config = {'layers':[{'rules':[row]}, {'rules':[dict(row, action='preserve')]}]}
+        self.assertEqual('preserve', rules.classify(config,'module/target',True,'repository')['action'])
 
-    def test_explicit_empty_selection_preserves_history_and_resumes(self):
-        task = self.ready()
-        logs = self.ws / 'runtime/logs'
-        logs.mkdir(exist_ok=True)
-        (logs / 'unsupported.bin').write_bytes(b'\xff')
-        request = self.reset_request(task)
-        with mock.patch.object(station.archives, 'publish', side_effect=ValueError('interrupted')), self.assertRaisesRegex(ValueError, 'interrupted'):
-            self.execute(task, request, op='op-selection-recovery')
-        operation = operations.read(self.ws)
-        original = operation['cleanup_plan']
-        self.assertEqual([], resources.plan(self.ws, task)['archive_runtime'])
-        plan = resources.plan(self.ws, task, archive_runtime=[])
-        current = task_store.read_task(self.ws)
-        station.amend_cleanup(self.ws, task['issue_key'], task['run_id'], current['_revision'],
-            operation['operation_id'], original['digest'], {'archive_runtime': [],
-                'confirmed_digest': plan['digest'], 'expected_plan_revision': 0, 'decision_ref': 'fixture:user'})
-        amended = operations.read(self.ws)
-        self.assertEqual(original, amended['plan_revisions'][0]['plan'])
-        self.assertEqual([], resources.plan(self.ws, current)['archive_runtime'])
-        self.execute(task, request, op=operation['operation_id'])
-        self.assertIsNone(task_store.read_task(self.ws))
-        saved = json.loads((archive_store.run_directory(self.ws, task['run_id']) / 'runtime-evidence.json').read_text())
-        self.assertEqual({}, saved['files'])
+    def test_patterns_are_relative_and_bounded(self):
+        self.assertTrue(rules.matches('**/target','target'))
+        self.assertTrue(rules.matches('**/target','a/b/target'))
+        self.assertFalse(rules.matches('*/target','a/b/target'))
+        for pattern in ('../target','/target','a/.git','a//target','[abc]'):
+            with self.subTest(pattern=pattern), self.assertRaises(ValueError):
+                rules.validate_layer({'version':3,'rules':[{'scope':'repository','pattern':pattern,'type':'directory','action':'generated'}]})
 
-    def test_selection_without_current_operation_and_expansion_rejected(self):
-        task = self.ready()
-        before = (self.ws / '.agenticops/operation.json').read_bytes()
-        for selection in ([], ['elsewhere'], ['logs', 'logs']):
-            with self.assertRaisesRegex(ValueError, '显式收缩'):
-                resources.plan(self.ws, task, archive_runtime=selection)
-        self.assertEqual(before, (self.ws / '.agenticops/operation.json').read_bytes())
+    def test_arbitrary_commands_and_state_cleanup_are_rejected(self):
+        for extra in ({'command':'rm -rf'}, {'callback':'project.py'}):
+            with self.assertRaises(ValueError):
+                rules.validate_layer({'version':3,'rules':[dict(scope='runtime',pattern='tmp',type='directory',action='generated',**extra)]})
+        with self.assertRaises(ValueError):
+            rules.validate_layer({'version':3,'rules':[dict(scope='station-root',pattern='.agenticops',type='directory',action='generated')]})
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == '__main__': unittest.main()

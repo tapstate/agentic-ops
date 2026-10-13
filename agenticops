@@ -11,7 +11,7 @@ usage() {
   agenticops setup [--source-pool <目录>]
   agenticops agents
   agenticops version
-  agenticops station <init|status|doctor|repair|start|list|identity|prune|clean|detach|purge|source-update> [参数]
+  agenticops station <init|status|doctor|repair|start|list|identity|prune|purge|source-update> [参数]
   agenticops update [--to-ref <完整SHA> --expected-current-ref <完整SHA>] [--check|--resume] [--writers-stopped]
   agenticops recover-install --source-branch <维护分支> --to-ref <完整SHA> --expected-current-ref <完整SHA> [--check|--resume] [--writers-stopped]
   agenticops rollback
@@ -130,7 +130,7 @@ start_agent() {
 station_registry_command() {
   station_command_name="${1:-}"
   case "$station_command_name" in
-    status|identity|prune|repair|clean|detach|purge)
+    status|identity|prune|repair|purge)
       ;;
     *)
       exec python3 "$product_root/bootstrap/station_registry.py" \
@@ -153,7 +153,7 @@ station_registry_command() {
     station_registry_arguments=("$station_command_name" --station "$station" "${@:2}")
   fi
   case "$station_command_name" in
-    prune|repair|clean|detach|purge)
+    prune|repair|purge)
       # shellcheck source=bootstrap/lifecycle-common.sh
       . "$product_root/bootstrap/lifecycle-common.sh"
       lifecycle_acquire_lock "$product_root" "station-$station_command_name"
@@ -183,7 +183,7 @@ if [ "$command_name" = "station" ]; then
     source-update)
       exec python3 "$product_root/workflow/station-source-update.py" "$@"
       ;;
-    status|list|identity|prune|clean|detach|purge)
+    status|list|identity|prune|purge)
       station_registry_command "$command_name" "$@"
       exit $?
       ;;

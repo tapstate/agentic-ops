@@ -8,7 +8,7 @@ Agent 在当前授权内处理动作；缺少授权时先询问对应动作范�
 
 状态、水印和字段按各自入口核验，不自动改写任务描述或猜填审批字段。接管状态同步允许在 task_intake/design_review/implementation 补查；更晚阶段交接人工，不回退 Jira 状态。同步失败明确原因及后续动作，不阻止无依赖的本地工作；unknown 或无法证明未写入的 failed 先核清。安全退出判定不消费容错展示结果。
 
-completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md#外部同步回执恢复)：epoch 28 在冻结前可回读已确认范围内的原意图；归档草稿、冻结证据或发布意图已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
+completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md)：epoch 28 在冻结前可回读已确认范围内的原意图；归档草稿、冻结证据或发布意图已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
 
 已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置，但仅 `checkpoint` 主动生成接管及检查点动作。
 
@@ -87,7 +87,7 @@ TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q
 
 新验证写入、当前质量报告、PR Ready 和阶段推进仍须实时核验当前代码、实际制品及有效范围。历史结果可读不代表本轮仍可复用；制品缺失、Head 或范围变化应显示当前证据不可用，不把历史 PASS 改成当前 PASS，也不提供用户可写的跳过实时核验开关。接口内部区分历史归约和实时判定，历史模式不进入持久事件上下文或改变原摘要。
 
-已完成任务归档/清理使用原完成证明、确认计划和实际步骤回执，不重新生产已清理的 Jar 或重跑验收以满足日志读取；未完成任务可以按真实结果受控 clean，不补造 completed。该历史读取缺陷的原版兼容修复与下一版退出默认分开，实施和验收边界见[统一退出优化目标](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)。
+已完成任务归档/清理使用原完成证明、确认计划和实际步骤回执，不重新生产已清理的 Jar 或重跑验收以满足日志读取；未完成任务可以按真实结果受控 clean，不补造 completed。该历史读取缺陷的原版兼容修复与下一版退出默认分开，实施和验收边界见[统一退出优化目标](../architecture/single-task-station.md)。
 
 清理的外部结果核验只读取既有意图和回读，并按原安全分类识别未知操作；不为该判断生成当前质量报告或新增待办正文。当前与旧 run 的未知写入仍须回读，损坏记录仍拒绝，明确未发送的同步待办按既有规则披露；实时质量报告及阶段准入的制品检查继续保留。两处解耦必须一起验证，不能通过忽略同步异常、返回空清单或复造 Jar 达到收尾效果。
 
@@ -130,7 +130,7 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
   --name jira-snapshot.json --dir "$project_station")"
 ```
 
-文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档后停止开发，release/clean 收尾移除活动副本，档案保留必要脱敏材料。不用根目录文件名前缀模拟任务归属。
+文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档尽力记录已有结果，不停止开发；release/clean 收尾移除活动副本，记录缺项不阻塞退出。不用根目录文件名前缀模拟任务归属。
 
 旧状态不在线迁移或猜测归属；退出当前任务后，明确 station purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
 

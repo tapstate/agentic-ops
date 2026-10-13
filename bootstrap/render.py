@@ -318,6 +318,7 @@ def init_document(install_root, artifacts, station_state_epoch=None):
         ),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "artifacts": recorded_artifacts,
+        "cleanup": json.loads((Path(install_root) / "policies/station-clean.json").read_text()),
     }
 
 

@@ -1,147 +1,66 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "工位重置确认清单版本 6（规则快照另由读取器校验）",
+  "$id": "https://agenticops.tapdata.net/contracts/station-reset.schema.json",
+  "title": "清单清理计划",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "schema_version",
     "run_id",
-    "directories",
-    "entries",
-    "source",
-    "external",
-    "active_state",
+    "config",
+    "objects",
     "retained",
+    "residuals",
     "digest",
-    "archive_runtime",
-    "rules"
+    "protected_paths"
   ],
+  "additionalProperties": false,
   "properties": {
-    "rules": {
-      "type": "object",
-      "required": [
-        "version",
-        "layers",
-        "digests",
-        "structure",
-        "objects",
-        "batches"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "version": {
-          "const": 2
-        },
-        "layers": {
-          "type": "array",
-          "minItems": 2
-        },
-        "digests": {
-          "type": "array",
-          "minItems": 2
-        },
-        "structure": {
-          "type": "object"
-        },
-        "objects": {
-          "type": "object"
-        },
-        "batches": {
-          "type": "object"
-        }
-      }
-    },
     "schema_version": {
-      "const": 6
+      "const": 7
     },
     "run_id": {
-      "type": "string",
-      "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}(?:-[0-9a-f]{8})?)$"
+      "type": [
+        "string",
+        "null"
+      ]
     },
-    "directories": {
-      "type": "array",
-      "items": {
-        "$ref": "station-directory.schema.json"
-      }
+    "config": {
+      "type": "object"
     },
-    "entries": {
+    "objects": {
       "type": "array",
       "items": {
         "type": "object",
         "required": [
           "path",
+          "identity",
+          "parent",
           "repository",
-          "file",
-          "action",
-          "head",
-          "before",
-          "before_index",
-          "index_patch",
-          "worktree_patch",
-          "preservation"
-        ],
-        "properties": {
-          "action": {
-            "enum": [
-              "restore",
-              "delete"
-            ]
-          },
-          "preservation": {
-            "type": "object",
-            "required": [
-              "action"
-            ],
-            "properties": {
-              "action": {
-                "enum": [
-                  "archive",
-                  "export",
-                  "discard"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "source": {
-      "type": "object"
-    },
-    "external": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "id",
-          "action"
+          "relative",
+          "type"
         ]
       }
-    },
-    "active_state": {
-      "type": "object",
-      "required": [
-        "files",
-        "unbind_run",
-        "task_digest"
-      ]
     },
     "retained": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "type": "string"
+      }
+    },
+    "residuals": {
+      "type": "array",
+      "items": {
+        "type": "object"
       }
     },
     "digest": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "archive_runtime": {
+    "protected_paths": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "type": "string"
       }
     }
   }

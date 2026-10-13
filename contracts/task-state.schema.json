@@ -21,7 +21,6 @@
         "facts": {"type": "object"},
         "history": {"type": "array", "items": {"type": "object"}},
         "pending": {"type": ["object", "null"]},
-        "reset_baseline": {"type": "object"},
         "replan": {"type": "object"},
         "replan_preserved": {"type": "object"},
         "retained_repositories": {"type": "object"},

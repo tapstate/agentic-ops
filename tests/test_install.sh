@@ -336,7 +336,7 @@ done
 rmdir "$detach_symlink_station/.agents/skills"
 ln -s "$symlink_outside/detach" "$detach_symlink_station/.agents/skills"
 ln -s "$detach_skill_target" "$symlink_outside/detach/tapdata-task"
-if "$install_root/agenticops" station detach \
+if "$install_root/agenticops" station purge \
     --station "$detach_symlink_station" --yes >/dev/null 2>&1; then
   printf 'detach 接受了 Skill 父目录 symlink\n' >&2
   exit 1
@@ -644,8 +644,8 @@ if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&
 fi
 "$install_root/agenticops" station repair --station "$station" >/dev/null
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
-"$install_root/agenticops" station clean --station "$station" --generated-only >/dev/null
-(cd "$station" && ./agenticops station clean --generated-only >/dev/null)
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+(cd "$station" && ./agenticops station repair >/dev/null)
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
 test -L "$station/.agents/skills/tapdata-ci-test"
 test -L "$station/.claude/skills/tapdata-ci-test"
@@ -817,11 +817,11 @@ if "$install_root/agenticops" station start --agent test-agent --station "$subse
 fi
 detached_station="$test_root/detached-station"
 "$install_root/agenticops" station init --project tapdata --station "$detached_station" --agent codex >/dev/null
-if (cd "$detached_station" && ./agenticops station detach) >/dev/null 2>&1; then
+if (cd "$detached_station" && ./agenticops station purge) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
 fi
-(cd "$detached_station" && ./agenticops station detach --yes >/dev/null)
+(cd "$detached_station" && ./agenticops station purge --yes >/dev/null)
 test ! -e "$detached_station/.agenticops/station.json"
 test ! -e "$detached_station/.agenticops/init.json"
 test ! -e "$detached_station/agenticops"
@@ -877,16 +877,12 @@ if "$install_root/agenticops" station purge \
 fi
 test -d "$station/.agenticops"
 
-# 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
-# 形态仍必须失败关闭，且不得触及工位外的目标。
+# 注销仅删除可确认的受管状态；未知对象及非常规 events.jsonl 保留，不触及工位外目标。
 unknown_state_station="$test_root/unknown-state-station"
 "$install_root/agenticops" station init --project tapdata --station "$unknown_state_station" --agent codex >/dev/null
 printf 'unknown\n' > "$unknown_state_station/.agenticops/unknown-state"
-if "$install_root/agenticops" station purge \
-    --station "$unknown_state_station" --yes >/dev/null 2>&1; then
-  printf '未知工位状态被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$unknown_state_station" --yes >/dev/null
+test ! -e "$unknown_state_station/.agenticops/station.json"
 test -f "$unknown_state_station/.agenticops/unknown-state"
 
 event_outside="$test_root/event-outside"
@@ -894,21 +890,16 @@ printf 'outside sentinel\n' > "$event_outside"
 event_symlink_station="$test_root/event-symlink-station"
 "$install_root/agenticops" station init --project tapdata --station "$event_symlink_station" --agent codex >/dev/null
 ln -s "$event_outside" "$event_symlink_station/.agenticops/events.jsonl"
-if "$install_root/agenticops" station purge \
-    --station "$event_symlink_station" --yes >/dev/null 2>&1; then
-  printf '符号链接 Gate 审计事件被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$event_symlink_station" --yes >/dev/null
+test ! -e "$event_symlink_station/.agenticops/station.json"
+test -L "$event_symlink_station/.agenticops/events.jsonl"
 grep -Fx 'outside sentinel' "$event_outside" >/dev/null
 
 event_directory_station="$test_root/event-directory-station"
 "$install_root/agenticops" station init --project tapdata --station "$event_directory_station" --agent codex >/dev/null
 mkdir "$event_directory_station/.agenticops/events.jsonl"
-if "$install_root/agenticops" station purge \
-    --station "$event_directory_station" --yes >/dev/null 2>&1; then
-  printf '目录 Gate 审计事件被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$event_directory_station" --yes >/dev/null
+test ! -e "$event_directory_station/.agenticops/station.json"
 test -d "$event_directory_station/.agenticops/events.jsonl"
 
 # 新版空闲工位清理与重建、材料保留、并发和路径替换回归。

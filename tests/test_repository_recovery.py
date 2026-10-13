@@ -5,7 +5,7 @@ import shutil
 import unittest
 from unittest import mock
 from test_station_source import ROOT, SourceFixture
-from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories, engineering_baseline
+from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories, engineering_baseline, station
 
 
 class RecoveryTests(SourceFixture, unittest.TestCase):
@@ -16,6 +16,9 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         catalog = json.loads(path.read_text())
         catalog["repositories"][self.name]["origin"] = str(self.remote)
         path.write_text(json.dumps(catalog))
+        init = self.ws / '.agenticops/init.json'
+        value = json.loads(init.read_text()); value['cleanup'] = json.loads((ROOT / 'policies/station-clean.json').read_text()); init.write_text(json.dumps(value))
+        (self.ws / 'config').mkdir()
 
     def test_failed_fetch_keeps_clone_for_retry(self):
         original = source.git
@@ -41,20 +44,23 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         directories.create(self.ws, task, "runtime", "workflow", adopt=True)
         return task
 
-    def test_partial_clone_can_be_neutralized(self):
+    def exit(self, task):
+        current = task_store.read_task(self.ws)
+        return station.execute(self.ws, 'clean', task['issue_key'], task['run_id'], current['_revision'], 'op-partial-cleanup', {})
+
+    def test_partial_clone_can_be_released_without_deleting_source(self):
         task = self.partial()
-        self.op["cleanup_plan"] = resources.plan(self.ws, task)
-        self.assertEqual(self.op["cleanup_plan"]["entries"], [])
-        resources.neutral(self.ws, task, self.op)
-        self.assertEqual({p.name for p in self.repo.iterdir()}, {".git"})
-        self.assertTrue(self.op["cleanup_plan"]["source"][self.name]["initial_checkout"])
+        before = {p.name for p in self.repo.iterdir()}
+        self.exit(task)
+        self.assertEqual({p.name for p in self.repo.iterdir()}, before)
+        self.assertIsNone(task_store.read_task(self.ws))
 
     def test_partial_clone_unknown_file_preserved(self):
         task = self.partial()
-        (self.repo / "personal.txt").write_text("retain")
-        with self.assertRaises(ValueError):
-            resources.plan(self.ws, task)
-        self.assertEqual((self.repo / "personal.txt").read_text(), "retain")
+        (self.repo / 'personal.txt').write_text('retain')
+        result = self.exit(task)
+        self.assertEqual((self.repo / 'personal.txt').read_text(), 'retain')
+        self.assertTrue(result['cleanup_result']['released'])
 
     def test_fetch_receipt_rejects_reference_drift(self):
         self.prepare()
@@ -62,7 +68,7 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "漂移"):
             source.prepare_repositories(self.ws, self.catalog, [self.name], self.op)
 
-    def test_neutral_preserves_unmerged_branch_and_commits(self):
+    def test_cleanup_preserves_unmerged_branch_and_commits(self):
         self.prepare()
         self.git(self.repo, "checkout", "-b", "fix/retained")
         self.git(self.repo, "config", "user.email", "test@example.com")
@@ -76,14 +82,13 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
                 "task_class": "technical_task", "stage": "waiting_takeover", "outcome": "in_progress",
                 "facts": {}, "history": [], "pending": None, "terminal_proof": None, "archive_ref": None,
                 "engineering_baseline": frozen,
-                "reset_baseline": {self.name: {"sha": self.sha}}, "task_repositories": {}}
+                "task_repositories": {}}
         task_store.write_task(self.ws, task)
         (self.ws / "runtime").mkdir(exist_ok=True)
         directories.create(self.ws, task, "runtime", "workflow", adopt=True)
-        self.op["cleanup_plan"] = resources.plan(self.ws, task)
-        resources.neutral(self.ws, task, self.op)
+        self.exit(task)
         self.assertEqual(self.git(self.repo, "rev-parse", "fix/retained"), head)
-        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "develop")
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "fix/retained")
 
 
 if __name__ == "__main__":

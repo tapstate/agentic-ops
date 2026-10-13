@@ -5,7 +5,7 @@
       "path": "source",
       "role": "repositories",
       "actions": [
-        "source-reset"
+        "preserve"
       ],
       "create": true
     },
@@ -13,7 +13,7 @@
       "path": "runtime",
       "role": "task-runtime",
       "actions": [
-        "clear-children"
+        "preserve"
       ],
       "create": true
     },
@@ -21,7 +21,7 @@
       "path": ".agenticops",
       "role": "station-state",
       "actions": [
-        "lifecycle-clean"
+        "preserve"
       ],
       "create": false
     },

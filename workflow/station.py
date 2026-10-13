@@ -24,71 +24,6 @@ def _project(base):
     return project_rules.project_root(root, project)
 
 
-def _plan_receipt(base, task, operation, phase, snapshot=None):
-    archives.verify(base, task["archive_ref"], task)
-    directory = archive_store.receipts(base, task["archive_ref"], create=True)
-    plan = snapshot["plan"] if snapshot else operation["cleanup_plan"]
-    generation = snapshot["plan_revision"] if snapshot else len(operation.get("plan_revisions", []))
-    path = directory / (operation["operation_id"] + "-" + phase + "-" + str(generation) + "-" + plan["digest"] + ".json")
-    value = {"operation_id": operation["operation_id"], "operation_kind": operation["kind"],
-             "purpose": "archive_refresh" if operation["kind"] == "archive" else "cleanup",
-             "run_id": task["run_id"], "phase": phase,
-             "archive_digest": task["archive_ref"]["digest"], "cleanup_plan_digest": plan["digest"], "plan_revision": generation,
-             "confirmation_digest": snapshot["confirmation_digest"] if snapshot else operation.get("confirmation_digest", operation["request"].get("confirmed_digest")),
-             "inventory": [{"id": baseline.digest(entry), "action": entry.get("action", "external")} for entry in plan.get("entries", []) + plan.get("external", [])]}
-    if phase == "resources-released":
-        value["observed_result"] = operation["cleanup_manifest"]["result"]
-    if path.is_symlink():
-        raise ValueError("档案回执不能是符号链接")
-    if path.exists():
-        if json.loads(path.read_text(encoding="utf-8")) != value:
-            raise ValueError("已有计划回执内容不一致")
-    else:
-        task_store._write_json_atomic(path, value)
-
-
-def _flush_amendment_receipts(base, task, operation):
-    if not task.get("archive_ref"):
-        return
-    for snapshot in operation.get("amendment_receipts", []):
-        _plan_receipt(base, task, operation, "amendment", snapshot)
-
-
-def _clear_active(base, operation):
-    root = task_store.state_path(base)
-    def inventory():
-        values = {}
-        for name in ("authorization.json", "evidence"):
-            target = root / name
-            paths = [target] + list(target.rglob("*")) if target.is_dir() else [target]
-            for path in paths:
-                if path.is_symlink():
-                    raise ValueError("活动材料中含符号链接")
-                if path.is_file():
-                    values[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-                elif path.exists() and not path.is_dir():
-                    raise ValueError("活动材料含非普通对象")
-        return values
-    actual = inventory()
-    plan = operation["cleanup_plan"]
-    _resources().verify_active(base, plan, operation)
-    step_name = "clear-active:" + str(len(operation.get("plan_revisions", []))) + ":" + operation["cleanup_plan"]["digest"]
-    step = operations.intent(base, operation, step_name, {}, {"files": actual}) if step_name not in operation["steps"] else operation["steps"][step_name]
-    expected = step["expected"]["files"]
-    if any(name not in expected or expected[name] != digest for name, digest in actual.items()):
-        raise ValueError("归档后活动材料新增或变化，拒绝删除")
-    for name in expected:
-        path = root / name
-        if path.exists():
-            path.unlink()
-    evidence = root / "evidence"
-    if evidence.exists():
-        for directory in sorted((p for p in evidence.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
-            directory.rmdir()
-        evidence.rmdir()
-    operations.receipt(base, operation, step_name, {"cleared": True})
-
-
 def takeover(base, request, operation_id, expected_revision):
     with task_store.task_state_lock(base):
         issue = task_store.validate_issue_key(request["issue_key"])
@@ -103,6 +38,7 @@ def takeover(base, request, operation_id, expected_revision):
         if not previous or previous["operation_id"] != operation_id:
             if task_store.read_current(base)["current"] is not None:
                 raise ValueError("工位仍有当前任务，不能接管新任务")
+            _resources().check_retained_resources(base, previous)
             _resources().verify_station_inventory(base)
             for name in selected:
                 path = source.repository_path(base, name)
@@ -111,6 +47,10 @@ def takeover(base, request, operation_id, expected_revision):
                     source.require_clean(path)
             if any((task_store.state_path(base) / name).exists() for name in ("authorization.json", "evidence")):
                 raise ValueError("空闲工位仍有活动授权或证据，拒绝接管")
+        if not previous or previous["operation_id"] != operation_id:
+            runtime = Path(base) / station_layout.station_name(base, "task-runtime")
+            if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
+                raise ValueError("接管前 runtime 必须为空；保留残留，尚未创建操作")
         operation = operations.begin(base, "takeover", operation_id, expected_revision, request)
         if operation["status"] == "done":
             return operation
@@ -176,16 +116,6 @@ def takeover(base, request, operation_id, expected_revision):
                 value = baseline.freeze(profile, catalog, resolutions, inputs, request.get("optional_repositories", []))
             baseline.verify_local_baseline(base, value)
             task["engineering_baseline"] = value
-        if "reset_baseline" not in task:
-            reset_baseline = {}
-            for name in selected:
-                reference = catalog[name].get("dev_branch")
-                if not reference:
-                    raise ValueError("项目仓库未声明开发引用")
-                baseline.ref_name(reference)
-                sha = source.git(source.repository_path(base, name), "rev-parse", "--verify", "refs/remotes/origin/" + reference + "^{commit}").stdout.strip()
-                reset_baseline[name] = {"ref": reference, "sha": sha, "source": "project.dev_branch/origin", "observed_at": task_store.now(), "recipe_revision": profile["revision"]}
-            task["reset_baseline"] = reset_baseline
             task_store.write_task(base, task)
         source.checkout_baseline(base, task["engineering_baseline"], operation)
         task["source_prepared"] = True
@@ -417,260 +347,6 @@ def apply_completion(task, proof):
     task.update(outcome="completed", stage="completed", terminal_proof=proof)
 
 
-def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_digest, request, conversation_input=None):
-    """同一操作精确重新确认；archive 只刷新未发布草稿，绝不授权删除。"""
-    with task_store.task_state_lock(base):
-        task = task_store.check_expected_run(base, issue, run_id)
-        operation = operations.read(base)
-        if (not operation or operation["operation_id"] != operation_id or operation["run_id"] != run_id
-                or operation["kind"] not in ("archive", "clean", "release") or operation["status"] == "done"):
-            raise ValueError("只能补充当前未完成的 archive/clean/release 操作")
-        if "unbind" in operation["steps"]:
-            raise ValueError("已开始解绑，不能再扩展清理范围")
-        from workflow import station_exit_inputs
-        prepared = station_exit_inputs.prepare(base, task, conversation_input, amendment=True) if conversation_input else None
-        if prepared:
-            request = dict(request, conversation_input_digest=prepared['manifest_digest'])
-        amendment = {"expected_plan_digest": expected_plan_digest, "request": request,
-                     "expected_revision": revision}
-        amendment_digest = baseline.digest(amendment)
-        if operation.get("last_amendment", {}).get("digest") == amendment_digest:
-            _flush_amendment_receipts(base, task, operation)
-            return operation
-        if task["_revision"] != revision:
-            raise ValueError("清理补充确认的工位 revision 已变化")
-        archives.recover_published(base, task, operation)
-        if operation["kind"] == "archive" and task.get("archive_ref"):
-            raise ValueError("正式档案已发布，不能刷新；请恢复原 archive 操作完成绑定")
-        if operation["kind"] == "release":
-            proof = task.get("terminal_proof") or {}
-            observed = source.inspect(base, task["engineering_baseline"])
-            if (task.get("outcome") != "completed" or any(not _resources().delivery_head_matches(base, name, state, proof.get("repositories", {}).get(name, {}).get("head"), operation)
-                    for name, state in observed.items())):
-                raise ValueError("释放后新增提交尚未核验，不能用补充文件清理绕过交付")
-        current = operation.get("cleanup_plan")
-        if not current:
-            raise ValueError("当前操作尚无已确认清理计划")
-        if current["digest"] != expected_plan_digest:
-            raise ValueError("原清理计划摘要已变化，拒绝旧确认")
-        history = operation.setdefault("plan_revisions", [])
-        generation = len(history)
-        if type(request.get("expected_plan_revision")) is not int or request["expected_plan_revision"] != generation:
-            raise ValueError("原清理计划修订编号已变化或缺失，拒绝旧确认")
-        from workflow import station_directories
-        station_directories.verify_completed_roots(base, task, operation)
-        _resources().verify_completed_batches(base, task, operation)
-        plan = _resources().plan(base, task, version=current["schema_version"], archive_runtime=request.get("archive_runtime"),
-                                 evidence_override=prepared["files"] if prepared else None)
-        from workflow import station_records
-        coverage_request = station_records.effective_request(operation, request)
-        inputs = station_records.read_documents(base, task, prepared["files"]) if prepared else None
-        if operation['kind'] != 'archive' or coverage_request.get('require_complete_conversation') or coverage_request.get('accept_conversation_digest'):
-            station_records.verify_decision(base, task, coverage_request, inputs)
-        else:
-            station_records.conversations(base, task, inputs)
-        confirmed = request.get("confirmed_digest")
-        if not confirmed or confirmed != plan["digest"] or not request.get("decision_ref"):
-            raise ValueError("必须明确确认当前补充清理计划摘要")
-        discarded = [entry for entry in plan["entries"] if entry["preservation"]["action"] == "discard"]
-        if discarded and request.get("discard_digest") != baseline.digest(discarded):
-            raise ValueError("丢弃源码成果需要额外确认 discard_digest")
-        if prepared:
-            # 完整请求与未来精确计划已核验后才写；部分落盘沿原清单恢复。
-            station_exit_inputs.write_prepared(base, prepared)
-        history.append({"revision": generation, "plan": current,
-                        "confirmation_digest": operation.get("confirmation_digest", operation["request"].get("confirmed_digest")),
-                        "purpose": "archive_refresh" if operation["kind"] == "archive" else "cleanup",
-                        "superseded_by": confirmed, "superseded_revision": generation + 1, "amendment_digest": amendment_digest})
-        if not task.get("archive_ref") and operation.get("archive_record"):
-            operation.setdefault("archive_drafts", []).append({"plan_revision": generation,
-                "record": operation.pop("archive_record"), "evidence": operation.pop("archive_evidence", None), "artifacts": operation.pop("archive_artifacts", None), "logs": operation.pop("archive_logs", None),
-                "publication_intent": copy.deepcopy(operation["steps"].get("archive-publish:" + str(generation)))})
-        for name, step in operation["steps"].items():
-            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:", "cleanup-batch:")) and step["receipt"] is None and not step.get("superseded_by"):
-                step["superseded_by"] = confirmed
-                step["superseded_plan_digest"] = expected_plan_digest
-                step["superseded_plan_revision"] = generation
-                step["superseded_revision"] = generation + 1
-        operation["cleanup_plan"] = plan
-        operation["confirmation_digest"] = confirmed
-        if operation["kind"] in ("clean", "release"):
-            operation["phase"] = "intent"
-        if task.get("archive_ref"):
-            operation["cleanup_manifest"] = {"cleanup_plan_digest": confirmed, "confirmation_digest": confirmed,
-                                             "archive_digest": task["archive_ref"]["digest"]}
-        else:
-            operation.pop("cleanup_manifest", None)
-        operation.setdefault("amendment_receipts", []).append({"plan_revision": generation + 1,
-            "plan": plan, "confirmation_digest": confirmed, "amendment_digest": amendment_digest})
-        operation["last_amendment"] = dict(amendment, digest=amendment_digest,
-            conversation_decision={key: coverage_request[key] for key in
-                ("require_complete_conversation", "accept_conversation_digest", "decision_ref") if key in coverage_request})
-        # 保留原始请求身份与已完成中立状态，不能让 release 重新判定或改写结果。
-        operations.save(base, operation)
-        _flush_amendment_receipts(base, task, operation)
-        return operation
-
-
-def _verify_cleanup_decision(base, task, request, kind=None, prepared_plan=None):
-    plan = prepared_plan if prepared_plan is not None else _resources().plan(base, task, version=request.get("cleanup_version", 6))
-    from workflow import station_records
-    if kind != 'archive':
-        station_records.verify_source_choices(plan)
-    if request.get("confirmed_digest") != plan["digest"] or not request.get("decision_ref"):
-        raise ValueError("请展示重置范围并确认 confirmed_digest 与真实 decision_ref")
-    if kind != 'archive' or request.get('require_complete_conversation') or request.get('accept_conversation_digest'):
-        station_records.verify_decision(base, task, request)
-    else:
-        station_records.conversations(base, task)
-    discard = [e for e in plan["entries"] if e["preservation"]["action"] == "discard"]
-    if discard and request.get("discard_digest") != baseline.digest(discard):
-        raise ValueError("丢弃源码成果需要额外确认 discard_digest")
-    return plan
-
-
 def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode="execute"):
-    if kind not in ("archive", "release", "clean"):
-        raise ValueError("未知生命周期操作")
-    if cleanup_mode not in ("execute", "prepare", "verify"):
-        raise ValueError("未知清理执行模式")
-    _resources().require_cleanup_version(request.get("cleanup_version", 6))
-    if cleanup_mode != "execute" and kind == "archive":
-        raise ValueError("Agent 接力只用于版本 6 清理操作")
-    with task_store.task_state_lock(base):
-        previous = operations.read(base)
-        if previous and previous["operation_id"] == operation_id and "unbind" in previous["steps"] and task_store.read_current(base)["current"] is None:
-            if (previous["request_digest"] != baseline.digest(request) or previous["run_id"] != run_id
-                    or previous["kind"] != kind or previous["expected_revision"] != revision):
-                raise ValueError("解绑恢复请求不一致")
-            if task_store.read_current(base)["current"] is not None:
-                raise ValueError("解绑恢复发现其它任务")
-            operations.receipt(base, previous, "unbind", {"current": None})
-            final_task = previous["final_task"]
-            archives.receipt(base, final_task, previous, {"outcome": final_task["outcome"], "current": None}, "done")
-            from workflow import station_cleanup_stages as stages
-            stages.run(base, final_task, previous, "release", lambda: None,
-                       lambda: task_store.read_current(base)["current"] is None)
-            operations.finish(base, previous)
-            return previous
-        task = task_store.check_expected_run(base, issue, run_id)
-        if kind == "release" and task.get("archive_ref"):
-            record = archives.verify(base, task["archive_ref"], task)
-            if record["task_result"] != "completed" or task.get("outcome") != "completed":
-                raise ValueError("未完成档案只能 clean；不能后置完成再复用 incomplete 档案释放")
-        fresh = not previous or previous["operation_id"] != operation_id
-        prepared_plan = None
-        if fresh:
-            if kind == "clean" and request.get("abandon_changes") is not True:
-                raise ValueError("未完成任务需要明确放弃变更，未写入状态")
-            if kind in ("archive", "clean", "release"):
-                prepared_plan = _verify_cleanup_decision(base, task, request, kind)
-            if not task.get("archive_ref"):
-                baseline.text(request.get("summary"), "归档总结")
-                baseline.text(request.get("reason"), "归档原因")
-                if project_rules.scan_sensitive(project_rules.load_admission(station=base), request["summary"] + "\n" + request["reason"]):
-                    raise ValueError("归档输入包含敏感内容")
-            _resources().verify_stopped(base, task)
-            _resources().verify_known_external(base, task)
-            if kind == "release":
-                proof = task.get("terminal_proof") if task.get("outcome") == "completed" else completion_proof(base, task)
-                if not proof or request.get("candidate_digest") != proof["candidate_digest"]:
-                    raise ValueError("释放确认必须绑定最终候选摘要")
-                if baseline.digest(source.inspect(base, task["engineering_baseline"])) != proof["candidate_digest"]:
-                    raise ValueError("完成后源码已变化，拒绝归档释放")
-            if kind == "clean" and task.get("outcome") == "completed":
-                raise ValueError("已完成任务应释放")
-        if previous and previous["kind"] == "takeover" and previous["status"] != "done" and kind == "clean":
-            handoff = previous.get("handoff")
-            plan = handoff["cleanup_plan"] if handoff else prepared_plan
-            operation = operations.handoff_clean(base, operation_id, revision, request, run_id, plan)
-        else:
-            operation = operations.begin(base, kind, operation_id, revision, request, run_id)
-        if operation["status"] == "done":
-            return operation
-        resources = _resources()
-        # 恢复也核查，不因 fresh=False 跳过未知外部写入；与回执保存共用工位锁。
-        resources.verify_known_external(base, task)
-        resources.verify_stopped(base, task)
-        if kind == "release" and task.get("outcome") != "completed":
-            proof = completion_proof(base, task)
-            if request.get("candidate_digest") != proof["candidate_digest"]:
-                raise ValueError("释放确认必须绑定最终候选摘要")
-            apply_completion(task, proof)
-            task_store.write_task(base, task)
-            prepared_plan = None  # 完成处置改变任务事实，不能复用此前的盘点。
-        if kind == "clean" and task.get("outcome") == "completed":
-            raise ValueError("已完成任务应释放，不允许改写为未完成")
-        plan = operation.get("cleanup_plan")
-        if plan is None:
-            # 仅复用本次持锁调用中已确认的盘点；恢复与发布前仍重新核验。
-            plan = prepared_plan if prepared_plan is not None else resources.plan(base, task, version=request.get("cleanup_version", 6))
-            if kind != "archive" and request.get("confirmed_digest") != plan["digest"]:
-                raise ValueError("清理或释放必须明确确认当前精确 cleanup plan digest")
-            operation["cleanup_plan"] = plan
-            operations.save(base, operation)
-        resources.require_cleanup_version(plan.get("schema_version"))
-        resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
-        from workflow import station_cleanup_stages as stages
-        stages.run(base, task, operation, "admission", lambda: None,
-                   lambda: resources.verify_station_inventory(base, plan["rules"], allow_pending=True))
-        operation["phase"] = "cleanup_archive"
-        operations.save(base, operation)
-        reference = archives.publish(base, task, request, plan, operation, lambda: resources.plan(base, task, version=plan["schema_version"]))
-        stages.run(base, task, operation, "archive", lambda: None,
-                   lambda: archives.verify(base, reference, task))
-        _flush_amendment_receipts(base, task, operation)
-        if kind == "archive":
-            operations.finish(base, operation)
-            return operation
-        if kind == "clean":
-            task["outcome"] = "interrupted"
-            task_store.write_task(base, task)
-        confirmed = operation.get("confirmation_digest", request["confirmed_digest"])
-        previous_result = operation.get("cleanup_manifest", {}).get("result")
-        operation["cleanup_manifest"] = {"cleanup_plan_digest": plan["digest"],
-                                         "confirmation_digest": confirmed, "archive_digest": reference["digest"]}
-        if previous_result and previous_result.get("plan_digest") == plan["digest"]:
-            operation["cleanup_manifest"]["result"] = previous_result
-        operations.save(base, operation)
-        from workflow import station_reset_result
-        if cleanup_mode == "prepare":
-            operation["phase"] = "awaiting_cleanup_result"
-            operations.save(base, operation)
-            return operation
-        if cleanup_mode == "execute":
-            station_reset_result.apply(base, task, operation)
-        else:
-            operation["phase"] = "cleanup_source"
-            operations.save(base, operation)
-            station_reset_result.guard(base, task, operation)
-            stages.run(base, task, operation, "source", lambda: None,
-                       lambda: station_reset_result.verify_sources(base, task, operation))
-            stages.run(base, task, operation, "disposition", lambda: None,
-                       lambda: stages.verify_dispositions(base, task, operation))
-            stages.run(base, task, operation, "resources", lambda: None,
-                       lambda: station_reset_result.verify(base, task, operation))
-        operation["phase"] = "cleanup_release"
-        operations.save(base, operation)
-        operation["cleanup_manifest"]["result"] = station_reset_result.record(base, task, operation)
-        operation["phase"] = "cleanup_release"
-        operations.save(base, operation)
-        # 已按实际清理成果核验；活动授权随归档保全后的 clear-active 意图移除。
-        if operation.get("plan_revisions"):
-            _plan_receipt(base, task, operation, "resources-released")
-        else:
-            archives.receipt(base, task, operation, {"outcome": task["outcome"], "cleanup_manifest": operation["cleanup_manifest"]})
-        resources.verify_station_inventory(base, plan.get("rules"))
-        _clear_active(base, operation)
-        operation["final_task"] = {key: task[key] for key in ("issue_key", "run_id", "outcome", "archive_ref")}
-        operations.save(base, operation)
-        operations.intent(base, operation, "unbind", {"run_id": run_id}, {"current": None})
-        task_store.compare_and_set(base, task["_revision"], None)
-        operations.receipt(base, operation, "unbind", {"current": None})
-        operation["phase"] = "unbound"
-        operations.save(base, operation)
-        archives.receipt(base, task, operation, {"outcome": task["outcome"], "current": None}, "done")
-        stages.run(base, task, operation, "release", lambda: None,
-                   lambda: task_store.read_current(base)["current"] is None)
-        operations.finish(base, operation)
-        return operation
+    from workflow import station_clean
+    return station_clean.execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode)

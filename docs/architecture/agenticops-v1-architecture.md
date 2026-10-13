@@ -1,6 +1,6 @@
 # AgenticOps v1 工程架构
 
-本文描述单任务工位产品架构。身份、四操作及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。旧版本状态只由原版本清理；新版本不提供旧 Runtime。本文不代替真实应用启动与发布验收。
+本文描述单任务工位产品架构。身份、退出职责及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。旧版本状态只由原版本清理；新版本不提供旧 Runtime。本文不代替真实应用启动与发布验收。
 
 ## 1. 核心决策
 
@@ -68,13 +68,13 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 ## 6. 四操作与恢复
 
-takeover 先登记操作意图和当前任务，再准备完整独立源码与 runtime；失败保留同 run/op。archive 可归档未完成任务，冻结后禁止继续开发且仍占用。release 在项目交付与验收核对及研发明确确认后归档、回收现场并解绑。clean 在未完成任务的精确处置授权和有效档案之后清理，保留源码仓库及 refs，成功后才允许下个任务。
+takeover 先完成只读预检，再登记操作与任务并准备独立源码；已有副作用的失败恢复同 run/op。工作清理保持当前任务；任务清理撤销授权并解绑；archive 尽力记录已有结果，不冻结开发或阻断退出；release 组合 archive 和任务清理，覆盖处理中途退出和完成后退出。业务完成验收独立执行。
 
-状态以工位锁串行，写请求绑定 run/revision，跨文件副作用以操作意图、回读、阶段和幂等回执恢复，不宣称事务或防篡改。未知归属、清理范围变化、路径漂移或资源停止失败均阻止解绑。
+状态由工位锁串行，写请求绑定 run/revision，副作用由原操作及逐对象回执恢复。未知对象、路径漂移和未停止写入者使受影响对象保留，独立步骤继续；解绑结果必须回读。具体清单、保护与异常接力规则只在[工位合同](single-task-station.md)维护。
 
 ## 7. 生成、清理与升级分层
 
-Bootstrap 生成可再生接线、稳定绑定、空 current 和工位内 config/source/runtime；repair 只修复同代际接线。station purge/detach 只处理空闲且无未完成操作的工位，验证生成归属，拒绝未知状态或非空 runtime，移除受管接线、绑定和状态。source/config 与用户文件保留，Product Root `.archive/` 不在工位清理范围；重新生成时非空持久材料需明确 --reuse-materials，并生成新 station_id，不继承旧 run 授权。
+Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 编排本版统一退出后移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
 
 同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。删除工具 Hook 的执行依赖会改变旧接线的读用语义，因此退役版本提升 epoch；旧客户端通过已有 epoch 检查在切换前停止，不能用新版检查器的行为替代旧客户端回归。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
 
@@ -82,7 +82,7 @@ Bootstrap 生成可再生接线、稳定绑定、空 current 和工位内 config
 
 ## 8. 连续性与安全
 
-任务接续区分同版本运行恢复与从 Jira/GitHub 成果重新接管。后者由 Agent 原生读取、理解和补齐外部材料，Workflow 只接收本版输入并核验；Bootstrap 不解析旧任务或实现 epoch 转换。共享任务接续 Skill 负责协作，阶段评论从既有仓库绑定派生工作分支、目标分支、历史基线与源码版本，不增加本地账本。详见[从任务事实接续](single-task-station.md#从任务事实接续)。
+任务接续区分同版本运行恢复与从 Jira/GitHub 成果重新接管。后者由 Agent 原生读取、理解和补齐外部材料，Workflow 只接收本版输入并核验；Bootstrap 不解析旧任务或实现 epoch 转换。共享任务接续 Skill 负责协作，阶段评论从既有仓库绑定派生工作分支、目标分支、历史基线与源码版本，不增加本地账本。详见[从任务事实接续](single-task-station.md)。
 
 未迁移的辅助能力优先由 Agent 原生能力完成；没有安全自动路径时，只暂停当前副作用并输出人工接力。事实不可信、权限不足、高风险操作或外部写入结果不明必须停止。
 

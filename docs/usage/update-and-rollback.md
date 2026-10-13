@@ -1,12 +1,12 @@
 # 更新与回退
 
-当前会话准入、来源范围和收尾输入使用 epoch 29。epoch 28 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
+当前清单、归档和退出语义使用 epoch 30。epoch 29 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
 
 ## 同 epoch 恢复与跨 epoch 切换的目标入口
 
-“原版无法退出，而修复版跨 epoch”的完整解法及定点更新、原版本维护恢复、预检和有限续接入口由[工位合同](../architecture/single-task-station.md#同-epoch-恢复与跨-epoch-切换目标设计)统一维护，属于[完整退出优化](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)的产品切换部分，本页不另定义规则。当前源码已提供入口；旧安装是否具备能力须回读实际提交与帮助，源码可用不代表旧安装已应用。无参 update 仍跟随原记录分支，定点更新不能换通道。原版纯历史重放及合法退出修复先在原 epoch 验收，新默认会话准入不混入兼容补丁，不要求旧现场先升 epoch 才能清理。
+“原版无法退出，而修复版跨 epoch”的完整解法及定点更新、原版本维护恢复、预检和有限续接入口由[工位合同](../architecture/single-task-station.md)统一维护，属于[完整退出优化](../architecture/single-task-station.md)的产品切换部分，本页不另定义规则。当前源码已提供入口；旧安装是否具备能力须回读实际提交与帮助，源码可用不代表旧安装已应用。无参 update 仍跟随原记录分支，定点更新不能换通道。原版纯历史重放及合法退出修复先在原 epoch 验收，新默认会话准入不混入兼容补丁，不要求旧现场先升 epoch 才能清理。
 
 当前遇到此循环时，先核实原版本退出缺陷和适用的兼容修复，复用原版本维护成果；尚无受信、可验证的应用路径时保全旧现场并停在恢复应用之前。不要手改 epoch、复制新版文件覆盖安装、删除登记，或把独立新版启动当作旧工位已退出。补丁应用、真实退出和最终升级分别核验，工作进展及待验证项记录在 Jira。
 
@@ -37,21 +37,21 @@
 先在同一个 Product Root 版本完成闭环：
 
 1. agenticops station init --station <绝对路径> --project tapdata，生成绑定、空 current 和 config/source/runtime；正式档案在绑定 Product Root 的 `.archive/` 中按 run 保存。
-2. 在工位中接管任务。处理中不能接新任务；结束后 archive/release 或 archive/clean，精确授权范围以项目 Skill 和 CLI 为准。
-3. 当前任务为空、操作完成且 runtime 已清空后，明确执行 agenticops station purge --station <绝对路径> --yes。清理验证生成归属，不删除 source/config、Product Root `.archive/` 和未知用户材料；未知状态导致失败，不能宣称工位已干净。
+2. 在工位中接管任务。处理中不能接新任务；结束后 release 或 clean，精确授权范围以项目 Skill 和 CLI 为准。
+3. 明确执行 agenticops station purge --station <绝对路径> --yes。清理验证生成归属，不删除 source/config、Product Root `.archive/` 和未知用户材料；本版 purge 先调用统一退出脚本，保留未知对象并返回结果，不将已解绑误称清理无残留。
 4. 确认 .agenticops 与受管接线已移除，再初始化。保留目录非空时明确追加 --reuse-materials；这只允许保留既有真实目录，不授权覆盖、删除或导入旧任务。runtime 必须为空，重新生成新的 station_id。
 
-station clean --generated-only 是接线刷新，不是上述解除绑定操作；不能用它证明状态已清空。
+接线刷新使用 station repair；工作清理使用 workflow/station-clean.py --action work-clean。
 
 ## 第二阶段：跨版本编排
 
-升级器只编排产品切换，不实现任务清理逻辑。兼容清单只维护 `station_state_epoch` 一个配置项。升级器在 Git 引用切换前比较当前与目标值：相同可直接更新；不同则必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本将已完成任务 release、未完成任务 clean，确认正式档案已经发布，再执行 `station purge`。单独执行 archive 仍占用工位，不满足升级条件。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
+升级器只编排产品切换，不实现任务清理逻辑。兼容清单只维护 `station_state_epoch` 一个配置项。升级器在 Git 引用切换前比较当前与目标值：相同可直接更新；不同则必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本按其退出合同执行 release/clean 与 `station purge`。本版归档不阻塞退出，旧版本不得套用本版语义。单独执行 archive 仍占用工位，不满足升级条件。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
 
 同 epoch 更新执行 `agenticops update`，随后 doctor 检查、repair 刷新接线。epoch 变化后，研发先在原版本完成任务并解绑全部工位，更新成功后再用目标版本重新 init；不自动 repair、init 或导入旧任务。rollback 只适用于安装目录，并使用相同的“epoch 变化则登记必须为空”规则；产品源码使用 Git 治理流程，不自动移动源码分支。
 
 ## 任务处理中升级后继续
 
-任务未完成而产品必须升级时，先按[从 Jira 任务接续](task-authorization.md#从-jira-任务接续)补齐 Jira/GitHub 中的有效设计、代码、验证和待办。原版本按实际范围归档为 incomplete、clean 并 purge；这只结束本地 run，不取消 Jira 任务。之后按目标版本初始化，通过 Jira key 接续既有分支，重新建立本版执行与授权。跨多个 epoch 同样处理，不逐级转换旧状态。
+任务未完成而产品必须升级时，先按[从 Jira 任务接续](task-authorization.md#从-jira-任务接续)补齐 Jira/GitHub 中的有效设计、代码、验证和待办。原版本按其合同记录未完成事实、退出并 purge；这只结束本地 run，不取消 Jira 任务。之后按目标版本初始化，通过 Jira key 接续既有分支，重新建立本版执行与授权。跨多个 epoch 同样处理，不逐级转换旧状态。
 
 共享安装有其它活动工位时，不注销其登记或更新共享安装来绕过检查。用户只授权隔离当前工位时，先在原版本退出当前工位，明确复用 source/config，以相同产品版本在独立安装目录重新绑定；随后只对独立安装执行升级。记录全部受影响工位并回读绑定和版本，另一工位的源码、运行状态及产品版本不在处置范围。
 

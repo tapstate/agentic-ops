@@ -122,6 +122,24 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertIn('代际', result.stderr)
         self.assertEqual('invalid old state', state.read_text())
 
+    def test_purge_composes_release_for_incomplete_task_and_optional_config(self):
+        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
+            'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
+            'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
+            'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
+        (self.station / 'config/service').write_text('reusable')
+        (self.station / 'config/keep').write_text('keep')
+        (self.station / 'runtime/unknown').write_text('keep')
+        (self.station / 'source/notes').write_text('source')
+        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=['config/service'])
+        from workflow import station_archive
+        with mock.patch.object(station_archive, 'publish', side_effect=OSError('unavailable')):
+            registry.command_detach(args, ROOT, purge=True)
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
+        self.assertFalse((self.station / 'config/service').exists())
+        for name in ('config/keep', 'runtime/unknown', 'source/notes'):
+            self.assertTrue((self.station / name).exists())
+
     def test_generate_purge_generate(self):
         before = json.loads((self.station / '.agenticops/station.json').read_text())
         self.assertEqual(before['schema_version'], 4)
@@ -264,15 +282,20 @@ class StationBootstrapTests(unittest.TestCase):
     def test_unknown_state_and_runtime_are_not_deleted(self):
         unknown = self.station / '.agenticops/unknown'
         unknown.write_text('keep')
-        with self.assertRaisesRegex(ValueError, '未知文件'):
-            registry.detach(ROOT, self.station, purge=True)
-        self.assertEqual(unknown.read_text(), 'keep')
-        unknown.unlink()
         runtime = self.station / 'runtime/unknown'
         runtime.write_text('keep')
-        with self.assertRaisesRegex(ValueError, 'runtime'):
-            registry.detach(ROOT, self.station, purge=True)
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertEqual(unknown.read_text(), 'keep')
         self.assertEqual(runtime.read_text(), 'keep')
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
+
+    def test_purge_preserves_unreferenced_operation_material(self):
+        folder = self.station / '.agenticops/operation-data'; folder.mkdir()
+        note = folder / 'user-note.json'; note.write_text('not managed JSON')
+        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=[])
+        registry.command_detach(args, ROOT, purge=True)
+        self.assertEqual('not managed JSON', note.read_text())
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
 
     def test_reuse_never_adopts_nonempty_runtime_or_symlink(self):
         registry.detach(ROOT, self.station, purge=True)
@@ -384,7 +407,7 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_non_tapdata_binding_is_reused_without_default(self):
         product = self.station.parent / 'product'
-        for name in ('bootstrap', 'contracts', 'workflow', 'adapters', 'skills'):
+        for name in ('bootstrap', 'contracts', 'workflow', 'adapters', 'skills', 'policies'):
             shutil.copytree(ROOT / name, product / name)
         (product / 'projects/demo').mkdir(parents=True)
         (product / 'projects/other').mkdir()

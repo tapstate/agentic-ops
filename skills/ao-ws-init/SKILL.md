@@ -20,7 +20,7 @@ description: 创建、刷新或受控解绑 AgenticOps 单任务工位，核验�
 
 ## 清理与再生成
 
-先检查 current 和 operation。存在任务则由项目 Skill 完成 release/clean，不用 station purge 代替任务归档；未完成操作先恢复。请求注销时可一次展示原任务退出及受管注销的完整具体范围，复用仍有效的真实决定；存在未完成操作仍先恢复。仅空闲、操作完成、runtime 干净时，展示精确工位及接线/状态删除范围，明确保留 source/config、旧工位 archive（若有）、Product Root `.archive/` 与用户文件，取得确认后执行：
+注销直接调用 purge，脚本先恢复原退出操作或调用 release，再移除接线和绑定；归档失败不阻断退出，脚本有异常才由 Agent 接手未完成部分。请求注销时可一次展示原任务退出及受管注销的完整具体范围，复用仍有效的真实决定；存在未完成操作仍先恢复。任务已退出、操作完成时，展示精确工位及接线/状态删除范围，明确保留 source/config、旧工位 archive（若有）、Product Root `.archive/` 与用户文件，取得确认后执行：
 
 ```sh
 <product-root>/agenticops station purge --station <station> --yes

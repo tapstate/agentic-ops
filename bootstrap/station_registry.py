@@ -232,14 +232,14 @@ def detach_preflight(product_root, station, purge=False, tree=None):
             continue
         if recorded["kind"] == "symlink":
             if not tree.is_symlink(relative) or tree.readlink(relative) != recorded["target"]:
-                raise ValueError("生成 Skill 接线已被修改或异常，拒绝删除：%s" % path)
+                continue  # 修改过的接线保留，由注销结果提示。
         elif (
             not tree.is_file(relative)
             or tree.is_symlink(relative)
             or hashlib.sha256(tree.read_text(relative).encode("utf-8")).hexdigest()
             != recorded["sha256"]
         ):
-            raise ValueError("生成接线已被修改或异常，拒绝删除：%s" % path)
+            continue  # 用户修改不授予删除权，也不阻止独立解绑。
         deletable.append(relative)
     state_root = station_artifact_path(station, STATE_DIRECTORY)
     require_station_can_adopt(product_root, station)
@@ -258,19 +258,13 @@ def detach_preflight(product_root, station, purge=False, tree=None):
                "git-ref-cache-v2.json.lock"}
     for path in state_root.iterdir():
         if path.name == "operation-data" and path.is_dir() and not path.is_symlink():
-            from workflow import engineering_baseline
-            for item in path.iterdir():
-                if item.is_symlink() or not item.is_file() or item.suffix != ".json" or engineering_baseline.digest(json.loads(item.read_text())) != item.stem:
-                    raise ValueError("操作材料包含未知或损坏对象，拒绝解绑")
             continue
         if path.name not in allowed or path.is_symlink() or not path.is_file():
-            raise ValueError("工位状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
+            continue  # 未知状态保留，不纳入受管删除范围。
     from workflow import station_layout
     runtime_root = station_layout.station_name(station, "task-runtime")
     if not tree.is_dir(runtime_root) or tree.is_symlink(runtime_root):
         raise ValueError("runtime 目录缺失或不安全，拒绝解绑")
-    if any(tree.path(runtime_root).iterdir()):
-        raise ValueError("runtime 仍有材料，必须先经任务清理或明确处置，不能解绑")
     return deletable, 0
 
 
@@ -300,8 +294,20 @@ def detach(product_root, station, purge=False, allow_product_lifecycle=False):
 
             for name in ("current-task.json", "operation.json", "events.jsonl",
                          "git-ref-cache-v2.json", "git-ref-cache-v2.json.lock"):
-                tree.unlink(Path(STATE_DIRECTORY) / name, missing_ok=True)
-            tree.remove_tree(Path(STATE_DIRECTORY) / "operation-data", missing_ok=True)
+                relative = Path(STATE_DIRECTORY) / name
+                if tree.exists(relative) and tree.is_file(relative) and not tree.is_symlink(relative):
+                    tree.unlink(relative)
+            blobs = station / STATE_DIRECTORY / 'operation-data'
+            if blobs.is_dir() and not blobs.is_symlink():
+                from workflow import engineering_baseline
+                for blob in blobs.iterdir():
+                    try:
+                        if (not blob.is_symlink() and blob.is_file() and blob.suffix == '.json'
+                                and engineering_baseline.digest(json.loads(blob.read_text())) == blob.stem):
+                            tree.unlink(Path(STATE_DIRECTORY) / 'operation-data' / blob.name)
+                    except (OSError, ValueError):
+                        continue
+                tree.rmdir_cached(Path(STATE_DIRECTORY) / 'operation-data')
             for relative in (
                 Path(STATE_DIRECTORY) / "init.json",
                 Path(STATE_DIRECTORY) / "station.json",
@@ -413,21 +419,45 @@ def command_detach(args, product_root, purge=False):
     targets = select_targets(args, product_root)
     details = {}
     for station in targets:
-        _, task_count = detach_preflight(product_root, station, purge=purge)
-        details[str(station)] = "空闲工位：只移除接线和绑定；保留 source/config、旧工位 archive（若有）及 Product Root .archive"
+        require_tracked(product_root, station)
+        require_station_can_adopt(product_root, station)
+        details[str(station)] = "由本版本脚本退出当前任务，再移除接线和绑定；保留 source/config 和未知残留"
     show_targets("purge" if purge else "detach", targets, details)
     confirm(args)
+    from workflow import station_clean
+    import uuid
     for station in targets:
-        detach(
-            product_root,
-            station,
-            purge=purge,
-            allow_product_lifecycle=args.lifecycle_held,
-        )
+        task = task_store.read_task(station)
+        previous = station_operation.read(station)
+        resumed = False
+        if previous and previous['status'] != 'done' and previous['kind'] in ('clean', 'release', 'work-clean'):
+            station_clean.execute(station, previous['kind'], (task or previous.get('exit_task') or {}).get('issue_key'),
+                                  previous['run_id'], previous['expected_revision'], previous['operation_id'], previous['request'],
+                                  allow_product_lifecycle=args.lifecycle_held)
+            task = task_store.read_task(station)
+            resumed = True
+        if task or not resumed:
+            operation = station_clean.execute(station, 'release' if task else 'work-clean', task['issue_key'] if task else None,
+                task['run_id'] if task else 'run-' + station_context.read_binding(station)['station_id'],
+                task_store.read_current(station)['revision'], 'op-' + uuid.uuid4().hex,
+                {'clear_config': getattr(args, 'clear_config', [])}, allow_product_lifecycle=args.lifecycle_held)
+            from workflow.station_clean_view import emit
+            emit({'station': str(station), 'cleanup': operation.get('cleanup_result'), 'archive': operation.get('archive_result')})
+        # 注销之前展示仍被保留的实际对象，归档缺项不影响解绑。
+        deletable, _ = detach_preflight(product_root, station, purge=purge)
+        owned = owned_artifacts(station)
+        retained = [name for name in owned if name not in deletable and (station / name).exists()]
+        retained.extend(str(path.relative_to(station)) for path in (station / 'runtime').iterdir())
+        if retained:
+            print(json.dumps({'station': str(station), 'retained': retained}, ensure_ascii=False))
+        detach(product_root, station, purge=purge, allow_product_lifecycle=args.lifecycle_held)
+        remaining_state = station / STATE_DIRECTORY
+        if remaining_state.is_dir():
+            print(json.dumps({'station': str(station), 'retained_state': [str(p.relative_to(station)) for p in remaining_state.iterdir()]}, ensure_ascii=False))
     for station in targets:
         if str(station) in load_registry(product_root) or (station / '.agenticops/station.json').exists():
             raise ValueError('受管注销结果未核验：' + str(station))
-    print('已%s %s 个工位；保留 source/config 与正式档案，工程目录未删除。' % ('注销' if purge else '解绑', len(targets)))
+    print('已%s %s 个工位；保留 source/config、未知残留与正式档案，工程目录未删除。' % ('注销' if purge else '解绑', len(targets)))
 
 
 def command_pending(args, product_root):
@@ -511,22 +541,18 @@ def parser():
     status.add_argument("--json", action="store_true", help="输出基本信息 JSON，不展开任务事实或秘密")
     identity = commands.add_parser("identity")
     identity.add_argument("--station", required=True)
-    for name in ("prune", "repair", "detach", "purge"):
+    for name in ("prune", "repair", "purge"):
         command = commands.add_parser(name)
         target = command.add_mutually_exclusive_group(required=True)
         target.add_argument("--station")
         target.add_argument("--all", action="store_true")
         command.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
+        if name == "purge":
+            command.add_argument("--clear-config", action="append", default=[], help="显式选择配置相对路径；默认保留")
         if name == "repair":
             command.add_argument("--ensure-wiki", action="store_true", help="显式准备项目共享 Wiki；不在初始化或接管时自动执行")
     wiki = commands.add_parser("ensure-wiki")
     wiki.add_argument("--station", required=True)
-    clean = commands.add_parser("clean")
-    target = clean.add_mutually_exclusive_group(required=True)
-    target.add_argument("--station")
-    target.add_argument("--all", action="store_true")
-    clean.add_argument("--generated-only", action="store_true", required=True)
-    clean.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
     return result
 
 
@@ -555,10 +581,6 @@ def main():
         elif args.command == "ensure-wiki":
             result = ensure_wiki(product_root, Path(args.station).resolve())
             print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
-        elif args.command == "clean":
-            command_refresh(args, product_root, "clean --generated-only")
-        elif args.command == "detach":
-            command_detach(args, product_root)
         elif args.command == "purge":
             command_detach(args, product_root, purge=True)
         return 0

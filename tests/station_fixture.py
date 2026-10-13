@@ -61,4 +61,5 @@ def initialize_station(base):
         original = Path(__file__).resolve().parents[1] / "contracts/station-state-compatibility.json"
         task_store._write_json_atomic(manifest, json.loads(original.read_text()))
     epoch = json.loads(manifest.read_text())["station_state_epoch"]
-    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": epoch})
+    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": epoch,
+        "cleanup": json.loads((Path(__file__).resolve().parents[1] / "policies/station-clean.json").read_text())})
