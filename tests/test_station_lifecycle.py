@@ -186,10 +186,11 @@ class StationTests(unittest.TestCase):
         self.assertEqual(self.other_repository_state(), untouched)
 
     def test_new_run_archives_and_resets_with_one_confirmation(self):
-        from workflow import station_resources
+        from workflow import station_resources, station_records
         task = self.takeover()
         plan = station_resources.plan(self.ws, task)
         request = {"summary": "尚未编码", "reason": "用户取消", "decision_ref": "fixture:user", "abandon_changes": True,
+                   "accept_conversation_digest": station_records.conversations(self.ws, task)['digest'],
                    "confirmed_digest": plan["digest"]}
         station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", request)
         self.assertIsNone(task_store.read_task(self.ws))
@@ -238,7 +239,7 @@ class StationTests(unittest.TestCase):
             task_store.require_development(self.ws, current)
 
     def test_wrong_confirmation_keeps_current(self):
-        from workflow import station_resources
+        from workflow import station_resources, station_records
         task = self.rule_task()
         plan = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
         resources = mock.Mock(spec=station_resources)
@@ -252,7 +253,8 @@ class StationTests(unittest.TestCase):
                 with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, "确认"):
                     station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-one", request)
                 self.assertEqual(before, {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()})
-            valid = dict(confirmed_digest="plan", decision_ref="fixture:user", cleanup_version=6)
+            valid = dict(confirmed_digest="plan", decision_ref="fixture:user", cleanup_version=6,
+                         accept_conversation_digest=station_records.conversations(self.ws, task)['digest'])
             self.assertEqual(plan, station._verify_cleanup_decision(self.ws, task, valid))
             plan["entries"] = [{"path": "source/tapdata/tapdata/file.txt", "preservation": {"action": "discard"}}]
             with self.assertRaisesRegex(ValueError, "discard_digest"):

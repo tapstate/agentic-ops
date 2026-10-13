@@ -10,6 +10,13 @@ test "$mode" = "installed" || { printf 'AgenticOps：rollback 只适用于安装
 . "$install_root/bootstrap/lifecycle-common.sh"
 lifecycle_acquire_lock "$install_root" "rollback:installed"
 lifecycle_require_clean_tree "$install_root" "使用"
+recorded_ref="$(python3 "$state_tool" --product-root "$install_root" read --field current_ref)"
+test "$(git -C "$install_root" rev-parse HEAD)" = "$recorded_ref" || {
+  printf 'AgenticOps：安装目录 HEAD 与本地配置不一致，拒绝回退\n' >&2
+  exit 2
+}
+repository="$(python3 "$state_tool" --product-root "$install_root" read --field repository)"
+lifecycle_require_recorded_remote "$install_root" "$repository" "安装目录"
 previous_ref="$(python3 "$state_tool" --product-root "$install_root" read --field previous_ref)"
 test -n "$previous_ref" || { printf 'AgenticOps：没有可回退版本\n' >&2; exit 2; }
 current_ref="$(git -C "$install_root" rev-parse HEAD)"

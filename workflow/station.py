@@ -417,7 +417,7 @@ def apply_completion(task, proof):
     task.update(outcome="completed", stage="completed", terminal_proof=proof)
 
 
-def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_digest, request):
+def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_digest, request, conversation_input=None):
     """同一操作精确重新确认；archive 只刷新未发布草稿，绝不授权删除。"""
     with task_store.task_state_lock(base):
         task = task_store.check_expected_run(base, issue, run_id)
@@ -427,6 +427,10 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
             raise ValueError("只能补充当前未完成的 archive/clean/release 操作")
         if "unbind" in operation["steps"]:
             raise ValueError("已开始解绑，不能再扩展清理范围")
+        from workflow import station_exit_inputs
+        prepared = station_exit_inputs.prepare(base, task, conversation_input, amendment=True) if conversation_input else None
+        if prepared:
+            request = dict(request, conversation_input_digest=prepared['manifest_digest'])
         amendment = {"expected_plan_digest": expected_plan_digest, "request": request,
                      "expected_revision": revision}
         amendment_digest = baseline.digest(amendment)
@@ -456,16 +460,24 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
         from workflow import station_directories
         station_directories.verify_completed_roots(base, task, operation)
         _resources().verify_completed_batches(base, task, operation)
-        plan = _resources().plan(base, task, version=current["schema_version"], archive_runtime=request.get("archive_runtime"))
+        plan = _resources().plan(base, task, version=current["schema_version"], archive_runtime=request.get("archive_runtime"),
+                                 evidence_override=prepared["files"] if prepared else None)
         from workflow import station_records
         coverage_request = station_records.effective_request(operation, request)
-        station_records.verify_decision(base, task, coverage_request)
+        inputs = station_records.read_documents(base, task, prepared["files"]) if prepared else None
+        if operation['kind'] != 'archive' or coverage_request.get('require_complete_conversation') or coverage_request.get('accept_conversation_digest'):
+            station_records.verify_decision(base, task, coverage_request, inputs)
+        else:
+            station_records.conversations(base, task, inputs)
         confirmed = request.get("confirmed_digest")
         if not confirmed or confirmed != plan["digest"] or not request.get("decision_ref"):
             raise ValueError("必须明确确认当前补充清理计划摘要")
         discarded = [entry for entry in plan["entries"] if entry["preservation"]["action"] == "discard"]
         if discarded and request.get("discard_digest") != baseline.digest(discarded):
             raise ValueError("丢弃源码成果需要额外确认 discard_digest")
+        if prepared:
+            # 完整请求与未来精确计划已核验后才写；部分落盘沿原清单恢复。
+            station_exit_inputs.write_prepared(base, prepared)
         history.append({"revision": generation, "plan": current,
                         "confirmation_digest": operation.get("confirmation_digest", operation["request"].get("confirmed_digest")),
                         "purpose": "archive_refresh" if operation["kind"] == "archive" else "cleanup",
@@ -500,14 +512,17 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
         return operation
 
 
-def _verify_cleanup_decision(base, task, request, kind=None):
-    plan = _resources().plan(base, task, version=request.get("cleanup_version", 6))
+def _verify_cleanup_decision(base, task, request, kind=None, prepared_plan=None):
+    plan = prepared_plan if prepared_plan is not None else _resources().plan(base, task, version=request.get("cleanup_version", 6))
     from workflow import station_records
     if kind != 'archive':
         station_records.verify_source_choices(plan)
-    station_records.verify_decision(base, task, request)
     if request.get("confirmed_digest") != plan["digest"] or not request.get("decision_ref"):
         raise ValueError("请展示重置范围并确认 confirmed_digest 与真实 decision_ref")
+    if kind != 'archive' or request.get('require_complete_conversation') or request.get('accept_conversation_digest'):
+        station_records.verify_decision(base, task, request)
+    else:
+        station_records.conversations(base, task)
     discard = [e for e in plan["entries"] if e["preservation"]["action"] == "discard"]
     if discard and request.get("discard_digest") != baseline.digest(discard):
         raise ValueError("丢弃源码成果需要额外确认 discard_digest")

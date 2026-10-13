@@ -29,7 +29,7 @@ def source_inventory(base, task):
                     objects.setdefault(filename, []).append(category)
             for filename, categories in sorted(objects.items()):
                 row["objects"].append({"path": station_layout.relative(base, "repositories", name + "/" + filename),
-                    "git_state": categories, "allowed_decisions": ["archive", "export", "discard_with_exact_confirmation"]})
+                    "git_state": categories, "allowed_decisions": ["export", "discard_with_exact_confirmation"]})
             device = repo.stat().st_dev
             def failed(error):
                 row["problems"].append({"path": str(error.filename), "reason": str(error)})
@@ -53,9 +53,9 @@ def source_inventory(base, task):
     return result
 
 
-def describe(base, task=None, plan=None, operation=None, blockers=()):
+def describe(base, task=None, plan=None, operation=None, blockers=(), conversation=None):
     operation = operation or {}
-    result = {"complete": bool(plan), "executable": bool(plan) and not blockers,
+    result = {"complete": bool(plan), "executable": False,
               "remove_or_reset": [], "preserve_before_clear": [], "retain": [], "unknown": [],
               "blockers": list(blockers), "boundary": "仅展示范围；执行仍须核验原计划摘要与确认，不扩大删除权限"}
 
@@ -71,7 +71,8 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
         owned = [entry["path"] for entry in init.get("artifacts", [])]
         for name in owned:
             row("retain", name, "retain", "初始化接线，任务退出不卸载工位", ["retain"])
-        observed = station_clean_rules.inspect(base, owned, roots, partial=True)
+        observed = ({'objects': plan['rules']['objects'], 'errors': []} if plan else
+                    station_clean_rules.inspect(base, owned, roots, partial=True))
         result["blockers"].extend(observed["errors"])
         # 观测只列根，不遍历配置、保留材料或正式档案。
         for name, decision in observed["objects"].items():
@@ -104,16 +105,17 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
             for relative in batch["files"]:
                 row("remove_or_reset", relative, "discard", "冻结规则匹配的普通文件，不归档丢弃", ["confirm", "cancel"], scope=batch["scope"])
         for entry in plan["entries"]:
-            row("preserve_before_clear", entry["path"], entry["preservation"]["action"], "源码成果处置", ["archive", "export", "discard_with_exact_confirmation"], evidence=entry)
+            action = entry["preservation"]["action"]
+            row("preserve_before_clear", entry["path"], "undecided" if action == "archive" else action,
+                "源码成果尚未决定" if action == "archive" else "源码成果处置", ["export", "discard_with_exact_confirmation"], evidence=entry)
         for relative in plan["archive_runtime"]:
-            row("preserve_before_clear", station_layout.relative(base, "task-runtime", relative), "archive", "仅保存符合归档规则的脱敏日志和报告，不备份整个 runtime", ["confirm", "cancel"])
+            row("preserve_before_clear", station_layout.relative(base, "task-runtime", relative), "archive", "仅保存运行证据的脱敏状态与引用，不备份日志正文或整个 runtime", ["confirm", "cancel"])
         for name, state in plan["source"].items():
             row("remove_or_reset", station_layout.relative(base, "repositories", name), "checkout_baseline", "保全成果后回到已核验开发 SHA，不移动命名分支", ["confirm", "cancel"], source=state)
             if state.get("preserved_ref"):
                 row("retain", name + ":" + state["preserved_ref"], "retain", "计划保留任务 Head", ["retain", "separate_request"], sha=state["preserved_head"])
             try:
-                repo = station_source.repository_path(base, name)
-                refs = station_source.git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes").stdout.splitlines()
+                refs = [ref + ' ' + sha for ref, sha in state.get('refs', {}).items()]
                 row("retain", name + " refs", "retain", "本地观测；远端现状及保护规则未经在线核验", ["retain", "separate_request"], refs=refs)
             except (ValueError, OSError, subprocess.TimeoutExpired) as error:
                 row("unknown", name + " refs", "unverified", str(error), ["clarify"])
@@ -123,7 +125,7 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
     if task:
         from workflow import station_records
         try:
-            result['conversation'] = station_records.conversations(base, task)
+            result['conversation'] = station_records.conversations(base, task) if conversation is None else conversation
         except (ValueError, OSError) as error:
             result['blockers'].append(str(error))
         if plan:
@@ -156,7 +158,85 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
     if result["blockers"] or result["unknown"]:
         result["executable"] = False
         result["complete"] = False
+    frozen = json.loads(operation['archive_evidence']) if operation.get('archive_evidence') else {}
+    final = task or dict(frozen.get('current', {}), **operation.get('final_task', {}))
+    root = Path(base).resolve()
+    runtime = root / station_layout.station_name(base, 'task-runtime')
+    empty_runtime = runtime.is_dir() and not runtime.is_symlink() and not any(runtime.iterdir())
+    current = task_store.read_current(base)['current']
+    result['results'] = {
+        'task': {'outcome': final.get('outcome', 'unknown'), 'stage': final.get('stage'),
+                 'terminal_proof': bool(final.get('terminal_proof'))},
+        'archive': {'reference': final.get('archive_ref') or operation.get('archive_ref'),
+                    'coverage': result.get('conversation', frozen.get('conversation_coverage', {})).get('coverage', '查看正式档案覆盖；不推定完整')},
+        'release': {'released': current is None and operation.get('status') == 'done'
+                    and operation.get('kind') in ('clean', 'release') and empty_runtime,
+                    'occupied': current is not None, 'operation': operation.get('status'), 'runtime_empty': empty_runtime},
+        'purge': {'unregistered': not (root / '.agenticops/station.json').exists(),
+                  'boundary': '任务释放不注销工位；注销保留源码、配置和正式档案'}}
     return result
+
+
+MAX_OUTPUT_BYTES = 64 * 1024
+
+
+def compact(value, limit=10, string_limit=2048, depth=0):
+    """只裁剪展示副本；完整计划、proof 与执行摘要不变。"""
+    if isinstance(value, dict):
+        if depth > 12:
+            return {'_summary_only': True, '_field_count': len(value)}
+        result = {}
+        for key, item in list(value.items())[:32]:
+            display_key = key if len(key) <= 256 else key[:128] + '…[键已省略]'
+            result[display_key] = compact(item, limit, string_limit, depth + 1)
+            if isinstance(item, list):
+                result[display_key + '_count'] = len(item)
+                result[display_key + '_omitted'] = max(0, len(item) - limit)
+        if len(value) > 32:
+            result['_field_count'] = len(value)
+            result['_fields_omitted'] = len(value) - 32
+        return result
+    if isinstance(value, list):
+        return [compact(item, limit, string_limit, depth + 1) for item in value[:limit]]
+    if isinstance(value, str) and len(value) > string_limit:
+        return value[:string_limit] + '…[已省略，完整值见 --details]'
+    return value
+
+
+def render(value, details=False):
+    if details:
+        return json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)
+    for limit, length in ((10, 2048), (5, 1024), (2, 512), (1, 128)):
+        summary = compact(value, limit, length)
+        summary['_summary_only'] = True
+        summary['details_command'] = 'station-clean.py --details'
+        text = json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False)
+        if len((text + '\n').encode('utf-8')) <= MAX_OUTPUT_BYTES:
+            return text
+    return json.dumps({'status': value.get('status', 'needs_attention'), 'summary_omitted': True,
+                      'details_command': 'station-clean.py --details'}, ensure_ascii=False)
+
+
+def emit(value, *, details=False, output=None, base=None):
+    if output:
+        if not details or base is None:
+            raise ValueError('--output 只用于 --details 的工位外完整清单')
+        from workflow import project_rules
+        target = Path(output)
+        if not target.is_absolute() or target != target.resolve():
+            raise ValueError('完整清单输出须为工位外规范绝对路径')
+        for root in (Path(base).resolve(), project_rules.product_root_from_station(base).resolve()):
+            if target == root or root in target.parents:
+                raise ValueError('完整清单不能写入工位、Product Root 或档案')
+        data = (render(value, True) + '\n').encode('utf-8')
+        fd = os.open(str(target), os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data); stream.flush(); os.fsync(stream.fileno())
+        print(render({'status': value.get('status'), 'output': str(target), 'bytes': len(data),
+            'run_id': value.get('run_id'), 'operation_id': value.get('operation_id'),
+            'revision': value.get('revision'), 'plan_digest': value.get('cleanup_scope', {}).get('plan_digest')}))
+    else:
+        print(render(value, details))
 
 
 def safe_describe(*args, **kwargs):

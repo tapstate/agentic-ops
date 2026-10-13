@@ -24,8 +24,10 @@ class StationCleanTests(unittest.TestCase):
     execute = fixture.ResourceTests.execute
 
     def result_request(self, task):
+        from workflow import station_records
         request = dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
                     cleanup_version=6, abandon_changes=True,
+                    accept_conversation_digest=station_records.conversations(self.ws, task)['digest'],
                     confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
         return fixture.prepare_exports(self, task, request)
 
@@ -111,7 +113,7 @@ class StationCleanTests(unittest.TestCase):
     def test_creation_device_change_does_not_block_new_plan(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(28, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         path = directories.registry_path(self.ws, task)
         original = json.loads(path.read_text())
         changed = json.loads(path.read_text())
@@ -128,7 +130,7 @@ class StationCleanTests(unittest.TestCase):
     def test_confirmed_identity_change_requires_amendment(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(28, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -150,7 +152,7 @@ class StationCleanTests(unittest.TestCase):
     def test_amend_cannot_redelete_completed_runtime(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(28, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(29, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -502,7 +504,7 @@ class StationCleanTests(unittest.TestCase):
         before = json.dumps(plan, sort_keys=True)
         view = station_clean_view.describe(self.ws, task, plan)
         self.assertTrue(view["complete"])
-        self.assertTrue(view["executable"], view)
+        self.assertFalse(view["executable"], view)
         self.assertEqual(view["plan_digest"], plan["digest"])
         self.assertEqual(before, json.dumps(plan, sort_keys=True))
         retained = {row["target"] for row in view["retain"]}
@@ -725,6 +727,11 @@ class StationCleanTests(unittest.TestCase):
                                   '--expected-run-id', task['run_id'], '--expected-revision', str(task['_revision']),
                                   '--operation-id', 'op-cli-cleanup', '--input', str(request), '--abandon-changes', 'yes'])
         self.assertEqual('done', json.loads(output.getvalue())['status'])
+        report = json.loads(output.getvalue())
+        self.assertEqual(task['run_id'], report['run_id'])
+        self.assertEqual('interrupted', report['cleanup_scope']['results']['task']['outcome'])
+        self.assertTrue(report['cleanup_scope']['results']['release']['released'])
+        self.assertFalse(report['cleanup_scope']['results']['purge']['unregistered'])
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_cli_failed_takeover_handoff_and_resume(self):

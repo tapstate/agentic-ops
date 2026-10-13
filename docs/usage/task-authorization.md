@@ -2,9 +2,19 @@
 
 本版任务档案只保存会话与处理状态，运行日志和报告正文不入档。会话来源、原文覆盖及截止点以[工位合同](../architecture/single-task-station.md#会话输入与覆盖)为准。未提交源码通过独立 export 或精确 discard 处置，不把摘要当成源码备份。默认清理输出聚合摘要，`--details` 查看完整精确清单；`station_export.py --input <JSON>` 接受精确 path/output 数组并沿用原单文件格式、意图及回执。
 
-`require_complete_conversation=true` 要求完整可见原文；无法取得时须提供导出，或以 `accept_conversation_digest` 和真实 `decision_ref` 接受当前覆盖。每份证据不超过16MiB、总量64MiB，不静默截断。原 epoch27 修复候选可用 `station-clean.py --archive-runtime none --details` 预览，再由 `cleanup-amend` 精确确认原计划子集；新版不解析旧 epoch 的现场。
+归档可行性预检、有界失败输出、声明来源覆盖、收尾输入及最小退出回执以[统一退出优化目标](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)为准。当前源码使用 epoch 29；原安装须独立核验版本。范围盘点成功不能代替正文容量、内容和覆盖验收。原版清理中制品移除导致日志读取异常时，先使用匹配版本的兼容修复恢复原操作，不重建制品、手改状态或切新版解析旧任务；[质量读取边界](quality-checkpoints.md#历史重放与清理收尾读取)区分历史可读与当前有效。
+
+clean/release 默认要求完整可见原文，显式 `require_complete_conversation=false` 不豁免缺口；无法取得时须提供导出，或以 `accept_conversation_digest` 和真实 `decision_ref` 接受当前覆盖。每份会话输入不超过16MiB，会话与任务正文编码后总量64MiB；控制 JSON 按专用读取器校验后投影，不套用会话输入限额。原 epoch27 修复候选可用 `station-clean.py --archive-runtime none --details` 预览，再由 `cleanup-amend` 精确确认原计划子集；新版不解析旧 epoch 的现场。
 
 本页说明单工位脚本操作。实际 Jira 事实须由已配置原生工具读取，本地 takeover 不替代 Jira 准入。完整四操作、退出与精确清单输入见[项目任务 Skill](../../projects/tapdata/skills/tapdata-task/SKILL.md)；质量输入见[质量检查与证据](quality-checkpoints.md)。
+
+## 材料预检与收尾录入
+
+`station-clean.py --dir <station> --check` 只读检查实际材料；与 `--input <工位外确认请求.json>` 组合可核验确认请求。分别读取 `scope_complete`、`archive_ready`、`execution_ready`，范围盘点成功不表示可归档或可执行。默认输出最多64KiB；`--details --output <工位外私有新文件>` 保存完整清单，不覆盖已有文件，也不能写入工位或产品根目录。
+
+先准备来源范围和 conversation 分块，格式见[会话来源与截止点合同](../architecture/single-task-station.md#会话来源与最小退出回执)。工位外清单包含 `schema_version:1`、`issue_key`、`run_id` 和 `files` 数组，每项填写 `kind`（conversation/conversation-scope）、绝对 `path`、实际 `size` 和完整 `sha256`。使用 `station-clean.py --dir <station> --check --conversation-input <工位外清单.json>` 只读预览；去掉 `--check` 并提供当前 `--issue-key`、`--expected-run-id`、`--expected-revision` 后仅录入，仍不确认或执行退出。
+
+completed 收尾可用 `task.py interaction-path --purpose exit` 分配当前 run 的普通输入位置。未完成 archive/clean/release 的输入清单另须绑定原 `operation_id`、当前任务 `revision`、原 `plan_digest`；interaction-path 对应提供 `--operation-id`、`--expected-revision`、`--expected-plan-digest`。冻结前补录若改变范围，须沿原 cleanup-amend 确认；未发布的冻结草稿只能使用 `cleanup-amend --conversation-input <同一外部清单>` 持锁修订。正式档案发布后禁止补写正文，后续实际结果进入 receipts。部分写入中断后复用同一清单恢复，不能新建操作或改原请求绕过。
 
 ## 清理范围决策视图
 

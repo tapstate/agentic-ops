@@ -137,6 +137,58 @@ class QualityTests(unittest.TestCase):
     def save_task(self):
         save_station_task(self.base, self.task)
 
+    def test_archived_checkpoints_and_comment_replay_after_jar_removal(self):
+        from workflow import verification, station_resources
+        self.task['source_prepared'] = True
+        self.save_task()
+        revision = mock.patch.object(quality, 'git_revision', return_value='a' * 40)
+        revision.start(); self.addCleanup(revision.stop)
+        rules_path = self.product / 'projects/tapdata/quality.json'
+        rules = json.loads(rules_path.read_text())
+        rules['verification_checkpoints'] = {'q3-draft': ['local'], 'q4-acceptance': ['local']}
+        rules_path.write_text(json.dumps(rules))
+        self.plan(); self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        self.execute()
+        jar = self.base / 'verified.jar'
+        jar.write_bytes(b'verified build')
+        checksum = verification.file_hash(jar)
+        ctx = quality.context(self.base, self.task)
+        payloads = []
+        for repo, binding in ctx['repositories'].items():
+            payload = {'kind': 'local', 'repository': repo, 'target_revision': verification.versions(ctx)[repo],
+                'source_ref': 'fixture:local', 'analysis_ref': 'fixture:analysis', 'case_review_ref': 'fixture:review',
+                'case_version': 'v1', 'dependency_analysis_ref': 'fixture:dependency', 'required_scope': ['behavior'],
+                'results': [{'scope': 'behavior', 'result': 'PASS', 'report_ref': 'fixture:report',
+                    'tests': 1, 'failures': 0, 'errors': 0, 'skipped': 0}],
+                'jars': [{'built_path': str(jar), 'consumed_path': str(jar), 'built_sha256': checksum,
+                    'consumed_sha256': checksum, 'loaded_from': 'fixture:classpath'}]}
+            self.apply('verification', payload); payloads.append(payload)
+        self.automatic_checkpoint(); self.decide(); self.checkpoint('q4-acceptance')
+        self.publish_checkpoint('q4-acceptance')
+        state = quality.load(self.base, self.task)
+        expected = quality.replay(state)
+        original = quality.state_path(self.base, self.task).read_bytes()
+        jar.unlink()
+        with mock.patch.object(verification, 'file_hash', side_effect=AssertionError('历史不能读制品')), \
+                mock.patch.object(quality, 'git_revision', side_effect=AssertionError('历史不能读 Git')), \
+                mock.patch.object(quality.subprocess, 'run', side_effect=AssertionError('历史不能启动外部进程')):
+            self.assertEqual(expected, quality.replay(state))
+        self.assertEqual(state, quality.load(self.base, self.task))
+        with mock.patch.object(quality, 'report', side_effect=AssertionError('清理不能读当前报告')), \
+                mock.patch.object(quality, 'context', side_effect=AssertionError('清理不能读当前代码')):
+            station_resources.verify_known_external(self.base, self.task)
+        current = self.view()['checkpoints']['q4-acceptance']
+        self.assertFalse(current['reviewed'])
+        self.assertTrue(any('Jar' in p for p in current['problems']))
+        with self.assertRaises((ValueError, OSError)):
+            quality.apply(self.base, self.task['issue_key'], self.task['run_id'], state['revision'],
+                {'action': 'verification', 'payload': payloads[0]})
+        self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+        corrupt = copy.deepcopy(state)
+        next(e for e in corrupt['events'] if e['command']['action'] == 'auto_checkpoint')['command']['payload']['digest'] = '0' * 64
+        with self.assertRaises(ValueError):
+            quality.replay(corrupt)
+
     def view(self):
         return quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task), base=self.base, task=self.task)
 
@@ -2639,6 +2691,34 @@ class SyncRecoveryTests(unittest.TestCase):
     select = QualityTests.select
     checkpoint = QualityTests.checkpoint
     plan = QualityTests.plan
+
+    def test_cleanup_audits_existing_and_previous_run_without_live_report(self):
+        from workflow import external_sync, station_resources
+        self.publication()
+        with mock.patch.object(quality, 'report', side_effect=AssertionError('禁止当前报告')), \
+                mock.patch.object(quality, 'context', side_effect=AssertionError('禁止当前上下文')):
+            with self.assertRaisesRegex(ValueError, '外部写入'):
+                station_resources.verify_known_external(self.base, self.task)
+            self.task['run_id'] = 'run-abcdefabcdef'
+            self.task['task_class'] = 'technical_task'
+            self.save_task()
+            pending = external_sync.existing_warnings(self.base, self.task)
+            self.assertTrue(any(r['status'] == 'unknown' and r['run_id'] == 'run-0123456789ab' for r in pending))
+            with self.assertRaisesRegex(ValueError, '外部写入'):
+                station_resources.verify_known_external(self.base, self.task)
+        path = quality.state_path(self.base, dict(self.task, run_id='run-0123456789ab'))
+        state = json.loads(path.read_text()); state['revision'] += 1
+        path.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, 'revision'):
+            station_resources.verify_known_external(self.base, self.task)
+
+    def test_cleanup_deferred_comment_is_not_an_unknown_write(self):
+        from workflow import station_resources
+        record = self.publication()
+        self.apply('receipt', {'id': 'summary', 'operation_id': record['operation_id'],
+            'result': 'deferred', 'reason': '明确未发送'})
+        with mock.patch.object(quality, 'report', side_effect=AssertionError('禁止当前报告')):
+            station_resources.verify_known_external(self.base, self.task)
 
     def terminal(self):
         self.task.update(stage="completed", outcome="completed")

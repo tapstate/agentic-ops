@@ -89,7 +89,7 @@ def verify_stopped(base, task, require_cleaned=False):
                     "清理完成" if require_cleaned else "停止写入", item.get("id")))
 
 
-def active_files(base):
+def active_files(base, overrides=None):
     """活动材料的授权指纹；资源回读单独校验，不让回读改变已确认身份。"""
     root = store.state_path(base)
     result = {}
@@ -101,7 +101,7 @@ def active_files(base):
                 raise ValueError("活动材料含符号链接或特殊对象")
             if path.is_file():
                 data = path.read_bytes()
-                if path.suffix == '.json' and path.parent == root / 'evidence':
+                if path.suffix == '.json' and path.parent == root / 'evidence' and (path.name.startswith(('conversation', 'quality-', 'jira-')) or path.name == 'resources.json'):
                     from workflow import sync_recovery
                     document = json.loads(data)
                     if isinstance(document, dict):
@@ -116,6 +116,9 @@ def active_files(base):
                             entry.pop("readback_ref", None)
                     data = json.dumps(document, sort_keys=True, ensure_ascii=False).encode("utf-8")
                 result[path.relative_to(root).as_posix()] = hashlib.sha256(data).hexdigest()
+    for name, raw in (overrides or {}).items():
+        document = json.loads(raw)
+        result['evidence/' + name] = hashlib.sha256(json.dumps(document, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
     return result
 
 
@@ -252,7 +255,7 @@ def archive_runtime_selection(task, operation, selection=None):
     return [x for x in allowed if x in selection]
 
 
-def plan(base, task, version=None, decisions_override=None, archive_runtime=None):
+def plan(base, task, version=None, decisions_override=None, archive_runtime=None, evidence_override=None):
     require_cleanup_version(6 if version is None else version)
     # 操作读取器统一拒绝旧计划（含 handoff 和计划修订），不在线转换。
     operation = operations.read(base) or {}
@@ -332,7 +335,7 @@ def plan(base, task, version=None, decisions_override=None, archive_runtime=None
         directories.path_at(base, station_layout.relative(base, "task-runtime", relative))
     value = {"schema_version": 6, "run_id": task["run_id"], "directories": list(roots.values()), "archive_runtime": logs,
              "entries": entries, "source": states, "external": external,
-             "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
+             "active_state": {"files": active_files(base, evidence_override), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "Product Root .archive", ".agenticops binding and operation"]}
     from workflow import station_cleanup_stages
     for entry in external:
@@ -356,7 +359,7 @@ def plan(base, task, version=None, decisions_override=None, archive_runtime=None
 
 def verify_known_external(base, task):
     from workflow import external_sync
-    if any(row["status"] == "unknown" for row in external_sync.warnings(base, task)):
+    if any(row["status"] == "unknown" for row in external_sync.existing_warnings(base, task)):
         raise ValueError("当前 run 有外部写入结果未知，须回读原操作；不能改 retain 绕过")
 
 

@@ -20,6 +20,9 @@ from workflow import archive_store, station_artifacts as artifacts, station_oper
 def prepare_exports(self, task, request):
     # 场景夹具显式保存需要复位的成果；新版任务档案不再备份源码。
     operation = operations.read(self.ws) or {}
+    if not request.get('require_complete_conversation') and 'accept_conversation_digest' not in request and (operation.get('status') == 'done' or operation.get('kind') not in ('archive', 'clean', 'release')):
+        from workflow import station_records
+        request['accept_conversation_digest'] = station_records.conversations(self.ws, task)['digest']
     if operation.get('kind') not in ('clean', 'release', 'archive') or operation.get('status') == 'done':
         plan = resources.plan(self.ws, task)
         if request.get('confirmed_digest') == plan['digest']:
@@ -51,7 +54,10 @@ class ResourceTests(unittest.TestCase):
         return task
 
     def reset_request(self, task):
-        return dict(cleanup_version=6, abandon_changes=True, summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
+        from workflow import station_records
+        return dict(cleanup_version=6, abandon_changes=True, summary='保存成果并重置', reason='用户取消',
+            decision_ref='fixture:user', accept_conversation_digest=station_records.conversations(self.ws, task)['digest'],
+            confirmed_digest=resources.plan(self.ws, task)['digest'])
 
     def execute(self, task, request, kind='clean', op='op-resource-reset'):
         prepare_exports(self, task, request)
@@ -413,6 +419,58 @@ class ResourceTests(unittest.TestCase):
             self.execute(task, request)
         self.assertEqual('must survive recovery', late.read_text())
         self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_completed_release_resumes_after_verified_jar_was_cleaned(self):
+        from workflow import quality, station_reset_result, verification
+        self.prepare_engineering(2)
+        current = self.ready()
+        jar = self.repo / 'verified.jar'
+        jar.write_bytes(b'original verified artifact')
+        checksum = verification.file_hash(jar)
+        ctx = quality.context(self.ws, current)
+        payload = {'kind': 'local', 'repository': self.name,
+            'target_revision': ctx['repositories'][self.name]['live_revision'], 'source_ref': 'fixture:original-report',
+            'analysis_ref': 'fixture:analysis', 'case_review_ref': 'fixture:review', 'case_version': 'v1',
+            'dependency_analysis_ref': 'fixture:dependency', 'required_scope': ['behavior'],
+            'results': [{'scope': 'behavior', 'result': 'PASS', 'report_ref': 'fixture:report',
+                'tests': 1, 'failures': 0, 'errors': 0, 'skipped': 0}],
+            'jars': [{'built_path': str(jar), 'consumed_path': str(jar), 'built_sha256': checksum,
+                'consumed_sha256': checksum, 'loaded_from': 'fixture:classpath'}]}
+        state = {'schema_version': 1, 'issue_key': current['issue_key'], 'run_id': current['run_id'],
+            'revision': 1, 'events': [{'at': '2026-10-13T00:00:00+00:00',
+                'command': {'action': 'verification', 'payload': payload}, 'rules': {}, 'context': ctx}]}
+        path = quality.state_path(self.ws, current)
+        self.write(path, state)
+        request = self.reset_request(current)
+        prepare_exports(self, current, request)
+        observed = station.source.inspect(self.ws, current['engineering_baseline'])
+        current.update(stage='completed', outcome='completed', terminal_proof={
+            'run_id': current['run_id'], 'repositories': observed, 'deliveries': [],
+            'dispositions': {self.name: 'merged'}, 'candidate_digest': resources.baseline.digest(observed)})
+        task_store.write_task(self.ws, current)
+        current = task_store.read_task(self.ws)
+        request['candidate_digest'] = current['terminal_proof']['candidate_digest']
+        other = next(name for name in current['engineering_baseline']['repositories'] if name != self.name)
+        apply_repository = station_reset_result._apply_repository
+        def interrupt(base, task, operation, name, entry):
+            if name == other:
+                raise OSError('second repository interrupted')
+            return apply_repository(base, task, operation, name, entry)
+        with mock.patch.object(station_reset_result, '_apply_repository', side_effect=interrupt):
+            with self.assertRaisesRegex(OSError, 'second repository'):
+                self.execute(current, request, kind='release', op='op-release-jar')
+        self.assertFalse(jar.exists())
+        pending = task_store.read_task(self.ws)
+        self.assertEqual('completed', pending['outcome'])
+        archive = pending['archive_ref']
+        original = operations.read(self.ws)
+        station.execute(self.ws, 'release', pending['issue_key'], pending['run_id'],
+            original['expected_revision'], original['operation_id'], original['request'])
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertEqual('done', operations.read(self.ws)['status'])
+        self.assertEqual([], list((self.ws / 'runtime').iterdir()))
+        self.assertFalse(jar.exists())
+        self.assertEqual(archive, operations.read(self.ws)['archive_ref'])
 
     def test_completed_root_batch_rejects_regenerated_file_after_resource_failure(self):
         task = self.ready()

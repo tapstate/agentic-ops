@@ -38,6 +38,7 @@ run_general_suite() {
   run_product tests/test_repository_recovery.py
   run_product tests/test_task_identity.py
   run_product tests/test_station_compatibility.py
+  run_product tests/test_installation_update.py
   run_product tests/test_checkpoints.py
   run_product tests/test_quality.py
   run_product tests/test_issue_versions.py

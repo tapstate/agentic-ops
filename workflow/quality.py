@@ -324,7 +324,7 @@ def item_accepted(view, outcomes=("accept", "not_applicable", "observed")):
     return view.get("decision_valid") and decision.get("outcome") in outcomes
 
 
-def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
+def automatic_checkpoint_problems(model, checkpoint, rules, ctx, *, check_artifacts=True):
     """Q3 是已授权执行的事实记录，不把它伪装成第二次用户验收。"""
     point = next(c for c in rules["checkpoints"] if c["id"] == checkpoint)
     if point.get("confirmation") != "automatic":
@@ -335,7 +335,7 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
         return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
     from workflow import verification
     problems = source_revision_problems(ctx)
-    problems += verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []), rules)
+    problems += verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []), rules, check_artifacts=check_artifacts)
     for key, view in after_fix.items():
         plan = view["plan"]
         if not view["selected"]:
@@ -358,10 +358,10 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
     return problems
 
 
-def automatic_checkpoint_digest(model, checkpoint, rules, ctx):
+def automatic_checkpoint_digest(model, checkpoint, rules, ctx, *, check_artifacts=True):
     # ``checkpoint_view(..., checking_automatic=True)`` deliberately omits the
     # automatic record's validity check so this digest has no recursion.
-    base = checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=True)["digest"]
+    base = checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=True, check_artifacts=check_artifacts)["digest"]
     after_fix = {key: item_digest(item, rules, ctx) for key, item in model["items"].items()
                  if item["plan"]["timing"] == "after_fix"}
     return digest({"checkpoint": checkpoint, "base": base, "after_fix": after_fix})
@@ -441,7 +441,7 @@ def source_revision_problems(ctx):
     return []
 
 
-def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
+def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, check_artifacts=True):
     ids = [c["id"] for c in rules["checkpoints"]]
     if checkpoint not in ids:
         raise ValueError("未知检查点")
@@ -488,7 +488,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
             snapshot["not_due"] = []
     from workflow import verification
     requirements = rules.get("verification_checkpoints", {}).get(checkpoint, [])
-    problems.extend(verification.problems(model, ctx, requirements, rules))
+    problems.extend(verification.problems(model, ctx, requirements, rules, check_artifacts=check_artifacts))
     if requirements:
         snapshot["verification"] = {repo: {kind: entries.get(kind) for kind in requirements}
                                     for repo, entries in model.get("verification", {}).items()}
@@ -498,8 +498,8 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
               "problems": problems, "decision": record, "mode": "automatic" if configured_automatic else "user"}
     if configured_automatic and not checking_automatic:
-        result["automatic_digest"] = automatic_checkpoint_digest(model, checkpoint, rules, ctx)
-        result["problems"] += automatic_checkpoint_problems(model, checkpoint, rules, ctx)
+        result["automatic_digest"] = automatic_checkpoint_digest(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
+        result["problems"] += automatic_checkpoint_problems(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
         result["reviewed"] = (record or {}).get("digest") == result["automatic_digest"] and not result["problems"]
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
@@ -584,7 +584,7 @@ def check_decision(decision):
             raise ValueError("deadline 必须带时区且晚于确认时间；延期必须提供 deadline") from error
 
 
-def reduce(model, command, rules, ctx):
+def reduce(model, command, rules, ctx, *, historical=False):
     """确定性归约；重放时使用当时规则和上下文，不重新解释旧决定。"""
     action, p = command["action"], command["payload"]
     if action == "jira_status":
@@ -671,7 +671,7 @@ def reduce(model, command, rules, ctx):
         point = next((c for c in rules["checkpoints"] if c["id"] == p["checkpoint"]), None)
         if point and point.get("confirmation") == "automatic":
             raise ValueError("该检查点由系统依据执行证据自动记录，不接受重复用户确认")
-        report = checkpoint_view(model, p["checkpoint"], rules, ctx)
+        report = checkpoint_view(model, p["checkpoint"], rules, ctx, check_artifacts=not historical)
         if p["digest"] != report["digest"]:
             raise ValueError("检查点内容已变化，请重新展示确认")
         if report["problems"]:
@@ -684,22 +684,22 @@ def reduce(model, command, rules, ctx):
         point = next((c for c in rules["checkpoints"] if c["id"] == p["checkpoint"]), None)
         if not point or point.get("confirmation") != "automatic":
             raise ValueError("当前检查点不允许自动记录")
-        expected = automatic_checkpoint_digest(model, p["checkpoint"], rules, ctx)
+        expected = automatic_checkpoint_digest(model, p["checkpoint"], rules, ctx, check_artifacts=not historical)
         if p["digest"] != expected:
             raise ValueError("首轮验证事实已变化，请重新读取执行证据")
-        problems = automatic_checkpoint_problems(model, p["checkpoint"], rules, ctx)
+        problems = automatic_checkpoint_problems(model, p["checkpoint"], rules, ctx, check_artifacts=not historical)
         if problems:
             raise ValueError("；".join(problems))
         model["checkpoints"][p["checkpoint"]] = dict(p, mode="automatic")
     else:
         from workflow import quality_write
-        quality_write.reduce(model, command, rules, ctx)
+        quality_write.reduce(model, command, rules, ctx, check_artifacts=not historical)
 
 
 def replay(state):
     model = {"items": {}, "checkpoints": {}, "publications": {}}
     for event in state["events"]:
-        reduce(model, event["command"], event["rules"], event["context"])
+        reduce(model, event["command"], event["rules"], event["context"], historical=True)
     return model
 
 

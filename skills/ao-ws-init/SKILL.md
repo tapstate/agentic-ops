@@ -20,7 +20,7 @@ description: 创建、刷新或受控解绑 AgenticOps 单任务工位，核验�
 
 ## 清理与再生成
 
-先检查 current 和 operation。存在任务则由项目 Skill 完成 release/clean，不用 station purge 代替任务归档；未完成操作先恢复。仅空闲、操作完成、runtime 干净时，展示精确工位及接线/状态删除范围，明确保留 source/config、旧工位 archive（若有）、Product Root `.archive/` 与用户文件，取得确认后执行：
+先检查 current 和 operation。存在任务则由项目 Skill 完成 release/clean，不用 station purge 代替任务归档；未完成操作先恢复。请求注销时可一次展示原任务退出及受管注销的完整具体范围，复用仍有效的真实决定；存在未完成操作仍先恢复。仅空闲、操作完成、runtime 干净时，展示精确工位及接线/状态删除范围，明确保留 source/config、旧工位 archive（若有）、Product Root `.archive/` 与用户文件，取得确认后执行：
 
 ```sh
 <product-root>/agenticops station purge --station <station> --yes
@@ -30,6 +30,6 @@ description: 创建、刷新或受控解绑 AgenticOps 单任务工位，核验�
 
 ## 升级边界
 
-不兼容时停止：用原版本保存材料并受控解绑，再安装/切换产品并生成新工位。新版本不解析旧任务；升级只编排已成功的原版清理和目标生成，不能用 repair 在线迁移。本次不发过渡版，旧安装不保证直接 update。
+不兼容时停止：用原版本保存材料并受控解绑，再安装/切换产品并生成新工位。新版本不解析旧任务；升级只编排已成功的原版清理和目标生成，不能用 repair 在线迁移。旧安装缺陷先核验匹配原 epoch 的恢复候选；生命周期入口及旧客户端的首次启动见[更新指引](../../docs/usage/update-and-rollback.md#同-epoch-恢复与跨-epoch-切换的目标入口)，不把源码实现当成旧安装已应用。
 
 结果报告包括 station_id、产品根、项目、Agent、current/op、工位三类目录、Product Root `.archive/` 及 doctor，区分生成成功与任务、应用、PR/CI 验收。此 Skill 不授权下载业务仓库、修改代码、提交、推送、PR、合并、发布或删除未受管材料。
