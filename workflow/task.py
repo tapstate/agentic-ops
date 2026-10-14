@@ -62,7 +62,7 @@ def operation_summary(operation):
         return None
     result = {key: operation[key] for key in (
         "operation_id", "kind", "run_id", "expected_revision", "request_digest",
-        "phase", "status", "archive_ref") if key in operation}
+        "phase", "status", "archive_ref", "archive_result") if key in operation}
     steps = operation.get("steps", {})
     result["completed_steps"] = [name for name, step in steps.items() if step.get("receipt") is not None]
     result["pending_steps"] = [name for name, step in steps.items()
@@ -99,13 +99,7 @@ def cmd_lifecycle(args):
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
     result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
                              args.expected_revision, args.operation_id, request)
-    summary = {key: result.get(key) for key in ("operation_id", "kind", "run_id", "phase", "status", "archive_ref")}
-    plan = result.get("cleanup_plan", {})
-    summary.update(directory_count=len(plan.get("directories", [])), source_artifact_count=len(plan.get("entries", [])),
-                   plan_digest=plan.get("digest"), retained=plan.get("retained", []))
-    from workflow import station_clean_view
-    summary["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), plan or None, result)
-    station_clean_view.emit(summary, details=getattr(args, 'details', False))
+    print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
     return 0
 
 
@@ -151,17 +145,6 @@ def cmd_source_readiness(args):
         else:
             record = station_source.prepare_readiness(args.dir, task)
         print(json.dumps(record, ensure_ascii=False, indent=2))
-    return 0
-
-
-def cmd_cleanup_amend(args):
-    from workflow import station, station_clean_view
-    request = json.loads(Path(args.input).read_text(encoding='utf-8'))
-    request['expected_plan_revision'] = args.expected_plan_revision
-    result = station.amend_cleanup(args.dir, args.issue_key, args.expected_run_id,
-        args.expected_revision, args.operation_id, args.expected_plan_digest, request,
-        getattr(args, 'conversation_input', None))
-    station_clean_view.emit(result, details=getattr(args, 'details', False))
     return 0
 
 
@@ -505,13 +488,6 @@ def cmd_block(args):
 
 
 def cmd_interaction_path(args):
-    if getattr(args, 'purpose', 'development') == 'exit':
-        from workflow import station_exit_inputs
-        path = station_exit_inputs.interaction(args.dir, args.issue_key, args.expected_run_id, args.name,
-            getattr(args, 'operation_id', None), getattr(args, 'expected_revision', None),
-            getattr(args, 'expected_plan_digest', None))
-        print(path)
-        return 0
     return _cmd_development_interaction(args)
 
 
@@ -693,7 +669,7 @@ def cmd_status(args):
     try:
         task = load(args.dir, args.issue_key)
     except (ValueError, OSError) as error:
-        if args.cmd in ('archive', 'release', 'clean', 'cleanup-amend', 'cleanup-preflight'):
+        if args.cmd in ('archive', 'release', 'clean', 'cleanup-preflight'):
             from workflow import station_clean_view
             station_clean_view.emit({'status': 'needs_attention', 'problems': [str(error)],
                 'boundary': '先回读原操作；未完成不报告已释放'}, details=getattr(args, 'details', False))
@@ -806,20 +782,6 @@ def main():
     p.add_argument("--decision-ref")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_source_readiness)
-    p = sub.add_parser("cleanup-amend", help="精确补充当前清理计划；archive 仅刷新未发布草稿，不授权删除",
-                       description="绑定原 operation、计划摘要和修订编号。archive 仅刷新未发布草稿，不删除资源；正式档案不可改写。clean/release 使用新精确确认后，仍以原始请求恢复。")
-    p.add_argument("--issue-key", required=True)
-    p.add_argument("--expected-run-id", required=True)
-    p.add_argument("--expected-revision", required=True, type=int)
-    p.add_argument("--operation-id", required=True)
-    p.add_argument("--expected-plan-digest", required=True)
-    p.add_argument("--expected-plan-revision", required=True, type=int)
-    p.add_argument("--conversation-input", help="工位外会话输入清单；仅修订未发布草稿")
-    p.add_argument("--details", action="store_true")
-    p.add_argument("--input", required=True)
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_cleanup_amend)
-
     p = sub.add_parser("record")
     p.add_argument("--issue-key")
     p.add_argument("--key", required=True)
@@ -951,7 +913,7 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--dir", default=".")
-    p.add_argument('--purpose', choices=('development', 'exit'), default='development')
+    p.add_argument('--purpose', choices=('development',), default='development')
     p.add_argument('--operation-id')
     p.add_argument('--expected-revision', type=int)
     p.add_argument('--expected-plan-digest')

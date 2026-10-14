@@ -66,7 +66,7 @@ class LifecycleCleanTreeTests(unittest.TestCase):
 
 class StationBootstrapTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory(prefix='ao logs ')
         self.station = Path(self.temporary.name) / 'station'
         self.init()
 
@@ -82,6 +82,70 @@ class StationBootstrapTests(unittest.TestCase):
             env={**os.environ, 'AGENTIC_OPS_HOME': str(ROOT)}, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
+
+    def render(self, *args):
+        return subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
+            '--install-home', str(ROOT), '--station', str(self.station), *args],
+            capture_output=True, text=True)
+
+    def test_doctor_version_drift_has_actionable_diagnostic_without_usage(self):
+        import shlex
+        init_path = self.station / '.agenticops/init.json'
+        init = json.loads(init_path.read_text())
+        init['product_ref'] = '0' * 40
+        init_path.write_text(json.dumps(init))
+        before = init_path.read_bytes()
+        result = self.render('--check')
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn('[AgenticOps][检查][失败]', result.stderr)
+        self.assertIn('station repair --station ' + shlex.quote(str(self.station.resolve())), result.stderr)
+        self.assertNotIn('usage:', result.stderr)
+        self.assertNotIn('[完成]', result.stdout)
+        self.assertEqual(before, init_path.read_bytes())
+
+    def test_repair_has_one_final_summary_and_doctor_reports_bound_context(self):
+        result = subprocess.run([str(ROOT / 'agenticops'), 'station', 'repair',
+            '--station', str(self.station)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, result.stdout.count('[完成]'))
+        self.assertIn('[AgenticOps][修复][进行]', result.stderr)
+        self.assertNotIn('接线已刷新', result.stdout)
+        checked = self.render('--check')
+        self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
+        self.assertIn('[AgenticOps][检查][完成]', checked.stdout)
+        self.assertIn('  项目：tapdata', checked.stdout)
+
+    def test_quiet_runtime_failure_keeps_diagnostic_and_argument_errors_keep_usage(self):
+        binding = self.station / '.agenticops/station.json'
+        binding.write_text('{broken')
+        result = self.render('--refresh', '--quiet')
+        self.assertEqual(2, result.returncode)
+        self.assertIn('[AgenticOps][刷新][失败]', result.stderr)
+        self.assertNotIn('usage:', result.stderr)
+        self.assertNotIn('[完成]', result.stdout)
+        invalid = self.render('--unknown')
+        self.assertEqual(2, invalid.returncode)
+        self.assertIn('usage:', invalid.stderr)
+
+    def test_init_summary_keeps_actionable_warning_and_failure(self):
+        binding = self.station / '.agenticops/station.json'
+        document = json.loads(binding.read_text())
+        document.pop('branch_identity', None)
+        binding.write_text(json.dumps(document))
+        # 确定性模拟未设置 Git 身份，不依赖测试机器的全局配置。
+        with mock.patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull,
+                                         'GIT_CONFIG_NOSYSTEM': '1'}):
+            result = self.init()
+        self.assertEqual(1, result.stdout.count('[AgenticOps][初始化][完成]'))
+        self.assertNotIn('接线已刷新', result.stdout)
+        self.assertNotIn('[进行]', result.stdout)
+        self.assertIn('[AgenticOps][初始化][警告]', result.stderr)
+        self.assertIn('git_name', result.stderr)
+        result = self.init(project='missing-project', success=False)
+        self.assertNotIn('[完成]', result.stdout)
+        self.assertIn('missing-project', result.stderr)
+        self.assertIn('[AgenticOps][初始化][失败] 检查工位条件', result.stderr)
+        self.assertFalse((ROOT / '.local/lifecycle.lock').exists())
 
     def test_station_status_is_read_only_for_idle_and_active_tasks(self):
         command = [str(self.station / 'agenticops'), 'station', 'status', '--json']
@@ -121,6 +185,34 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn('代际', result.stderr)
         self.assertEqual('invalid old state', state.read_text())
+
+    def test_purge_composes_release_for_incomplete_task_and_optional_config(self):
+        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
+            'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
+            'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
+            'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
+        (self.station / 'config/service').write_text('reusable')
+        (self.station / 'config/keep').write_text('keep')
+        (self.station / 'runtime/unknown').write_text('keep')
+        (self.station / 'source/notes').write_text('source')
+        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=['config/service'])
+        from workflow import station_archive, station_clean, station_operation
+        with mock.patch.object(station_archive, 'publish', side_effect=OSError('unavailable')):
+            with self.assertRaisesRegex(ValueError, '归档待用户决定'):
+                registry.command_detach(args, ROOT, purge=True)
+            self.assertTrue((self.station / '.agenticops/station.json').exists())
+            self.assertTrue((self.station / 'config/service').exists())
+            operation = station_operation.read(self.station)
+            for checkpoint in ('before-cleanup', 'after-cleanup'):
+                self.assertEqual(checkpoint, operation['archive_result']['checkpoint'])
+                operation = station_clean.execute(self.station, 'release', 'TAP-123', operation['run_id'],
+                    operation['expected_revision'], operation['operation_id'], operation['request'],
+                    archive_decision={'action': 'discard', 'digest': operation['archive_result']['digest']})
+            registry.command_detach(args, ROOT, purge=True)
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
+        self.assertFalse((self.station / 'config/service').exists())
+        for name in ('config/keep', 'runtime/unknown', 'source/notes'):
+            self.assertTrue((self.station / name).exists())
 
     def test_generate_purge_generate(self):
         before = json.loads((self.station / '.agenticops/station.json').read_text())
@@ -264,15 +356,20 @@ class StationBootstrapTests(unittest.TestCase):
     def test_unknown_state_and_runtime_are_not_deleted(self):
         unknown = self.station / '.agenticops/unknown'
         unknown.write_text('keep')
-        with self.assertRaisesRegex(ValueError, '未知文件'):
-            registry.detach(ROOT, self.station, purge=True)
-        self.assertEqual(unknown.read_text(), 'keep')
-        unknown.unlink()
         runtime = self.station / 'runtime/unknown'
         runtime.write_text('keep')
-        with self.assertRaisesRegex(ValueError, 'runtime'):
-            registry.detach(ROOT, self.station, purge=True)
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertEqual(unknown.read_text(), 'keep')
         self.assertEqual(runtime.read_text(), 'keep')
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
+
+    def test_purge_preserves_unreferenced_operation_material(self):
+        folder = self.station / '.agenticops/operation-data'; folder.mkdir()
+        note = folder / 'user-note.json'; note.write_text('not managed JSON')
+        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=[])
+        registry.command_detach(args, ROOT, purge=True)
+        self.assertEqual('not managed JSON', note.read_text())
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
 
     def test_reuse_never_adopts_nonempty_runtime_or_symlink(self):
         registry.detach(ROOT, self.station, purge=True)
@@ -384,7 +481,7 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_non_tapdata_binding_is_reused_without_default(self):
         product = self.station.parent / 'product'
-        for name in ('bootstrap', 'contracts', 'workflow', 'adapters', 'skills'):
+        for name in ('bootstrap', 'contracts', 'workflow', 'adapters', 'skills', 'policies'):
             shutil.copytree(ROOT / name, product / name)
         (product / 'projects/demo').mkdir(parents=True)
         (product / 'projects/other').mkdir()

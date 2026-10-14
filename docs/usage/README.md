@@ -1,10 +1,15 @@
 # AgenticOps 扩展使用
 
-归档与清理的统一合同见[工位合同](../architecture/single-task-station.md#归档清理与升级的统一退出优化目标)，覆盖材料可行性、真实会话覆盖、最小退出回执、收尾输入、原操作恢复与工位注销结果，并衔接下述升级设计。[质量指引](quality-checkpoints.md#历史重放与清理收尾读取)维护历史证据读取与当前准入的边界；任务授权、存档恢复和升级指引只导航相应入口，不另建退出流程或迁移规则。
+[更新与回退](update-and-rollback.md#部分克隆更新与材料准备)负责部分克隆安装的材料准备、预检副作用和失败恢复；设计职责与本地核验限制链接[现役架构](../architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)，不在操作指引重复定义下载或状态逻辑。
 
-同 epoch 退出修复与跨 epoch 升级的入口由[更新与回退](update-and-rollback.md#同-epoch-恢复与跨-epoch-切换的目标入口)导航到[工位合同](../architecture/single-task-station.md#同-epoch-恢复与跨-epoch-切换目标设计)。该主题区分普通定点更新和明确的原版本维护恢复，覆盖首次旧客户端及失败续接；以绑定安装实际能力为准，源码实现不代表旧安装已应用。
+[Git SSH 安装](git-ssh-install.md)统一说明安装脚本调用、默认值和自定义参数；首次使用与 Agent 引导安装引用该入口，gh 一键安装只补充脚本获取方式，不重复实现安装生命周期。
 
-任务档案内容与重置体验的当前合同由[工位合同](../architecture/single-task-station.md#任务记录归档与重置的目标设计)维护；本目录的任务授权和存档恢复说明负责当前入口与精确确认用法。原版本恢复与新版本切换保持分开，不在使用指引维护另一份设计或执行计划。
+工作清理、任务清理、归档异常的用户决策、release 与工位注销统一见[任务授权指引](task-authorization.md#清理与退出)。正常路径直接运行脚本，Agent 只接手残留或异常；环境配置默认保留。唯一职责合同见[工位合同](../architecture/single-task-station.md)。
+
+
+同 epoch 退出修复与跨 epoch 升级的入口由[更新与回退](update-and-rollback.md#同-epoch-恢复与跨-epoch-切换的目标入口)导航到[工位合同](../architecture/single-task-station.md)。该主题区分普通定点更新和明确的原版本维护恢复，覆盖首次旧客户端及失败续接；以绑定安装实际能力为准，源码实现不代表旧安装已应用。
+
+任务档案内容与重置体验的当前合同由[工位合同](../architecture/single-task-station.md)维护；本目录的任务授权和存档恢复说明负责当前入口与精确确认用法。原版本恢复与新版本切换保持分开，不在使用指引维护另一份设计或执行计划。
 
 [工位源码与材料](station-materials.md#查看工位基本信息)负责 `station status` 的只读基本信息查询，区分绑定应用、版本、工位登记与任务阶段；状态展示不执行修复或任务推进。
 
@@ -22,7 +27,6 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 空闲工位的源码刷新由[工位源码与材料](station-materials.md)说明：`station source-update` 刷新已准备仓库，支持 `--repo` 指定单仓；任务接管后不能使用，不替代任务基线核验。
 
-任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
 
 共享需求技能的安装资源补齐、同 epoch 接线刷新与回退由[更新与回退](update-and-rollback.md#共享-skill-资源与接线)说明；技能职责与发现范围以[Skill 维护规范](../skill-maintenance.md)为准。
 
@@ -30,7 +34,7 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 [PR 正文发布与回读](quality-checkpoints.md#pr-正文发布与回读)负责多行正文的安全传递、只读预检、原生 PR 正文回读比对及局部失败恢复。工具不发送 PR、不新增阶段门禁；项目 Skill 仅负责调用顺序，正文内容及验收事实仍需人工核对。
 
-任务退出范围与 Jira 同步分别由[任务授权指引](task-authorization.md#清理范围决策视图)和[质量检查与证据](quality-checkpoints.md#同步待办与有限回执恢复)说明：前者负责清理、保全、保留和未知对象的用户决策；后者负责接管与检查点的待办、原生执行、回读及终态恢复。状态冻结与兼容边界统一由[工位合同](../architecture/single-task-station.md#外部同步回执恢复)定义，不另建生命周期或同步队列。
+任务退出范围与 Jira 同步分别由[任务授权指引](task-authorization.md#清理与退出)和[质量检查与证据](quality-checkpoints.md#同步待办与有限回执恢复)说明：前者负责清理、保全、保留和未知对象的用户决策；后者负责接管与检查点的待办、原生执行、回读及终态恢复。状态冻结与兼容边界统一由[工位合同](../architecture/single-task-station.md)定义，不另建生命周期或同步队列。
 
 [源码定位与实时核验](quality-checkpoints.md#源码定位与实时核验)负责质量事件不保存源码绝对路径、同类实现的历史与实时核验边界、材料缺口与工具故障的处理，以及发送正文检查；兼容代际变更统一遵循[更新与回退](update-and-rollback.md)，不导入旧任务确认。
 
@@ -42,9 +46,9 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 完成预检归[任务授权指引](task-authorization.md#完成预检与等待合并)说明：`next`、实际推进和释放共用判定，预检只读，实际变更重新核验；PR Ready 与合并完成分开。
 
-[配置化清理入口](task-authorization.md#配置化清理入口)负责 `station-clean.py` 的预检、成果保全、一次范围确认、默认执行和 Agent 接力后的结果验收，并说明中央/项目名单及恢复请求；仅支持计划版本 6，旧现场退出复用[更新与回退](update-and-rollback.md)。验收标准和安全依赖以[工位合同](../architecture/single-task-station.md#成果导向清理计划版本-6)为准。
+[配置化清理入口](task-authorization.md#清理与退出)负责 `station-clean.py` 的预检、成果保全、一次范围确认、默认执行和 Agent 接力后的结果验收，并说明中央/项目名单及恢复请求；仅支持计划版本 6，旧现场退出复用[更新与回退](update-and-rollback.md)。验收标准和安全依赖以[工位合同](../architecture/single-task-station.md)为准。
 
-任务退出的使用目标是保留关键材料并重置工位：[任务授权指引](task-authorization.md)说明目录生产前登记、一次确认、空未初始化子模块及工位 IDE 配置的保留边界和恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，工位代际及支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划 schema 是独立的格式版本，不能当作工位 epoch；[更新与回退](update-and-rollback.md)说明跨代际必须原版退出、purge 后再重建的边界。
+任务退出保留源码、撤销授权并解除任务绑定：[任务授权指引](task-authorization.md)说明清单驱动清理、可选配置和原操作恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，工位代际及支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划 schema 是独立的格式版本，不能当作工位 epoch；[更新与回退](update-and-rollback.md)说明跨代际必须原版退出、purge 后再重建的边界。
 
 [工位源码与材料](station-materials.md)负责源码池下载加速、独立源码生成、中央共享 Wiki 的显式生命周期及缓存丢失后的使用边界；初始化接线、接管准备源码和实际应用运行保持分离。源码准备成功不等于工具链、数据库、构建产物或应用健康已验证；运行操作依据由 TapData 构建运行指引维护。
 

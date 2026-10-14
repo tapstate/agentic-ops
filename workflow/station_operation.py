@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 from pathlib import Path
 
 from workflow import engineering_baseline, task_store
@@ -41,7 +42,7 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan")
+            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean")
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
@@ -65,87 +66,11 @@ def read(base):
 
 
 def _verify_superseded(operation, name, step):
-    history = operation.get("plan_revisions", [])
-    current = operation.get("cleanup_plan", {})
-    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:", "cleanup-batch:")):
-        raise ValueError("只有清理资源步骤可被已确认的新计划替代")
-    for index, revision in enumerate(history):
-        if not isinstance(revision, dict) or not isinstance(revision.get("plan"), dict):
-            raise ValueError("清理计划修订记录无效")
-        plan = revision.get("plan", {})
-        digest = plan.get("digest")
-        if (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
-                or engineering_baseline.digest({k: v for k, v in plan.items() if k != "digest"}) != digest
-                or (revision.get("confirmation_digest") != digest and not
-                    (operation.get("kind") == "archive" and index == 0 and revision.get("confirmation_digest") is None))
-                or revision.get("revision") != index or revision.get("superseded_revision") != index + 1
-                or not isinstance(revision.get("superseded_by"), str)
-                or not re.fullmatch(r"[0-9a-f]{64}", revision["superseded_by"])):
-            raise ValueError("清理计划修订链无效")
-        successor = history[index + 1].get("plan", {}) if index + 1 < len(history) and isinstance(history[index + 1], dict) else current
-        if revision["superseded_by"] != successor.get("digest"):
-            raise ValueError("清理计划修订链未指向下一版权威计划")
-    original = step.get("superseded_plan_digest")
-    if not isinstance(original, str):
-        raise ValueError("替代步骤缺少原计划摘要")
-    original_revision = step.get("superseded_plan_revision")
-    if type(original_revision) is not int or not 0 <= original_revision < len(history):
-        raise ValueError("替代步骤缺少原计划修订编号")
-    revision = history[original_revision]
-    if (revision["plan"]["digest"] != original or revision.get("superseded_by") != step.get("superseded_by")
-            or step.get("superseded_revision") != original_revision + 1):
-        raise ValueError("步骤替代缺少原计划和精确新确认")
-    if not isinstance(step["expected"], dict):
-        raise ValueError("清理步骤目标结构无效")
-    if operation.get("kind") == "archive" and not name.startswith("archive-publish:"):
-        raise ValueError("归档草稿刷新不能替代或执行删除步骤")
-    if name.startswith("archive-publish:"):
-        drafts = operation.get("archive_drafts", [])
-        draft = next((item for item in drafts if isinstance(item, dict) and item.get("plan_revision") == original_revision), None)
-        if (name != "archive-publish:" + str(original_revision) or not draft
-                or engineering_baseline.digest(draft.get("record")) != step["expected"].get("digest")
-                or (draft.get("publication_intent") or {}).get("expected") != step["expected"]):
-            raise ValueError("发布步骤替代缺少未发布草稿及原意图")
-    elif name.startswith("clear-active:"):
-        if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
-            raise ValueError("活动材料清理步骤不属于原计划")
-    elif name.startswith("station-source-reset:"):
-        if (revision["plan"].get("schema_version") != 6
-                or name != "station-source-reset:" + str(original_revision) + ":" + original
-                or step["expected"] != {"plan_digest": original}):
-            raise ValueError("工位源码复位步骤不属于原计划")
-    elif name.startswith("cleanup-stage:"):
-        from workflow.station_cleanup_stages import STAGES
-        stage = step["expected"].get("stage")
-        if stage not in STAGES or name != "cleanup-stage:" + str(original_revision) + ":" + original + ":" + stage or step["expected"].get("plan_digest") != original:
-            raise ValueError("阶段回执不属于原计划")
-    elif name.startswith("cleanup-batch:"):
-        batch = step["expected"].get("batch")
-        boundary = revision["plan"]["rules"]["batches"].get(batch)
-        if (not boundary or name != "cleanup-batch:%s:%s:%s" % (original_revision, original, batch)
-                or step["expected"].get("plan_digest") != original
-                or step["expected"].get("boundary_digest") != engineering_baseline.digest(boundary)):
-            raise ValueError("清理批次回执不属于原计划")
-    elif name.startswith("source-reset:"):
-        repository = step["expected"].get("repository")
-        entries = [entry for entry in revision["plan"].get("entries", []) if entry.get("repository") == repository]
-        if step["expected"].get("entries_digest") != engineering_baseline.digest(entries):
-            raise ValueError("源码回收步骤不属于原计划")
-    elif name.startswith("resource:"):
-        if name != "resource:" + str(original_revision) + ":" + original + ":" + str(step["expected"].get("path")) or step["expected"] not in revision["plan"].get("entries", []):
-            raise ValueError("被替代步骤不属于原计划")
-    else:
-        identifier = step["expected"].get("id")
-        if (name != "external:" + str(original_revision) + ":" + original + ":" + engineering_baseline.digest(identifier)
-                or not any(entry.get("id") == identifier for entry in revision["plan"].get("external", []))):
-            raise ValueError("被替代外部资源不属于原计划")
-    if (engineering_baseline.digest({k: v for k, v in current.items() if k != "digest"}) != current.get("digest")
-            or operation.get("confirmation_digest") != current.get("digest")):
-        raise ValueError("当前清理计划没有有效精确确认")
+    raise ValueError("旧清理修订记录必须由原版本退出")
 
 
 def begin(base, kind, operation_id, expected_revision, request, run_id=None):
-    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan"):
+    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
         raise ValueError("operation_id 必须为 op- 前缀的稳定操作编号")
@@ -169,14 +94,21 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
         from workflow import archive_store
-        run_id = task_store.new_run_id(issue_key)
-        try:
-            archive_store.reserve(base, issue_key, run_id)
-        except FileExistsError as error:
-            raise ValueError(
-                "执行编号 %s 已存在；同一 Jira 在同一秒只能发起一次接管，请研发稍后重试" % run_id
-            ) from error
-    elif current["current"] is None or current["current"]["run_id"] != run_id:
+        for attempt in range(2):
+            run_id = task_store.new_run_id(issue_key)
+            try:
+                archive_store.reserve(base, issue_key, run_id)
+                break
+            except OSError as error:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                if isinstance(error, FileExistsError):
+                    raise ValueError(
+                        "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
+                    ) from error
+                raise OSError("编号占位目录创建失败；等待 2 秒自动重试一次仍失败：%s" % error) from error
+    elif kind != "work-clean" and (current["current"] is None or current["current"]["run_id"] != run_id):
         raise ValueError("工位 run 已变化")
     value = {
         "schema_version": 1, "operation_id": operation_id, "kind": kind,
@@ -184,17 +116,33 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         "expected_revision": expected_revision, "phase": "intent", "status": "running",
         "request": copy.deepcopy(request), "steps": {},
     }
+    if previous and previous.get('protected_paths'):
+        value['protected_paths'] = previous['protected_paths']
+    inherited = list(previous.get("retained_results", [])) if previous else []
+    if previous and previous.get("cleanup_result"):
+        result = previous["cleanup_result"]
+        if result.get("residuals") or result.get("resources"):
+            inherited.append({"operation_id": previous["operation_id"], "run_id": previous["run_id"], "result": result})
+    if inherited:
+        value["retained_results"] = inherited
     try:
         save(base, value)
     except Exception:
         if kind == "takeover":
+            observed = read(base)
+            if observed and observed.get('operation_id') == operation_id and observed.get('run_id') == run_id:
+                # 原子写入可能已完成而持久化回执失败；保留编号供原操作恢复。
+                raise
             archive_store.consume_reservation(base, run_id)
         raise
-    collect_payloads(base)
+    residuals = collect_payloads(base) or []
+    if residuals:
+        value['maintenance_residuals'] = residuals
+        save(base, value)
     return value
 
 
-PAYLOAD_FIELDS = {"cleanup_plan", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs", "archive_drafts", "plan_revisions", "amendment_receipts", "previous_operation"}
+PAYLOAD_FIELDS = {"archive_payload", "retained_results", "exit_task", "cleanup_plan", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs", "archive_drafts", "plan_revisions", "amendment_receipts", "previous_operation"}
 
 
 def save(base, operation):
@@ -217,17 +165,19 @@ def save(base, operation):
     task_store._write_json_atomic(path(base), value)
 
 
-def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan):
-    """先在原接管记录固化完整交接，再替换；任何中断点都有唯一后继。"""
+def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, kind="clean"):
+    """先在原任务操作记录固化完整交接，再替换；任何中断点都有唯一后继。"""
     previous = read(base)
-    if previous is None or previous["kind"] != "takeover" or previous["status"] == "done":
-        raise ValueError("只有未完成接管可以交接清理")
+    if previous and previous.get('archive_result', {}).get('status') == 'awaiting_decision':
+        raise ValueError('归档仍待用户决定，先恢复原操作处理归档，不能以 clean 绕过')
+    if previous is None or previous["kind"] not in ("takeover", "scope_change", "replan", "archive") or previous["status"] == "done":
+        raise ValueError("只有未完成的非清理任务操作可以交接退出")
     if not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id) or operation_id == previous["operation_id"]:
         raise ValueError("清理交接需要新的有效操作编号")
     current = task_store.read_current(base)
     if not current["current"] or current["current"]["run_id"] != run_id or previous["run_id"] != run_id:
         raise ValueError("清理交接 run 已变化")
-    target = {"operation_id": operation_id, "expected_revision": revision,
+    target = {"operation_id": operation_id, "kind": kind, "expected_revision": revision,
               "request": copy.deepcopy(request), "request_digest": engineering_baseline.digest(request),
               "cleanup_plan": copy.deepcopy(cleanup_plan), "run_id": run_id}
     if previous.get("handoff"):
@@ -238,7 +188,7 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan):
             raise ValueError("清理交接 revision 已变化：expected=%s actual=%s" % (revision, current["revision"]))
         previous["handoff"] = target
         save(base, previous)
-    value = {"schema_version": 1, "operation_id": operation_id, "kind": "clean", "run_id": run_id,
+    value = {"schema_version": 1, "operation_id": operation_id, "kind": kind, "run_id": run_id,
              "request_digest": target["request_digest"], "expected_revision": revision,
              "phase": "intent", "status": "running", "request": copy.deepcopy(request),
              "steps": {}, "cleanup_plan": copy.deepcopy(cleanup_plan),
@@ -282,7 +232,14 @@ def finish(base, operation):
         for key in ("evidence", "artifacts", "logs"):
             draft.pop(key, None)
     save(base, operation)
-    collect_payloads(base)
+    residuals = collect_payloads(base) or []
+    if residuals:
+        operation['maintenance_residuals'] = residuals
+        if 'cleanup_result' in operation:
+            existing = {row['path'] for row in operation['cleanup_result']['residuals']}
+            operation['cleanup_result']['residuals'].extend(row for row in residuals if row['path'] not in existing)
+            operation['cleanup_result']['complete'] = False
+        save(base, operation)
 
 
 def collect_payloads(base):
@@ -294,13 +251,16 @@ def collect_payloads(base):
         return
     current = json.loads(path(base).read_text())
     retained = set(current.get("payload_refs", {}).values())
+    residuals = []
     for blob in directory.iterdir():
-        if blob.is_symlink() or not blob.is_file() or blob.suffix != ".json":
-            raise ValueError("操作材料含未知对象，拒绝回收")
-        if engineering_baseline.digest(json.loads(blob.read_text())) != blob.stem:
-            raise ValueError("操作材料摘要损坏，拒绝回收")
-    for blob in directory.iterdir():
-        if blob.stem not in retained:
-            blob.unlink()
+        try:
+            if (blob.is_symlink() or not blob.is_file() or blob.suffix != '.json'
+                    or engineering_baseline.digest(json.loads(blob.read_text())) != blob.stem):
+                raise ValueError('未知操作材料，保留')
+            if blob.stem not in retained:
+                blob.unlink()
+        except (ValueError, OSError) as error:
+            residuals.append({'path': blob.relative_to(Path(base).resolve()).as_posix(), 'reason': str(error)})
     from workflow.station_directories import sync
     sync(directory)
+    return residuals

@@ -1,0 +1,55 @@
+{
+  "version": 3,
+  "rules": [
+    {
+      "scope": "repository",
+      "pattern": "**/target",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "repository",
+      "pattern": "**/node_modules",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "repository",
+      "pattern": "**/__pycache__",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "repository",
+      "pattern": "**/.pytest_cache",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "tapdata-test-env",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "maven-local",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "tapdata-test-env-diagnostics",
+      "type": "directory",
+      "action": "generated"
+    }
+  ],
+  "resources": [
+    {
+      "kind": "docker-project",
+      "path": "runtime/tapdata-test-env",
+      "project_prefix": "ao-tapdata-",
+      "identity_label": "io.agenticops.station"
+    }
+  ]
+}

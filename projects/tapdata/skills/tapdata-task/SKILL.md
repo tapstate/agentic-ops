@@ -11,17 +11,17 @@ metadata:
 
 先读工位 AGENTS、当前 Project Profile、准入规则和本 Skill。以 station.json 的 Product Root 为准，memory 只作历史线索。工位 config/source/runtime 分离配置、完整源码和唯一运行现场；正式档案在 Product Root 的 `.archive/<run-id>`，.agenticops 只保存一个当前任务与操作。
 
-写请求固定 issue/run，advance 另带 expected-stage；生命周期与范围操作带 expected-revision 和稳定 operation-id。拒绝后先回读，不自动用新 run/revision 重放旧决定。interaction-path 分配当前证据路径，归档后不继续写开发证据。
+写请求固定 issue/run，advance 另带 expected-stage；生命周期与范围操作带 expected-revision 和稳定 operation-id。拒绝后先回读，不自动用新 run/revision 重放旧决定。interaction-path 分配当前证据路径，独立归档不冻结开发；任务释放后不写旧运行证据。
 
 ## 接管与恢复
 
 用户以 Jira key 要求继续已有任务、跨版本升级后接续，或升级前保全进展时，使用共享 [ao-task-resume](../../../../skills/shared/ao-task-resume/SKILL.md)。Jira/GitHub 保存有效设计、决定、真实历史基线与完整 Head、验证和剩余事项；缺项由 AI 核实并协助用户补齐。该技能只整理可信输入，接管、授权、质量和状态写入仍使用本 Skill 的现役入口，不解析旧 epoch 或复制旧 PASS。
 
-需要配置、部署、更新、检查、切换或卸载工位 Docker 开发环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，任务释放或清理前先卸载该 Skill 管理的容器。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
+需要配置、部署、更新、检查、切换或卸载工位 Docker 开发环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，正常退出先由脚本处理已支持的运行资源，返回未完成容器时再由该 Skill 接力。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
 
-1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先按确认范围保全、归档并清理，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
+1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先由脚本 release/clean 退出，保留源码与未选择配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
 3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。用户已选择当前会话处理 TapTest 且需要测试仓时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
@@ -29,25 +29,11 @@ metadata:
 6. 续办原 run 不重写已有基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。追加当前 Profile 允许的可选仓库时，使用[同周期方案返工](../../../../docs/usage/task-authorization.md#同周期方案返工)，保留成果并重新确认受影响方案和授权；更换工程版本或超出支持范围时须归档清理后重接，不能偷改冻结清单。
 7. snapshot 固化 Jira 初始事实，jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
 
-## 归档、释放和重置工位
+## 清理、归档和释放
 
-先向用户展示 `cleanup_scope` 的清理/复位、保全、保留、未知四类实际对象及允许的决定，再请求确认；不要只问“是否放弃变更”。保留源码仓不等于保留当前工作区修改。部分清单或阻塞不授权执行；恢复展示原范围、完成回执与变化，结束展示实际结果及剩余材料。用户要求处理保留项时遵守独立处置边界，不扩大普通清理授权。
+用户明确请求工作清理、任务清理、归档或 release 后，直接使用[清理入口](../../../../docs/usage/task-authorization.md#清理与退出)的脚本，不先由 Agent 盘点或生成清理计划。项目清单声明生成物，工位清单维护接线和配置；源码及 Git 成果保留，环境配置默认保留。release 支持中途退出与完成退出，归档只记录已有结果，失败不阻断清理。
 
-结果分别报告最终 PR/提交及验收、归档覆盖、实际释放和注销；有档案不等于工位已退出。最终完成检查复用当前 Head/Checks 的已有具体例外，提交或实际缺口变化只补核受影响证据，不把同一决定再次改为“所有 Checks 全绿”。业务 completed 暂不能可靠证明时，明确保留已交付、已验收和待核验项，可在原范围决定及安全条件满足后如实 clean 腾空，不补造 PASS 或 completed。缺陷收尾说明根因、实际修改、候选与安装版本、验证及遗留事项，区分代码修复和原工位恢复。
-
-用户要求清理时，新操作先调用 `workflow/station-clean.py --check --dir <station>` 只读预检；两层名单、版本 6 请求及结果标准见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用 clean/release；已有确认仍覆盖当前范围时复用。未提交及 ignored 内容先选择独立导出或精确丢弃，保留 config/source/archive 和命名分支、PR。源码复位不依赖 Maven/npm 清理命令；完成任务仍核对 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
-
-停止写入者后按确认范围执行；默认脚本先保全再清理。脚本异常时核对已完成与剩余动作，在相同授权内接管；也可用 `--prepare-only` 保全后直接交给 Agent。完成后原请求增加 `--verify-result`，按实际成果验收并正式解绑，不要求补成功退出码或重跑原脚本。基线、保全、权限和未知外部结果仍须核验；范围变化补充确认，不手改状态。源码回到 Profile 开发分支的已确认 SHA，按清单回收受管临时基线引用，不联网追新；空闲工位才可使用 source-update 刷新。
-
-可迁出的运行产物优先放 runtime；源码内构建输出不要求生产前登记，也不按 target 等名称判定可删。退出时按实际清单确认，关键报告和敏感材料先保全。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
-
-任务档案只保存会话与处理状态；通过原生读取或用户导出生成带来源、覆盖边界及截止点的 conversation 证据，摘要不得标成完整会话。未提交源码和必要新文件须先登记 source-disposition，精确 export/discard 和当前快照，不把状态摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接只保存链接文本、不跟随目标；冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
-
-清理默认自动经过准入、归档、源码、分支/PR、资源、释放六阶段，出口检查实际成果；仅遇到 needs_attention 时处理 problems，随后恢复同一操作。分支/PR 默认保留；用户明确删除时在原计划登记精确对象和决定，本地分支 location=local 由固定逻辑处理。远端分支和 PR 在 cleanup_disposition 阶段使用原生工具，先 station_disposition intent，后实际回读 readback，再恢复原清理；未知结果先回读，不重发，不把删除失败静默改为保留。完整用法见[阶段式清理](../../../../docs/architecture/single-task-station.md#阶段式清理)。
-
-中断恢复同一 issue/run/revision/operation-id 和原请求；旧 schema 3–5 或旧 epoch 只能由原产品版本退出，不用现役入口恢复。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
-
-会话来源、截止点、明确接受缺口及退出输入遵循[统一退出合同](../../../../docs/architecture/single-task-station.md#会话来源与最小退出回执)。正文截止点在范围确认前固定，确认与后续事实由状态及回执补全，不反复回灌正文。源码完整清单用 `--details --output <工位外私有新文件>`，不保存到正在盘点的 runtime/evidence。会话输入通过 `station-clean.py --conversation-input <工位外清单>` 仅录入；completed 使用 interaction-path 的显式 `--purpose exit`，pending 绑定原 operation/revision/plan。冻结草稿只能沿 cleanup-amend 的同一参数持锁修订，正式正文不能补写；具体参数以绑定版本帮助及[授权指引](../../../../docs/usage/task-authorization.md)为准。
+只有脚本返回残留或异常时，Agent 才分析并接手未完成工作。复用原 operation 和已完成回执，按原范围使用原生工具处理后通过 --verify-result 验收。剩余未知内容由用户决定保留、移出、删除或暂停，未决定不扩大删除范围。任务是否释放与文件是否全部清理分别说明；不要求先修脚本、重跑验证或补齐会话才能退出。
 
 ## 准入、设计和多仓库
 
@@ -91,7 +77,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - 创建或编辑 PR 正文时，按[PR 正文发布与回读](../../../../docs/usage/quality-checkpoints.md#pr-正文发布与回读)每仓准备真实多行 UTF-8 文件，调用 `workflow/pr_body.py preflight`；CLI 用 `--body-file`，不把正文拼入 Shell。原生写入后回读 `number,url,body` 并用 `compare` 核对目标与全文，再报告描述已核验。提示不自动替换合法转义；已存在 PR 保留人工修改，未知结果先回读原 PR，不重建。纯正文修正不触发来源分支合并或代码重验，正文问题不阻塞无依赖工作，不改变 PR Ready 门禁。
 
 - 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
-- completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
+- completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出脚本先处理可确定事项；未知外部结果保留原操作信息并交接，不重复发送，也不因同步记录缺项阻断独立清理。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
 - 提交与 PR 准备遵循[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#测试与提交边界)：业务及适用普通 `test` 与 `ci-test`（`it`）强制分开提交，前者可合入低版本，后者不得回补；核验合入方式保留回补边界；用户回补后回读实际 release 成果并完成独立功能验证，再创建或更新 PR。不代办跨分支合入，不以 develop 报告替换 release 证据。
 - 创建或提审前端代码 PR 时，按[PR 默认审查人](../../runbooks/build-test-and-local-run.md#pr-默认审查人)应用 Feynman 默认审查安排，核对账号、请求资格及写后回读；用户明确指定的安排优先，未确认账号不猜测。
@@ -113,3 +99,5 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-station>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
 - 每个检查点确认后尽力回写简洁人读评论，保留 draft/confirm/prepare_write/receipt/readback。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
 - 未迁移能力优先使用 Agent 原生能力；没有安全路径时只暂停当前副作用步骤。
+
+归档写入失败时，按[任务授权指引](../../../../docs/usage/task-authorization.md#清理与退出)展示指定快照、失败原因和实际清理结果，引导研发明确授权修复后重试或放弃。复用原操作和失败摘要，不自动丢弃，不以新 clean 操作绕过；回读结果不明时先核实。

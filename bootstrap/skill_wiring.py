@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from agent_registry import discover
@@ -242,7 +243,11 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--refresh", action="store_true")
     mode.add_argument("--check", action="store_true")
+    parser.add_argument("--quiet", action="store_true", help="省略接线成功明细，保留失败诊断")
     arguments = parser.parse_args()
+    operation = "检查" if arguments.check else "维护接线"
+    if not arguments.quiet:
+        print("[AgenticOps][%s][进行] 核验维护 Skill 接线" % operation, file=sys.stderr)
     try:
         product_root = validate_source_product_root(arguments.product_root)
         artifacts = expected_artifacts(product_root)
@@ -254,15 +259,18 @@ def main():
         if arguments.refresh:
             update_git_exclude(product_root, artifacts)
     except (OSError, ValueError) as error:
-        parser.error(str(error))
+        print("[AgenticOps][%s][失败] %s（退出码=2）" % (operation, error), file=sys.stderr)
+        raise SystemExit(2)
+    if arguments.quiet:
+        return 0
     if arguments.check:
         print(
-            "AgenticOps 维护 Skill 接线检查通过：%s（links=%s）"
+            "[AgenticOps][检查][完成] 维护 Skill 接线检查通过：%s（links=%s）"
             % (product_root, len(artifacts))
         )
     else:
         print(
-            "AgenticOps 维护 Skill 接线已刷新：%s（links=%s）"
+            "[AgenticOps][维护接线][完成] 维护 Skill 接线已刷新：%s（links=%s）"
             % (product_root, len(artifacts))
         )
     return 0

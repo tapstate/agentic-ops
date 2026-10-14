@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ao_stage="核验产品根目录与操作条件"
+trap 'ao_status=$?; printf "[AgenticOps][配置][失败] %s（退出码=%s）\n" "$ao_stage" "$ao_status" >&2; exit "$ao_status"' ERR
+
 product_root="${AGENTIC_OPS_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
 target_branch="develop"
 source_pool="$HOME/.agentic-ops-repos"
@@ -23,7 +26,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     *)
-      printf 'AgenticOps：未知 setup 参数：%s\n' "$1" >&2
+      printf '[AgenticOps][配置][失败] 未知 setup 参数：%s（退出码=2）\n' "$1" >&2
       usage >&2
       exit 2
       ;;
@@ -31,14 +34,14 @@ while [ "$#" -gt 0 ]; do
 done
 
 test -f "$product_root/.agentic-ops-source" || {
-  printf 'AgenticOps：setup 只适用于源码产品根目录\n' >&2
+  printf '[AgenticOps][配置][失败] setup 只适用于源码产品根目录（退出码=2）\n' >&2
   exit 2
 }
 if [ -f "$product_root/.local/product.json" ]; then
   if configured_mode="$(python3 "$product_root/bootstrap/product_state.py" \
       --product-root "$product_root" read --field mode 2>/dev/null)"; then
     test "$configured_mode" != "installed" || {
-      printf 'AgenticOps：安装目录不能执行 setup；请使用 agenticops update\n' >&2
+      printf '[AgenticOps][配置][失败] 安装目录不能执行 setup；请使用 agenticops update（退出码=2）\n' >&2
       exit 2
     }
     if [ "$source_pool_explicit" = false ]; then
@@ -47,15 +50,15 @@ if [ -f "$product_root/.local/product.json" ]; then
     env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"
     python3 "$product_root/bootstrap/product_state.py" \
       --product-root "$product_root" update-source-pool --source-pool "$source_pool"
-    printf 'AgenticOps 源码池已更新：%s\n' "$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field source_pool)"
+    printf '[AgenticOps][配置][完成] 源码池已更新：%s\n' "$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field source_pool)"
     exit 0
   fi
   # 产品源码的本地生命周期配置可由 setup 重新生成；不解析或迁移任何工位状态。
-  printf 'AgenticOps：产品源码本地配置版本不支持，将重新初始化产品配置\n' >&2
+  printf '[AgenticOps][配置][警告] 产品源码本地配置版本不支持，将重新初始化产品配置\n' >&2
 fi
 for command_name in git python3 uv; do
   command -v "$command_name" >/dev/null 2>&1 || {
-    printf 'AgenticOps：源码维护缺少命令：%s\n' "$command_name" >&2
+    printf '[AgenticOps][配置][失败] 源码维护缺少命令：%s（退出码=2）\n' "$command_name" >&2
     exit 2
   }
 done
@@ -66,19 +69,23 @@ lifecycle_acquire_lock "$product_root" "setup:source"
 lifecycle_require_clean_tree "$product_root" "维护"
 
 current_branch="$(git -C "$product_root" branch --show-current)"
-git -C "$product_root" fetch origin "$target_branch"
+ao_stage="获取并核验目标版本"
+printf '[AgenticOps][配置][进行] %s\n' "$ao_stage" >&2
+git -C "$product_root" fetch --quiet origin "$target_branch"
 if [ "$current_branch" != "$target_branch" ]; then
   if git -C "$product_root" show-ref --verify --quiet "refs/heads/$target_branch"; then
-    git -C "$product_root" switch "$target_branch"
+    git -C "$product_root" switch --quiet "$target_branch"
   else
-    git -C "$product_root" switch --create "$target_branch" --track "origin/$target_branch"
+    git -C "$product_root" switch --quiet --create "$target_branch" --track "origin/$target_branch"
   fi
 fi
-git -C "$product_root" merge --ff-only "origin/$target_branch"
+git -C "$product_root" merge --quiet --ff-only "origin/$target_branch"
 
 repository="$(git -C "$product_root" remote get-url origin)"
 current_ref="$(git -C "$product_root" rev-parse HEAD)"
 source_pool="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$source_pool")"
+ao_stage="同步维护依赖与接线"
+printf '[AgenticOps][配置][进行] %s\n' "$ao_stage" >&2
 mkdir -p "$product_root/.local/venv" "$product_root/.local/cache"
 chmod 0700 "$product_root/.local" "$product_root/.local/venv" "$product_root/.local/cache"
 UV_CACHE_DIR="$product_root/.local/cache/uv" \
@@ -96,6 +103,6 @@ python3 "$product_root/bootstrap/product_state.py" \
 python3 "$product_root/bootstrap/station_registry.py" \
   --product-root "$product_root" initialize
 python3 "$product_root/bootstrap/skill_wiring.py" \
-  --product-root "$product_root" --refresh
+  --product-root "$product_root" --refresh --quiet
 
-printf 'AgenticOps 初始化完成：branch=%s，ref=%s，源码池=%s\n' "$target_branch" "$current_ref" "$source_pool"
+printf '[AgenticOps][配置][完成] 初始化完成：branch=%s，ref=%s，源码池=%s\n' "$target_branch" "$current_ref" "$source_pool"

@@ -75,7 +75,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None, 
         from workflow import station_operation
         operation = station_operation.read(base) or {}
         version = operation.get("cleanup_plan", {}).get("schema_version", 6)
-        plan = _plan if _plan is not None else resources.plan(base, task, version=version, decisions_override={relative: {"action": "archive"}})
+        plan = _plan if _plan is not None else resources.export_plan(base, task, version=version, decisions_override={relative: {"action": "archive"}})
         entry = next((item for item in plan['entries'] if item['path'] == relative), None)
         if entry is None:
             raise ValueError('导出路径不属于当前源码成果')
@@ -123,7 +123,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None, 
         if sha256_file(target) != checksum:
             raise ValueError('导出文件回读失败，拒绝登记保存决定')
         # 写出期间源码有任何变化时，不把刚生成的旧成果当成当前成果。
-        if not _defer and resources.plan(base, task, version=version, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
+        if not _defer and resources.export_plan(base, task, version=version, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
             raise ValueError('导出期间源码变化，请保留导出并重新核对')
         choice = {'action': 'export', 'path': str(target), 'sha256': checksum, 'snapshot': proof,
                   'readback_ref': receipt_reference(base, task, path)}
@@ -151,14 +151,14 @@ def export_batch(base, issue, run, items, expected_operation_id=None):
         if len({row['path'] for row in items}) != len(items) or len({str(Path(row['output']).resolve()) for row in items}) != len(items):
             raise ValueError('批量导出路径或目标重复')
         overrides = {row['path']: {'action': 'archive'} for row in items}
-        plan = resources.plan(base, task, decisions_override=overrides)
+        plan = resources.export_plan(base, task, decisions_override=overrides)
         entries = {row['path']: row for row in plan['entries']}
         if not set(overrides) <= set(entries):
             raise ValueError('批量路径不属于当前源码成果')
         result = []
         for row in items:
             result.append(export(base, issue, run, row['path'], row['output'], expected_operation_id, _plan=plan, _defer=True))
-        current = resources.plan(base, task, decisions_override=overrides)
+        current = resources.export_plan(base, task, decisions_override=overrides)
         # 导出自身的意图/回执写入 evidence；只排除本批已核验的精确文件。
         owned = set()
         for row in result:

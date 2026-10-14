@@ -17,19 +17,6 @@
       ],
       "optional_repositories": [
         "tapdata/t-layer3-test"
-      ],
-      "generated_directories": [
-        "target",
-        "**/target",
-        "node_modules",
-        "**/node_modules",
-        "__pycache__",
-        "**/__pycache__",
-        ".pytest_cache"
-      ],
-      "archive_runtime": [
-        "logs",
-        "reports"
       ]
     }
   }

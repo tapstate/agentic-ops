@@ -1,23 +1,23 @@
 {
-  "version": 2,
+  "version": 3,
   "rules": [
     {
       "scope": "station-root",
       "pattern": "source",
       "type": "directory",
-      "action": "source-reset"
+      "action": "preserve"
     },
     {
       "scope": "station-root",
       "pattern": "runtime",
       "type": "directory",
-      "action": "clear-children"
+      "action": "preserve"
     },
     {
       "scope": "station-root",
       "pattern": ".agenticops",
       "type": "directory",
-      "action": "lifecycle-clean"
+      "action": "preserve"
     },
     {
       "scope": "station-root",
@@ -38,22 +38,52 @@
       "action": "preserve"
     },
     {
+      "scope": "runtime",
+      "pattern": "logs",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "reports",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "tmp",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
+      "scope": "configuration",
+      "pattern": "*",
+      "type": "file",
+      "action": "configuration"
+    },
+    {
+      "scope": "configuration",
+      "pattern": "*",
+      "type": "directory",
+      "action": "configuration"
+    },
+    {
       "scope": "station-root",
       "pattern": ".DS_Store",
       "type": "file",
-      "action": "discard"
+      "action": "generated"
     },
     {
-      "scope": "source-layout",
+      "scope": "runtime",
       "pattern": ".DS_Store",
       "type": "file",
-      "action": "discard"
+      "action": "generated"
     },
     {
-      "scope": "repository",
+      "scope": "configuration",
       "pattern": ".DS_Store",
       "type": "file",
-      "action": "discard"
+      "action": "generated"
     }
   ]
 }

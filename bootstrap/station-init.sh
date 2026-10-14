@@ -43,32 +43,36 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     *)
-      printf 'AgenticOps：未知参数：%s\n' "$1" >&2
+      printf '[AgenticOps][初始化][失败] 未知参数：%s（退出码=2）\n' "$1" >&2
       usage >&2
       exit 2
       ;;
   esac
 done
 
+ao_stage="检查工位条件"
+trap 'ao_status=$?; printf "[AgenticOps][初始化][失败] %s（退出码=%s）\n" "$ao_stage" "$ao_status" >&2; exit "$ao_status"' ERR
+printf '[AgenticOps][初始化][进行] %s\n' "$ao_stage" >&2
+
 test -n "$station" || { usage >&2; exit 2; }
 install_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$install_root")"
 station="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station")"
 case "$station" in
   "$install_root"|"$install_root"/*)
-    printf 'AgenticOps：项目工位不能是产品根目录或其子目录：%s\n' "$station" >&2
+    printf '[AgenticOps][初始化][失败] 项目工位不能是产品根目录或其子目录：%s（退出码=2）\n' "$station" >&2
     exit 2
     ;;
 esac
 test ! -f "$station/.agentic-ops-source" || {
-  printf 'AgenticOps：源码仓库不能初始化为业务项目工位：%s\n' "$station" >&2
+  printf '[AgenticOps][初始化][失败] 源码仓库不能初始化为业务项目工位：%s（退出码=2）\n' "$station" >&2
   exit 2
 }
 test -f "$install_root/contracts/gate-request.schema.json" || {
-  printf 'AgenticOps：安装不完整：%s\n' "$install_root" >&2
+  printf '[AgenticOps][初始化][失败] 安装不完整：%s（退出码=2）\n' "$install_root" >&2
   exit 2
 }
 test -f "$install_root/gate/runner.py" || {
-  printf 'AgenticOps：安装缺少标准 Gate Runner：%s\n' "$install_root" >&2
+  printf '[AgenticOps][初始化][失败] 安装缺少标准 Gate Runner：%s（退出码=2）\n' "$install_root" >&2
   exit 2
 }
 
@@ -89,13 +93,33 @@ source_pool_arguments=()
 if [ -n "$source_pool" ]; then
   source_pool_arguments=(--source-pool "$source_pool")
 fi
+ao_stage="登记工位"
+printf '[AgenticOps][初始化][进行] %s\n' "$ao_stage" >&2
 python3 "$install_root/bootstrap/station_registry.py" \
   --product-root "$install_root" --lifecycle-held register --station "$station"
+ao_stage="生成项目与 Agent 接线"
+printf '[AgenticOps][初始化][进行] %s\n' "$ao_stage" >&2
 python3 "$install_root/bootstrap/render.py" \
-  --install-home "$install_root" --station "$station" \
+  --quiet --install-home "$install_root" --station "$station" \
   --project "$project" ${agent_arguments[@]+"${agent_arguments[@]}"} \
   ${source_pool_arguments[@]+"${source_pool_arguments[@]}"} \
   ${reuse_arguments[@]+"${reuse_arguments[@]}"}
-printf 'AgenticOps 项目工位已初始化：%s（project=%s）\n' "$station" "$project"
-printf '统一入口：cd %s && ./agenticops station doctor\n' "$station"
-printf '必需插件：首次使用 Jira 事实时，Agent 会检查 atlassian；缺失时只暂停依赖步骤并引导你在当前 Agent 客户端安装和登录。GitHub 工具由 Agent 按任务自行选择。\n'
+ao_stage="读取初始化结果"
+python3 - "$station" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+station = Path(sys.argv[1])
+config = json.loads((station / ".agenticops/station.json").read_text())
+init = json.loads((station / ".agenticops/init.json").read_text())
+project = config["project"]
+agents = ",".join(config["agents"])
+product_ref = init["product_ref"]
+print("[AgenticOps][初始化][完成] 项目工位已初始化")
+print("  工位目录：%s" % station)
+print("  项目：%s" % project)
+print("  Agent：%s" % agents)
+print("  产品提交：%s" % product_ref)
+PYTHON
+printf '  下一步：cd %q && ./agenticops station doctor\n' "$station"
+printf '  提示：首次使用 Jira 时由 Agent 引导配置 Atlassian 插件。\n'

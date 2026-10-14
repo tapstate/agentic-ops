@@ -13,7 +13,7 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
 - `station-layout.json`：工位固定路径、结构角色和合法动作能力，由 Bootstrap 与 Workflow 共同读取，不提供默认清理动作。
-- `station-reset.schema.json`：唯一现役版本 6 的清理范围、保全与规则快照；旧计划必须由原版本退出，不在线转换。历史档案保留，不作为可恢复执行合同。
+- `station-reset.schema.json`：唯一现役版本 7 的清单快照、精确处理对象、保留项与残留；旧计划必须由原版本退出，不在线转换。历史档案保留，不作为可恢复执行合同。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
@@ -24,7 +24,7 @@ Manifest v3 删除 `entrypoint`、`hook` 和 `capabilities`，不再要求 Agent
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
-工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。该清单只维护单调递增的 `station_state_epoch`：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；升级与回退也只比较这个值，不另设旧 epoch 映射、支持列表或最低 updater protocol。`station-init.schema.json` 要求新工位记录当前 epoch；缺少该字段的工位不受支持，必须由原版本完成任务归档、释放并 purge。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
+工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。该清单只维护单调递增的 `station_state_epoch`：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；升级与回退也只比较这个值，不另设旧 epoch 映射、支持列表或最低 updater protocol。`station-init.schema.json` 要求新工位记录当前 epoch 和自己的 cleanup 清单；项目清单由 `projects/<project>/station-clean.json` 提供，执行与保护由统一 Workflow 负责。初始化合同；缺少该字段的工位不受支持，必须由原版本完成任务归档、释放并 purge。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
 
 ## 兼容规则
 
@@ -44,3 +44,5 @@ epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读�
 - 删除字段、增加必填字段或改变既有字段和操作语义必须升级主版本。
 - 未知版本、缺失字段和契约与 Policy 漂移必须拒绝；未知操作必须转人工。
 - Adapter、Gate、Policy 不得私自定义未登记的标准操作或字段语义。
+
+本版清单与非阻塞退出使用 epoch 30。取消归档冻结、源码重置和清理计划修订；独立归档只追加已有事实。工作清理、任务清理及注销边界以[单任务工位合同](../docs/architecture/single-task-station.md)为准。

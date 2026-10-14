@@ -21,12 +21,12 @@ lifecycle_acquire_lock() {
       ''|*[!0-9]*) lifecycle_owner='' ;;
     esac
     if [ -n "$lifecycle_owner" ] && kill -0 "$lifecycle_owner" 2>/dev/null; then
-      printf 'AgenticOps：已有生命周期操作正在执行：pid=%s\n' "$lifecycle_owner" >&2
+      printf '[AgenticOps][生命周期][失败] 已有生命周期操作正在执行：pid=%s\n' "$lifecycle_owner" >&2
       return 2
     fi
     rm -f "$lifecycle_lock_dir/owner"
     rmdir "$lifecycle_lock_dir" 2>/dev/null || {
-      printf 'AgenticOps：生命周期锁状态异常：%s\n' "$lifecycle_lock_dir" >&2
+      printf '[AgenticOps][生命周期][失败] 生命周期锁状态异常：%s\n' "$lifecycle_lock_dir" >&2
       return 2
     }
     mkdir "$lifecycle_lock_dir"
@@ -52,11 +52,11 @@ lifecycle_require_clean_tree() {
   lifecycle_root="$1"
   lifecycle_face="$2"
   lifecycle_status="$(git -C "$lifecycle_root" status --porcelain --untracked-files=all)" || {
-    printf 'AgenticOps：无法核验%s工作树状态，拒绝更新\n' "$lifecycle_face" >&2
+    printf '[AgenticOps][生命周期][失败] 无法核验%s工作树状态，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
   test -z "$lifecycle_status" || {
-    printf 'AgenticOps：%s存在未提交修改，拒绝更新\n' "$lifecycle_face" >&2
+    printf '[AgenticOps][生命周期][失败] %s存在未提交修改，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
 }
@@ -67,7 +67,7 @@ lifecycle_require_recorded_remote() {
   lifecycle_face="$3"
   lifecycle_actual_repository="$(git -C "$lifecycle_root" remote get-url origin)"
   test "$lifecycle_actual_repository" = "$lifecycle_expected_repository" || {
-    printf 'AgenticOps：%s origin 与本地配置不一致，拒绝更新\n' "$lifecycle_face" >&2
+    printf '[AgenticOps][生命周期][失败] %s origin 与本地配置不一致，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
 }
@@ -81,7 +81,7 @@ lifecycle_refresh_install_scope() {
   if [ -n "$scope_entry" ]; then
     case "$scope_entry" in
       '040000 tree '*) scope_paths+=(skills/shared) ;;
-      *) printf 'AgenticOps：目标共享 Skill 根不是目录，拒绝切换\n' >&2; return 2 ;;
+      *) printf '[AgenticOps][生命周期][失败] 目标共享 Skill 根不是目录，拒绝切换\n' >&2; return 2 ;;
     esac
   fi
   git -C "$scope_root" sparse-checkout set "${scope_paths[@]}"

@@ -151,20 +151,20 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new')
 
-    def test_task_record_epoch_twenty_nine_boundary(self):
+    def test_archive_decision_epoch_thirty_one_boundary(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(manifest(29), current)
+        self.assertEqual(manifest(31), current)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
-        path.write_text(json.dumps({'station_state_epoch': 29}))
+        path.write_text(json.dumps({'station_state_epoch': 31}))
         before = path.read_bytes()
         self.write_registry([str(self.station)])
         for operation in ('update', 'rollback'):
-            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(29), manifest(29)]):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(31), manifest(31)]):
                 compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
         compatibility.require_station_can_adopt(self.product_root, self.station)
         self.assertEqual(before, path.read_bytes())
-        for epoch in range(1, 29):
+        for epoch in range(1, 31):
             with self.subTest(epoch=epoch):
                 path.write_text(json.dumps({'station_state_epoch': epoch}))
                 before = path.read_bytes()
@@ -174,7 +174,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_ci_plan_epoch_rejects_epoch_twenty_two_and_bound_switch(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(29, current['station_state_epoch'])
+        self.assertEqual(31, current['station_state_epoch'])
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 22}))
@@ -191,7 +191,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_merged_cleanup_epoch_rejects_both_epoch_twenty_three_candidates(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(29, current['station_state_epoch'])
+        self.assertEqual(31, current['station_state_epoch'])
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 23}))
@@ -208,7 +208,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(29, current["station_state_epoch"])
+        self.assertEqual(31, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
@@ -373,7 +373,7 @@ class StationCompatibilityTests(unittest.TestCase):
         script = (ROOT / "bootstrap" / "update.sh").read_text(encoding="utf-8")
         self.assertLess(
             script.index("station_compatibility.py"),
-            script.index('merge --ff-only "$target_ref"'),
+            script.index('merge --quiet --ff-only "$target_ref"'),
         )
 
     def test_rollback_passes_the_rollback_operation_to_the_checker(self):
@@ -384,7 +384,7 @@ class StationCompatibilityTests(unittest.TestCase):
         entry = (ROOT / "agenticops").read_text(encoding="utf-8")
         for operation in ("station-start-refresh:", "station-repair:"):
             self.assertIn(operation, entry)
-        self.assertIn("prune|repair|clean|detach|purge", entry)
+        self.assertIn("prune|repair|purge", entry)
         self.assertIn('"station-$station_command_name"', entry)
         self.assertIn("--lifecycle-held", entry)
 

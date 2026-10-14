@@ -4,25 +4,61 @@
   "title": "AgenticOps Project Station Initialization",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "product_ref", "station_state_epoch", "generated_at", "artifacts"],
+  "required": [
+    "schema_version",
+    "product_ref",
+    "station_state_epoch",
+    "generated_at",
+    "artifacts",
+    "cleanup"
+  ],
   "properties": {
     "checkpoint_migration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["from_product_ref", "accepted_at", "retired_artifacts"],
+      "required": [
+        "from_product_ref",
+        "accepted_at",
+        "retired_artifacts"
+      ],
       "properties": {
-        "from_product_ref": { "type": "string", "minLength": 1 },
-        "accepted_at": { "type": "string", "minLength": 1 },
+        "from_product_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accepted_at": {
+          "type": "string",
+          "minLength": 1
+        },
         "retired_artifacts": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
-    "schema_version": { "enum": [1, 2] },
-    "product_ref": { "type": "string", "minLength": 1 },
-    "station_state_epoch": { "type": "integer", "minimum": 1 },
-    "generated_at": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "product_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "station_state_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
     "artifacts": {
       "type": "array",
       "minItems": 1,
@@ -32,33 +68,153 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "sha256"],
+            "required": [
+              "path",
+              "sha256"
+            ],
             "properties": {
-              "path": { "type": "string", "minLength": 1 },
-              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
             }
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "kind", "sha256"],
+            "required": [
+              "path",
+              "kind",
+              "sha256"
+            ],
             "properties": {
-              "path": { "type": "string", "minLength": 1 },
-              "kind": { "const": "file" },
-              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "const": "file"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
             }
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "kind", "target"],
+            "required": [
+              "path",
+              "kind",
+              "target"
+            ],
             "properties": {
-              "path": { "type": "string", "minLength": 1 },
-              "kind": { "const": "symlink" },
-              "target": { "type": "string", "minLength": 1 }
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "const": "symlink"
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         ]
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "rules"
+      ],
+      "properties": {
+        "version": {
+          "const": 3
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scope",
+              "pattern",
+              "type",
+              "action"
+            ],
+            "properties": {
+              "scope": {
+                "enum": [
+                  "station-root",
+                  "repository",
+                  "runtime",
+                  "configuration"
+                ]
+              },
+              "pattern": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "enum": [
+                  "file",
+                  "directory"
+                ]
+              },
+              "action": {
+                "enum": [
+                  "preserve",
+                  "generated",
+                  "configuration"
+                ]
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 3
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "path",
+              "project_prefix",
+              "identity_label"
+            ],
+            "properties": {
+              "kind": {
+                "const": "docker-project"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^runtime/[^.]"
+              },
+              "project_prefix": {
+                "type": "string",
+                "minLength": 1
+              },
+              "identity_label": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
       }
     }
   }

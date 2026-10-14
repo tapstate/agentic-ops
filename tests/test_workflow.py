@@ -349,6 +349,7 @@ def check_station_binding_snapshot(base):
     bound = area / "station"
     binding = bound / ".agenticops/station.json"
     binding.parent.mkdir(parents=True)
+    (binding.parent / "init.json").write_text(json.dumps({"cleanup": json.loads((ROOT / "policies/station-clean.json").read_text())}))
     initial = binding_document(products[0], "alpha")
     later = binding_document(products[1], "beta")
     task = {"task_class": "defect_fix"}

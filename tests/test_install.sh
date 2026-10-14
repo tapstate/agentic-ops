@@ -181,7 +181,8 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+source_update_error="$test_root/source-update-error"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '产品源码已更新' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
@@ -191,7 +192,7 @@ test -L "$maintainer_root/.claude/skills/fixture-maintenance"
 
 git -C "$source_repo" rm -qr skills/fixture-maintenance
 git -C "$source_repo" commit -qm "remove maintenance skill"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
 test ! -e "$maintainer_root/.agents/skills/fixture-maintenance"
 test ! -e "$maintainer_root/.claude/skills/fixture-maintenance"
 
@@ -203,8 +204,8 @@ local_parent="$(git -C "$maintainer_root" rev-parse HEAD)"
 local_tree="$(git -C "$maintainer_root" write-tree)"
 local_commit="$(printf 'local ahead\n' | git -C "$maintainer_root" commit-tree "$local_tree" -p "$local_parent")"
 git -C "$maintainer_root" update-ref refs/heads/develop "$local_commit" "$local_parent"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
-grep -F '维护分支本地领先 1 个提交；update 不会自动推送' "$source_update_output" >/dev/null
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
+grep -F '[AgenticOps][更新][警告] 维护分支本地领先 1 个提交；update 不会自动推送' "$source_update_error" >/dev/null
 mkdir "$maintainer_root/.local/lifecycle.lock"
 printf '%s\n' "$$" > "$maintainer_root/.local/lifecycle.lock/owner"
 printf 'test\n' > "$maintainer_root/.local/lifecycle.lock/operation"
@@ -229,6 +230,24 @@ fi
 git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
+# 下载失败保留底层诊断与退出码，不能输出安装完成。
+install_fail_bin="$test_root/install-fail-bin"
+mkdir -p "$install_fail_bin"
+cat > "$install_fail_bin/git" <<'SH'
+#!/usr/bin/env bash
+printf 'fatal: fixture download denied\n' >&2
+exit 37
+SH
+chmod +x "$install_fail_bin/git"
+install_fail_status=0
+PATH="$install_fail_bin:$PATH" bash "$repo_root/bootstrap/install.sh" \
+  --install-home "$test_root/failed-install" \
+  > "$test_root/install-failure.out" 2> "$test_root/install-failure.err" || install_fail_status=$?
+test "$install_fail_status" -eq 37
+grep -F 'fatal: fixture download denied' "$test_root/install-failure.err" >/dev/null
+grep -F '[AgenticOps][安装][失败] 下载产品（分支=main）（退出码=37）' "$test_root/install-failure.err" >/dev/null
+test ! -s "$test_root/install-failure.out"
+
 # 与 gh 一键安装一致：仅向 Bash 传脚本文本，从源码目录之外运行。
 # 同名本地辅助脚本不能被执行。
 installer_cwd="$test_root/installer-cwd"
@@ -239,7 +258,14 @@ printf '%s\n' 'exit 99' > "$installer_cwd/lifecycle-common.sh"
   cat "$repo_root/bootstrap/install.sh" | bash -s -- \
     --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
     --source-pool "$custom_source_pool"
-)
+) > "$test_root/install.out" 2> "$test_root/install.err"
+
+test "$(grep -Fc '[AgenticOps][安装][完成]' "$test_root/install.out")" -eq 1
+grep -F '[AgenticOps][安装][进行] 下载产品' "$test_root/install.err" >/dev/null
+if grep -E 'Cloning into|Already on|up to date|\[进行\]' "$test_root/install.out"; then
+  printf '安装摘要混入底层进度\n' >&2
+  exit 1
+fi
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
@@ -336,7 +362,7 @@ done
 rmdir "$detach_symlink_station/.agents/skills"
 ln -s "$symlink_outside/detach" "$detach_symlink_station/.agents/skills"
 ln -s "$detach_skill_target" "$symlink_outside/detach/tapdata-task"
-if "$install_root/agenticops" station detach \
+if "$install_root/agenticops" station purge \
     --station "$detach_symlink_station" --yes >/dev/null 2>&1; then
   printf 'detach 接受了 Skill 父目录 symlink\n' >&2
   exit 1
@@ -439,7 +465,16 @@ finally:
 assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
 PY
 
-"$install_root/agenticops" station init --project tapdata --station "$station"
+"$install_root/agenticops" station init --project tapdata --station "$station" \
+  > "$test_root/station-init.out" 2> "$test_root/station-init.err"
+test "$(grep -Fc '[AgenticOps][初始化][完成]' "$test_root/station-init.out")" -eq 1
+grep -F '  项目：tapdata' "$test_root/station-init.out" >/dev/null
+grep -F '  Agent：' "$test_root/station-init.out" >/dev/null
+grep -F '[AgenticOps][初始化][进行] 生成项目与 Agent 接线' "$test_root/station-init.err" >/dev/null
+if grep -E '接线已刷新|Workflow|工具 Hook|\[进行\]' "$test_root/station-init.out"; then
+  printf '初始化摘要混入接线明细\n' >&2
+  exit 1
+fi
 
 test -f "$station/.agenticops/station.json"
 test -f "$station/.agenticops/init.json"
@@ -644,8 +679,8 @@ if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&
 fi
 "$install_root/agenticops" station repair --station "$station" >/dev/null
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
-"$install_root/agenticops" station clean --station "$station" --generated-only >/dev/null
-(cd "$station" && ./agenticops station clean --generated-only >/dev/null)
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+(cd "$station" && ./agenticops station repair >/dev/null)
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
 test -L "$station/.agents/skills/tapdata-ci-test"
 test -L "$station/.claude/skills/tapdata-ci-test"
@@ -817,11 +852,11 @@ if "$install_root/agenticops" station start --agent test-agent --station "$subse
 fi
 detached_station="$test_root/detached-station"
 "$install_root/agenticops" station init --project tapdata --station "$detached_station" --agent codex >/dev/null
-if (cd "$detached_station" && ./agenticops station detach) >/dev/null 2>&1; then
+if (cd "$detached_station" && ./agenticops station purge) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
 fi
-(cd "$detached_station" && ./agenticops station detach --yes >/dev/null)
+(cd "$detached_station" && ./agenticops station purge --yes >/dev/null)
 test ! -e "$detached_station/.agenticops/station.json"
 test ! -e "$detached_station/.agenticops/init.json"
 test ! -e "$detached_station/agenticops"
@@ -877,16 +912,12 @@ if "$install_root/agenticops" station purge \
 fi
 test -d "$station/.agenticops"
 
-# 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
-# 形态仍必须失败关闭，且不得触及工位外的目标。
+# 注销仅删除可确认的受管状态；未知对象及非常规 events.jsonl 保留，不触及工位外目标。
 unknown_state_station="$test_root/unknown-state-station"
 "$install_root/agenticops" station init --project tapdata --station "$unknown_state_station" --agent codex >/dev/null
 printf 'unknown\n' > "$unknown_state_station/.agenticops/unknown-state"
-if "$install_root/agenticops" station purge \
-    --station "$unknown_state_station" --yes >/dev/null 2>&1; then
-  printf '未知工位状态被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$unknown_state_station" --yes >/dev/null
+test ! -e "$unknown_state_station/.agenticops/station.json"
 test -f "$unknown_state_station/.agenticops/unknown-state"
 
 event_outside="$test_root/event-outside"
@@ -894,21 +925,16 @@ printf 'outside sentinel\n' > "$event_outside"
 event_symlink_station="$test_root/event-symlink-station"
 "$install_root/agenticops" station init --project tapdata --station "$event_symlink_station" --agent codex >/dev/null
 ln -s "$event_outside" "$event_symlink_station/.agenticops/events.jsonl"
-if "$install_root/agenticops" station purge \
-    --station "$event_symlink_station" --yes >/dev/null 2>&1; then
-  printf '符号链接 Gate 审计事件被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$event_symlink_station" --yes >/dev/null
+test ! -e "$event_symlink_station/.agenticops/station.json"
+test -L "$event_symlink_station/.agenticops/events.jsonl"
 grep -Fx 'outside sentinel' "$event_outside" >/dev/null
 
 event_directory_station="$test_root/event-directory-station"
 "$install_root/agenticops" station init --project tapdata --station "$event_directory_station" --agent codex >/dev/null
 mkdir "$event_directory_station/.agenticops/events.jsonl"
-if "$install_root/agenticops" station purge \
-    --station "$event_directory_station" --yes >/dev/null 2>&1; then
-  printf '目录 Gate 审计事件被错误清理\n' >&2
-  exit 1
-fi
+"$install_root/agenticops" station purge --station "$event_directory_station" --yes >/dev/null
+test ! -e "$event_directory_station/.agenticops/station.json"
 test -d "$event_directory_station/.agenticops/events.jsonl"
 
 # 新版空闲工位清理与重建、材料保留、并发和路径替换回归。
