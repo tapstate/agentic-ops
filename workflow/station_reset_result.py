@@ -30,6 +30,13 @@ def protected(base, entry):
     if entry.get('repository'):
         repo = source.repository_path(base, entry['repository'])
         source.identity(repo, entry['origin'])
+        candidate = repo / entry['relative']
+        for parent in (candidate, *candidate.parents):
+            if parent == repo:
+                break
+            marker = parent / '.git'
+            if marker.exists() or marker.is_symlink():
+                raise ValueError('对象位于嵌套 Git 仓库，保留')
         names = source.git(repo, 'ls-files', '-z').stdout.split('\0')
         names += source.git(repo, 'ls-tree', '-r', '--name-only', '-z', 'HEAD').stdout.split('\0')
         relative = entry['relative']

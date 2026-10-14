@@ -193,6 +193,30 @@ class CleanupTests(unittest.TestCase):
         clean.check(self.ws, task)
         self.assertEqual(before, (self.ws / '.agenticops/operation.json').read_bytes()); self.assertTrue(path.exists())
 
+    def test_nested_repository_tracked_generated_name_is_preserved(self):
+        task = self.ready()
+        nested = self.repo / 'vendor/local'; nested.mkdir(parents=True)
+        self.git(nested, 'init')
+        source = self.generated('vendor/local/target', 'source.py') / 'source.py'
+        self.git(nested, 'add', 'target/source.py')
+        index = (nested / '.git/index').read_bytes()
+        result = self.run_exit(task)
+        self.assertEqual(b'generated', source.read_bytes())
+        self.assertEqual(index, (nested / '.git/index').read_bytes())
+        self.assertTrue(result['cleanup_result']['released'])
+        self.assertIn('source/tapdata/tapdata/vendor/local', [row['path'] for row in result['cleanup_result']['residuals']])
+
+    def test_nested_repository_created_after_prepare_is_preserved(self):
+        task = self.ready()
+        output = self.generated('vendor/local/target')
+        self.run_exit(task, mode='prepare')
+        self.git(output.parent, 'init')
+        self.git(output.parent, 'add', 'target/output.bin')
+        result = self.run_exit(task)
+        self.assertTrue((output / 'output.bin').exists())
+        self.assertTrue(result['cleanup_result']['released'])
+        self.assertFalse(result['cleanup_result']['complete'])
+
     def test_prepare_and_native_cleanup_then_verify(self):
         task = self.ready(); path = self.generated()
         self.run_exit(task, mode='prepare')

@@ -160,6 +160,9 @@ def plan(base, task=None, options=None):
             if stat.S_ISLNK(info.st_mode) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)) or path.is_mount():
                 residuals.append({'path': local, 'reason': '链接、挂载或特殊对象保留'})
                 return False
+            if stat.S_ISDIR(info.st_mode) and ((path / '.git').exists() or (path / '.git').is_symlink()):
+                residuals.append({'path': local, 'reason': '嵌套 Git 仓库保留，不使用外层仓库清单处理'})
+                return True
             decision = classify(config, relative, stat.S_ISDIR(info.st_mode), scope, repository)['action']
             tracked_here = any(t == relative or t.startswith(relative + '/') for t in tracked)
             if tracked_here and decision in ('generated', 'configuration'):
