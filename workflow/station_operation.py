@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 from pathlib import Path
 
 from workflow import engineering_baseline, task_store
@@ -93,13 +94,20 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
         from workflow import archive_store
-        run_id = task_store.new_run_id(issue_key)
-        try:
-            archive_store.reserve(base, issue_key, run_id)
-        except FileExistsError as error:
-            raise ValueError(
-                "执行编号 %s 已存在；同一 Jira 在同一秒只能发起一次接管，请研发稍后重试" % run_id
-            ) from error
+        for attempt in range(2):
+            run_id = task_store.new_run_id(issue_key)
+            try:
+                archive_store.reserve(base, issue_key, run_id)
+                break
+            except OSError as error:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                if isinstance(error, FileExistsError):
+                    raise ValueError(
+                        "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
+                    ) from error
+                raise OSError("编号占位目录创建失败；等待 2 秒自动重试一次仍失败：%s" % error) from error
     elif kind != "work-clean" and (current["current"] is None or current["current"]["run_id"] != run_id):
         raise ValueError("工位 run 已变化")
     value = {
@@ -121,6 +129,10 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         save(base, value)
     except Exception:
         if kind == "takeover":
+            observed = read(base)
+            if observed and observed.get('operation_id') == operation_id and observed.get('run_id') == run_id:
+                # 原子写入可能已完成而持久化回执失败；保留编号供原操作恢复。
+                raise
             archive_store.consume_reservation(base, run_id)
         raise
     residuals = collect_payloads(base) or []
@@ -130,7 +142,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
     return value
 
 
-PAYLOAD_FIELDS = {"retained_results", "exit_task", "cleanup_plan", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs", "archive_drafts", "plan_revisions", "amendment_receipts", "previous_operation"}
+PAYLOAD_FIELDS = {"archive_payload", "retained_results", "exit_task", "cleanup_plan", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs", "archive_drafts", "plan_revisions", "amendment_receipts", "previous_operation"}
 
 
 def save(base, operation):
@@ -156,6 +168,8 @@ def save(base, operation):
 def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, kind="clean"):
     """先在原任务操作记录固化完整交接，再替换；任何中断点都有唯一后继。"""
     previous = read(base)
+    if previous and previous.get('archive_result', {}).get('status') == 'awaiting_decision':
+        raise ValueError('归档仍待用户决定，先恢复原操作处理归档，不能以 clean 绕过')
     if previous is None or previous["kind"] not in ("takeover", "scope_change", "replan", "archive") or previous["status"] == "done":
         raise ValueError("只有未完成的非清理任务操作可以交接退出")
     if not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id) or operation_id == previous["operation_id"]:

@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 import uuid
-from workflow import engineering_baseline as baseline, station_archive as archives, station_clean_rules as rules
+from workflow import archive_store, engineering_baseline as baseline, station_archive as archives, station_clean_rules as rules
 from workflow import station_context, station_operation as operations, station_reset_result as results
 from workflow import station_resources as resources, task_store
 
@@ -72,13 +72,64 @@ def _depends(base, entry, pending):
     return entry['path'].startswith('runtime/') or bool(entry.get('repository'))
 
 
-def _archive(base, task, operation):
+def _archive(base, task, operation, checkpoint, decision=None):
+    if operation.get('archive_checkpoint') != checkpoint:
+        if decision:
+            raise ValueError('归档决定不能用于另一个快照')
+        operation['archive_payload'] = archives.prepare(base, task, operation['request'], operation)
+        operation['archive_checkpoint'] = checkpoint
+        operation.pop('archive_result', None)
+        operations.save(base, operation)
+    digest = baseline.digest(operation['archive_payload'])
+    if decision:
+        if (not isinstance(decision, dict) or set(decision) != {'action', 'digest'}
+                or decision['action'] not in ('retry', 'discard') or decision['digest'] != digest
+                or operation.get('archive_result', {}).get('status') != 'awaiting_decision'):
+            raise ValueError('归档决定必须匹配当前待处理快照')
+        # 用户选择不能把已写成功或读取不明的结果当作丢弃。
+        saved = archives.observe(base, operation['archive_payload'])
+        decisions = operation.setdefault('archive_decisions', [])
+        if decisions and decisions[-1].get('state') == 'authorized' and any(decisions[-1].get(key) != decision[key] for key in ('action', 'digest')):
+            raise ValueError('已有未完成归档决定，先恢复该决定')
+        if not decisions or decisions[-1].get('state') != 'authorized':
+            decisions.append(dict(decision, checkpoint=checkpoint, state='authorized'))
+        operations.save(base, operation)
+        if saved:
+            return {'status': 'saved', 'reference': archive_store.reference(task['run_id'], baseline.digest(operation['archive_payload']['record']))}
+        if decision['action'] == 'discard':
+            return {'status': 'discarded', 'digest': digest, 'checkpoint': checkpoint,
+                    'authorization': 'explicit_user_decision'}
     try:
         reference = archives.publish(base, task, operation['request'], operation=operation)
         operation['archive_ref'] = reference
         return {'status': 'saved', 'reference': reference}
-    except Exception as error:
-        return {'status': 'warning', 'reason': type(error).__name__ + ': ' + str(error)}
+    except OSError as error:
+        return {'status': 'awaiting_decision', 'digest': digest, 'checkpoint': checkpoint,
+                'reason': type(error).__name__ + ': ' + str(error),
+                'path': str(archive_store.run_directory(base, task['run_id'])),
+                'guidance': '先回读写入结果；由用户授权修复后重试或明确放弃此快照，禁止自动丢弃'}
+
+
+def _archive_checkpoint(base, task, operation, checkpoint, decision=None):
+    result = operation.get('archive_result', {})
+    previous_decision = (operation.get('archive_decisions') or [{}])[-1]
+    if not decision and previous_decision.get('state') == 'authorized' and previous_decision.get('checkpoint') == checkpoint:
+        decision = {key: previous_decision[key] for key in ('action', 'digest')}
+    if operation.get('archive_checkpoint') == checkpoint and result.get('status') == 'awaiting_decision' and not decision:
+        return False
+    if operation.get('archive_checkpoint') == checkpoint and result.get('status') in ('saved', 'discarded'):
+        if decision:
+            raise ValueError('此归档快照已处理，不能重复授权')
+        return True
+    operation['archive_result'] = _archive(base, task, operation, checkpoint, decision)
+    if decision:
+        operation['archive_decisions'][-1]['state'] = 'handled'
+    if operation['archive_result']['status'] == 'awaiting_decision':
+        operation['phase'] = 'awaiting_archive_decision'
+        operations.save(base, operation)
+        return False
+    operations.save(base, operation)
+    return True
 
 
 def _clear_active(base, operation):
@@ -109,7 +160,7 @@ def _clear_active(base, operation):
     directories.sync(root)
 
 
-def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode='execute', allow_product_lifecycle=False):
+def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode='execute', allow_product_lifecycle=False, archive_decision=None):
     if kind not in ('clean', 'release', 'archive', 'work-clean') or cleanup_mode not in ('execute', 'prepare', 'verify'):
         raise ValueError('清理操作或模式无效')
     if request.get('cleanup_version', 7) != 7:
@@ -119,6 +170,8 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
         current = task_store.read_current(base)
         task = task_store.read_task(base)
         same = old and old['operation_id'] == operation_id
+        if archive_decision and (not same or kind not in ('archive', 'release')):
+            raise ValueError('归档决定只能恢复原归档或 release 操作')
         if same:
             if (old['kind'] != kind or old['request_digest'] != baseline.digest(request)
                     or old['expected_revision'] != revision or old['run_id'] != run_id):
@@ -148,7 +201,8 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operation['exit_task'] = task
             operations.save(base, operation)
         if kind == 'archive':
-            operation['archive_result'] = _archive(base, task, operation)
+            if not _archive_checkpoint(base, task, operation, 'archive', archive_decision):
+                return operation
             operations.finish(base, operation)
             return operation
         if 'cleanup_plan' not in operation:
@@ -158,9 +212,14 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operations.save(base, operation)
         plan = operation['cleanup_plan']
         rules.validate_snapshot(plan)
-        if kind == 'release' and 'archive_result' not in operation:
-            operation['archive_result'] = _archive(base, task, operation)
-            operations.save(base, operation)
+        if kind == 'release':
+            if operation.get('archive_checkpoint') == 'after-cleanup':
+                if not _archive_checkpoint(base, task, operation, 'after-cleanup', archive_decision):
+                    return operation
+                operations.finish(base, operation)
+                return operation
+            if not _archive_checkpoint(base, task, operation, 'before-cleanup', archive_decision):
+                return operation
         if cleanup_mode == 'prepare':
             operation['phase'] = 'awaiting_cleanup_result'
             operations.save(base, operation)
@@ -230,7 +289,8 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operations.receipt(base, operation, 'unbind', {'current': None})
             operation['cleanup_result']['released'] = True
         if kind == 'release':
-            operation['archive_result'] = _archive(base, task, operation)
+            if not _archive_checkpoint(base, task, operation, 'after-cleanup'):
+                return operation
         operations.finish(base, operation)
         return operation
 
@@ -244,11 +304,15 @@ def main(argv=None):
     parser.add_argument('--clear-config', action='append', default=[])
     parser.add_argument('--operation-id')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--archive-decision', choices=('retry', 'discard'))
+    parser.add_argument('--expected-archive-digest')
     parser.add_argument('--verify-result', action='store_true')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--details', action='store_true')
     parser.add_argument('--output', help='完整结果输出到工位外的新文件')
     args = parser.parse_args(argv)
+    if bool(args.archive_decision) != bool(args.expected_archive_digest) or args.archive_decision and not args.resume:
+        raise ValueError('归档决定必须带 --resume 和 --expected-archive-digest')
     from workflow.station_clean_view import emit
     from bootstrap.station_compatibility import require_station_can_adopt
     from workflow import project_rules
@@ -272,7 +336,8 @@ def main(argv=None):
         run_id = task['run_id'] if task else 'run-' + station_context.read_binding(args.dir)['station_id']
         issue = task['issue_key'] if task else None
     result = execute(args.dir, kind, issue, run_id, revision, op, request,
-                     'verify' if args.verify_result else 'prepare' if args.prepare_only else 'execute')
+                     'verify' if args.verify_result else 'prepare' if args.prepare_only else 'execute',
+                     archive_decision={'action': args.archive_decision, 'digest': args.expected_archive_digest} if args.archive_decision else None)
     emit({'operation_id': result['operation_id'], 'status': result['status'],
           'cleanup': result.get('cleanup_result'), 'archive': result.get('archive_result')}, args.details, args.output, args.dir)
     return 0

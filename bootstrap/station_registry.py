@@ -431,9 +431,14 @@ def command_detach(args, product_root, purge=False):
         previous = station_operation.read(station)
         resumed = False
         if previous and previous['status'] != 'done' and previous['kind'] in ('clean', 'release', 'work-clean'):
-            station_clean.execute(station, previous['kind'], (task or previous.get('exit_task') or {}).get('issue_key'),
+            result = station_clean.execute(station, previous['kind'], (task or previous.get('exit_task') or {}).get('issue_key'),
                                   previous['run_id'], previous['expected_revision'], previous['operation_id'], previous['request'],
                                   allow_product_lifecycle=args.lifecycle_held)
+            if result.get('archive_result', {}).get('status') == 'awaiting_decision':
+                from workflow.station_clean_view import emit
+                emit({'station': str(station), 'operation_id': result['operation_id'],
+                      'cleanup': result.get('cleanup_result'), 'archive': result['archive_result']})
+                raise ValueError('归档待用户决定，请用 station-clean.py 恢复原操作后再注销')
             task = task_store.read_task(station)
             resumed = True
         if task or not resumed:
@@ -443,6 +448,8 @@ def command_detach(args, product_root, purge=False):
                 {'clear_config': getattr(args, 'clear_config', [])}, allow_product_lifecycle=args.lifecycle_held)
             from workflow.station_clean_view import emit
             emit({'station': str(station), 'cleanup': operation.get('cleanup_result'), 'archive': operation.get('archive_result')})
+            if operation.get('archive_result', {}).get('status') == 'awaiting_decision':
+                raise ValueError('归档待用户决定，请用 station-clean.py 恢复原操作后再注销')
         # 注销之前展示仍被保留的实际对象，归档缺项不影响解绑。
         deletable, _ = detach_preflight(product_root, station, purge=purge)
         owned = owned_artifacts(station)

@@ -99,3 +99,5 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-station>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
 - 每个检查点确认后尽力回写简洁人读评论，保留 draft/confirm/prepare_write/receipt/readback。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
 - 未迁移能力优先使用 Agent 原生能力；没有安全路径时只暂停当前副作用步骤。
+
+归档写入失败时，按[任务授权指引](../../../../docs/usage/task-authorization.md#清理与退出)展示指定快照、失败原因和实际清理结果，引导研发明确授权修复后重试或放弃。复用原操作和失败摘要，不自动丢弃，不以新 clean 操作绕过；回读结果不明时先核实。

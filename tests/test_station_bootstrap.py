@@ -132,8 +132,18 @@ class StationBootstrapTests(unittest.TestCase):
         (self.station / 'runtime/unknown').write_text('keep')
         (self.station / 'source/notes').write_text('source')
         args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=['config/service'])
-        from workflow import station_archive
+        from workflow import station_archive, station_clean, station_operation
         with mock.patch.object(station_archive, 'publish', side_effect=OSError('unavailable')):
+            with self.assertRaisesRegex(ValueError, '归档待用户决定'):
+                registry.command_detach(args, ROOT, purge=True)
+            self.assertTrue((self.station / '.agenticops/station.json').exists())
+            self.assertTrue((self.station / 'config/service').exists())
+            operation = station_operation.read(self.station)
+            for checkpoint in ('before-cleanup', 'after-cleanup'):
+                self.assertEqual(checkpoint, operation['archive_result']['checkpoint'])
+                operation = station_clean.execute(self.station, 'release', 'TAP-123', operation['run_id'],
+                    operation['expected_revision'], operation['operation_id'], operation['request'],
+                    archive_decision={'action': 'discard', 'digest': operation['archive_result']['digest']})
             registry.command_detach(args, ROOT, purge=True)
         self.assertFalse((self.station / '.agenticops/station.json').exists())
         self.assertFalse((self.station / 'config/service').exists())

@@ -17,23 +17,11 @@ def redact_evidence(rules, value, key=''):
     return value
 
 
-def publish(base, task, request, inventory=None, operation=None, check_stable=None):
-    """写出不可变快照；调用方捕获归档失败后继续独立退出。"""
+def prepare(base, task, request, operation=None):
+    """冻结已有材料；重试不得用清理后的现场替换失败快照。"""
     rules = project_rules.load_admission(station=base)
-    target = archive_store.run_directory(base, task['run_id'], create_root=True)
-    if target.is_symlink():
-        raise ValueError('档案目录不能为链接')
-    target.mkdir(mode=0o700, exist_ok=True)
     record = {'schema_version': 2, 'run_id': task['run_id'], 'issue_key': task['issue_key'],
               'station_id': station_context.read_binding(base)['station_id']}
-    record_path = target / 'record.json'
-    if record_path.is_symlink():
-        raise ValueError('档案记录不能为链接')
-    if record_path.exists():
-        if json.loads(record_path.read_text()) != record:
-            raise ValueError('已有档案身份或版本不同，保留原档案')
-    else:
-        task_store._write_json_atomic(record_path, record)
     snapshot = {'operation_id': (operation or {}).get('operation_id'),
                 'task': {key: value for key, value in task.items() if key not in ('_revision', 'repositories')},
                 'summary': request.get('summary', ''), 'reason': request.get('reason', ''),
@@ -61,6 +49,41 @@ def publish(base, task, request, inventory=None, operation=None, check_stable=No
     # 不主动读取报告、配置或源码；超限作为归档警告，不强制采集或截断。
     if len(json.dumps(snapshot, ensure_ascii=False).encode()) > 16 * 1024 * 1024:
         raise ValueError('已有状态超出归档上限')
+    return {'record': record, 'snapshot': snapshot}
+
+
+def observe(base, payload):
+    """只回读确切快照；缺失可确认，读取失败或身份冲突不能视为缺失。"""
+    record, snapshot = payload['record'], payload['snapshot']
+    target = archive_store.run_directory(base, record['run_id'])
+    if target.is_symlink():
+        raise ValueError('档案目录不能为链接')
+    record_path = target / 'record.json'
+    path = target / ('result-' + baseline.digest(snapshot) + '.json')
+    for item, expected in ((record_path, record), (path, snapshot)):
+        if item.is_symlink():
+            raise ValueError('档案文件不能为链接')
+        try:
+            value = json.loads(item.read_text())
+        except FileNotFoundError:
+            continue
+        if value != expected:
+            raise ValueError('已有档案身份或快照冲突，保留原档案')
+    return record_path.exists() and path.exists()
+
+
+def publish(base, task, request, inventory=None, operation=None, check_stable=None):
+    """发布冻结快照；失败由原操作交接用户决策。"""
+    payload = (operation or {}).get('archive_payload') or prepare(base, task, request, operation)
+    record, snapshot = payload['record'], payload['snapshot']
+    if record['run_id'] != task['run_id'] or record['issue_key'] != task['issue_key']:
+        raise ValueError('冻结归档 run 不匹配')
+    target = archive_store.run_directory(base, task['run_id'], create_root=True)
+    observe(base, payload)
+    target.mkdir(mode=0o700, exist_ok=True)
+    record_path = target / 'record.json'
+    if not record_path.exists():
+        task_store._write_json_atomic(record_path, record)
     path = target / ('result-' + baseline.digest(snapshot) + '.json')
     if path.is_symlink():
         raise ValueError('档案快照不能为链接')

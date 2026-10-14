@@ -1,6 +1,6 @@
 # AgenticOps 扩展使用
 
-工作清理、任务清理、非阻塞归档、release 与工位注销统一见[任务授权指引](task-authorization.md#清理与退出)。正常路径直接运行脚本，Agent 只接手残留或异常；环境配置默认保留。唯一职责合同见[工位合同](../architecture/single-task-station.md)。
+工作清理、任务清理、归档异常的用户决策、release 与工位注销统一见[任务授权指引](task-authorization.md#清理与退出)。正常路径直接运行脚本，Agent 只接手残留或异常；环境配置默认保留。唯一职责合同见[工位合同](../architecture/single-task-station.md)。
 
 
 同 epoch 退出修复与跨 epoch 升级的入口由[更新与回退](update-and-rollback.md#同-epoch-恢复与跨-epoch-切换的目标入口)导航到[工位合同](../architecture/single-task-station.md)。该主题区分普通定点更新和明确的原版本维护恢复，覆盖首次旧客户端及失败续接；以绑定安装实际能力为准，源码实现不代表旧安装已应用。

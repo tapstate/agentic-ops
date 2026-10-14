@@ -1,12 +1,9 @@
 """Product Root 中央任务档案的路径、预留与安全读取。"""
 from __future__ import annotations
 
-import json
 import os
-import time
 from pathlib import Path
 
-from workflow import station_context
 from workflow import project_rules, task_store
 
 
@@ -21,7 +18,6 @@ def root(base, create=False):
         raise ValueError("Product Root 档案根必须为真实目录")
     if create:
         path.mkdir(mode=0o700, exist_ok=True)
-        os.chmod(path, 0o700)
     return path
 
 
@@ -57,57 +53,42 @@ def receipts(base, reference_value, create=False):
 
 
 def reserve(base, issue_key, run_id):
-    """原子预留新 run_id，使多工位不能生成同名中央档案。"""
+    """以正式档案目录原子占位；目录存续就是编号不再分配的凭据。"""
     issue_key = task_store.validate_issue_key(issue_key)
     task_store.validate_run_id(issue_key, run_id)
     archive_root = root(base, create=True)
-    reservations = archive_root / RESERVATION_DIRECTORY
-    if reservations.is_symlink() or (reservations.exists() and not reservations.is_dir()):
-        raise ValueError("档案预留目录必须为真实目录")
-    reservations.mkdir(mode=0o700, exist_ok=True)
-    os.chmod(reservations, 0o700)
-    if (archive_root / run_id).exists() or (archive_root / run_id).is_symlink():
+    legacy = archive_root / RESERVATION_DIRECTORY
+    if legacy.is_symlink() or (legacy.exists() and not legacy.is_dir()):
+        raise ValueError("历史档案预留目录必须为真实目录")
+    previous = legacy / (run_id + ".json")
+    if previous.exists() or previous.is_symlink():
         raise FileExistsError(run_id)
-    binding = station_context.read_binding(base)
-    station_id = binding.get("station_id")
-    if not isinstance(station_id, str) or not station_id:
-        raise ValueError("工位绑定缺少 station_id")
-    path = reservations / (run_id + ".json")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    descriptor = os.open(str(path), flags, 0o600)
+    target = archive_root / run_id
+    target.mkdir(mode=0o700)
     try:
-        value = {
-            "schema_version": 1,
-            "issue_key": issue_key,
-            "run_id": run_id,
-            "station_id": station_id,
-            "reserved_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        }
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            descriptor = None
-            json.dump(value, stream, ensure_ascii=False, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-    parent = os.open(str(reservations), os.O_RDONLY)
-    try:
-        os.fsync(parent)
-    finally:
-        os.close(parent)
-    return path
-
-
-def consume_reservation(base, run_id):
-    path = root(base) / RESERVATION_DIRECTORY / (run_id + ".json")
-    if path.is_symlink():
-        raise ValueError("档案预留文件不能是符号链接")
-    if path.exists():
-        path.unlink()
-        parent = os.open(str(path.parent), os.O_RDONLY)
+        parent = os.open(str(archive_root), os.O_RDONLY)
         try:
             os.fsync(parent)
         finally:
             os.close(parent)
+    except OSError:
+        # 创建成功但持久化失败时，仅撤销本次空目录；无法确认撤销则停止。
+        try:
+            target.rmdir()
+        except OSError as error:
+            raise ValueError("编号占位持久化失败且撤销结果无法确认，保留目录并核验") from error
+        raise
+    return target
+
+
+def consume_reservation(base, run_id):
+    """仅接管意图确定未保存时撤销本次占位，不删除任何归档内容。"""
+    target = run_directory(base, run_id)
+    if target.is_symlink():
+        raise ValueError("编号占位目录不能为符号链接")
+    target.rmdir()
+    parent = os.open(str(target.parent), os.O_RDONLY)
+    try:
+        os.fsync(parent)
+    finally:
+        os.close(parent)

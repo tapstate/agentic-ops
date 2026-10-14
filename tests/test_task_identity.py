@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bootstrap"))
 from bootstrap import render, station_registry
-from workflow import station_operation, task_store
+from workflow import archive_store, station_operation, task_store
 
 
 class TaskIdentityTests(unittest.TestCase):
@@ -60,10 +60,11 @@ class TaskIdentityTests(unittest.TestCase):
         (other / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(other)
         self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"}, other)
-        (self.product / ".archive/TAP-123-69d8a1f0").mkdir(parents=True)
-        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"):
-            with self.assertRaisesRegex(ValueError, "同一 Jira 在同一秒.*稍后重试"):
+        self.assertTrue((self.product / ".archive/TAP-123-69d8a1f0").is_dir())
+        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), mock.patch.object(station_operation.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "自动重试一次仍冲突"):
                 station_operation.begin(other, "takeover", "op-identity-two", 0, {"issue_key": "TAP-123"})
+            sleep.assert_called_once_with(2)
 
     def test_takeover_without_station_identity_keeps_non_code_flow_available(self):
         self.binding()
@@ -81,7 +82,7 @@ class TaskIdentityTests(unittest.TestCase):
                 mock.patch.object(station_operation, "save", side_effect=OSError("fixture")):
             with self.assertRaisesRegex(OSError, "fixture"):
                 station_operation.begin(self.station, "takeover", "op-identity-fail", 0, {"issue_key": "TAP-123"})
-        self.assertFalse((self.product / ".archive/.reservations" / (run_id + ".json")).exists())
+        self.assertFalse((self.product / ".archive" / run_id).exists())
 
     def test_station_identity_is_first_write_wins_and_generates_branch(self):
         self.binding()
@@ -94,6 +95,55 @@ class TaskIdentityTests(unittest.TestCase):
         with mock.patch.object(station_registry, "configured_git_name", return_value=("other", "git_global_user_name")):
             station_registry.command_identity(type("Args", (), {"station": str(self.station)})(), self.product)
         self.assertEqual(json.loads((self.station / ".agenticops/station.json").read_text())["branch_identity"]["git_name"], "developer")
+
+    def test_collision_retries_once_with_new_timestamp_and_reuses_successful_operation(self):
+        self.binding()
+        (self.product / '.archive/TAP-123-69d8a1f0').mkdir(parents=True)
+        with mock.patch.object(task_store, 'timestamp_hex', side_effect=['69d8a1f0', '69d8a1f2']), mock.patch.object(station_operation.time, 'sleep') as sleep:
+            op = station_operation.begin(self.station, 'takeover', 'op-retry-identity', 0, {'issue_key': 'TAP-123'})
+        sleep.assert_called_once_with(2)
+        self.assertEqual('TAP-123-69d8a1f2', op['run_id'])
+        self.assertTrue((self.product / '.archive' / op['run_id']).is_dir())
+        with mock.patch.object(task_store, 'new_run_id', side_effect=AssertionError('不能重新分配')):
+            self.assertEqual(op, station_operation.begin(self.station, 'takeover', 'op-retry-identity', 0, {'issue_key': 'TAP-123'}))
+
+    def test_unwritable_directory_retries_once_then_preserves_failure(self):
+        self.binding()
+        with mock.patch.object(archive_store, 'reserve', side_effect=PermissionError('unwritable')) as reserve, mock.patch.object(station_operation.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(OSError, '自动重试一次仍失败.*unwritable'):
+                station_operation.begin(self.station, 'takeover', 'op-unwritable-identity', 0, {'issue_key': 'TAP-123'})
+        sleep.assert_called_once_with(2)
+        self.assertEqual(2, reserve.call_count)
+        self.assertIsNone(station_operation.read(self.station))
+
+    def test_saved_intent_with_lost_receipt_keeps_directory_for_recovery(self):
+        self.binding()
+        save = station_operation.save
+        def lost_receipt(base, value):
+            save(base, value)
+            raise OSError('receipt unavailable')
+        with mock.patch.object(station_operation, 'save', side_effect=lost_receipt):
+            with self.assertRaises(OSError):
+                station_operation.begin(self.station, 'takeover', 'op-lost-identity', 0, {'issue_key': 'TAP-123'})
+        op = station_operation.read(self.station)
+        self.assertTrue((self.product / '.archive' / op['run_id']).is_dir())
+
+    def test_existing_archive_permissions_are_not_changed(self):
+        self.binding()
+        root = self.product / '.archive'
+        root.mkdir(mode=0o750)
+        before = root.stat().st_mode
+        archive_store.reserve(self.station, 'TAP-123', 'TAP-123-69d8a1f0')
+        self.assertEqual(before, root.stat().st_mode)
+
+    def test_legacy_reservation_still_prevents_reusing_identity(self):
+        self.binding()
+        legacy = self.product / '.archive/.reservations'
+        legacy.mkdir(parents=True)
+        (legacy / 'TAP-123-69d8a1f0.json').write_text('{}')
+        with self.assertRaises(FileExistsError):
+            archive_store.reserve(self.station, 'TAP-123', 'TAP-123-69d8a1f0')
+        self.assertFalse((self.product / '.archive/TAP-123-69d8a1f0').exists())
 
     def test_new_station_reads_valid_global_git_name_once(self):
         with mock.patch.object(render, "global_git_name", return_value="developer"):

@@ -62,7 +62,7 @@ def operation_summary(operation):
         return None
     result = {key: operation[key] for key in (
         "operation_id", "kind", "run_id", "expected_revision", "request_digest",
-        "phase", "status", "archive_ref") if key in operation}
+        "phase", "status", "archive_ref", "archive_result") if key in operation}
     steps = operation.get("steps", {})
     result["completed_steps"] = [name for name, step in steps.items() if step.get("receipt") is not None]
     result["pending_steps"] = [name for name, step in steps.items()

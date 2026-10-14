@@ -95,12 +95,34 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual('not managed JSON', unknown.read_text())
         self.assertIn('.agenticops/operation-data/user-note.json', [r['path'] for r in result['cleanup_result']['residuals']])
 
-    def test_archive_failure_does_not_block_release(self):
+    def test_archive_failure_requires_decision_before_release(self):
         task = self.ready(); generated = self.generated()
         with mock.patch.object(station_archive, 'publish', side_effect=OSError('disk unavailable')):
             result = self.run_exit(task)
+        self.assertTrue(generated.exists()); self.assertIsNotNone(task_store.read_task(self.ws))
+        self.assertEqual('awaiting_decision', result['archive_result']['status'])
+        result = clean.execute(self.ws, 'release', task['issue_key'], task['run_id'], task['_revision'], 'op-cleanup-test', {},
+                               archive_decision={'action': 'discard', 'digest': result['archive_result']['digest']})
         self.assertFalse(generated.exists()); self.assertIsNone(task_store.read_task(self.ws))
-        self.assertEqual('warning', result['archive_result']['status'])
+        self.assertEqual('done', result['status'])
+
+    def test_post_cleanup_archive_failure_resumes_without_repeating_cleanup(self):
+        task = self.ready(); generated = self.generated()
+        publish = station_archive.publish
+        def fail_final(*args, **kwargs):
+            if kwargs['operation'].get('cleanup_result'):
+                raise PermissionError('final unavailable')
+            return publish(*args, **kwargs)
+        with mock.patch.object(station_archive, 'publish', side_effect=fail_final):
+            result = self.run_exit(task)
+        self.assertFalse(generated.exists()); self.assertIsNone(task_store.read_task(self.ws))
+        self.assertTrue(result['cleanup_result']['released'])
+        self.assertEqual('after-cleanup', result['archive_result']['checkpoint'])
+        generated.mkdir(); (generated / 'later').write_text('must preserve')
+        result = clean.execute(self.ws, 'release', task['issue_key'], task['run_id'], task['_revision'], 'op-cleanup-test', {},
+                               archive_decision={'action': 'retry', 'digest': result['archive_result']['digest']})
+        self.assertEqual('done', result['status'])
+        self.assertTrue((generated / 'later').exists())
 
     def test_archive_is_repeatable_snapshot_without_freezing_task(self):
         task = self.ready()

@@ -158,13 +158,22 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --execute --act
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action release
 ```
 
-work-clean 保留任务，clean 结束本次本地运行；release 尝试归档后调用相同清理能力，支持任务中途退出及完成退出。归档失败只提示；不重新检查业务完成、不修改 Jira 或默认关闭 PR。配置清理增加 `--clear-config config/<相对对象>`，可重复，未选择配置保留。工位注销使用 `agenticops station purge`，有活动任务时先执行 release。
+work-clean 保留任务，clean 结束本次本地运行；release 尝试归档后调用相同清理能力，支持任务中途退出及完成退出。归档写入失败按工位合同保留待决策快照，由 Agent 引导用户授权重试或明确放弃；不重新检查业务完成、不修改 Jira 或默认关闭 PR。配置清理增加 `--clear-config config/<相对对象>`，可重复，未选择配置保留。工位注销使用 `agenticops station purge`，有活动任务时先执行 release。
 
 脚本报告已完成对象、保留项、残留、异常及实际释放结果。有残留或异常时 Agent 接手原范围未完成事项，用户可选择保留、移出、删除或暂停。不得循环强删新内容或重复外部未知调用。
 
+归档失败结果包含 `digest`、`checkpoint` 和失败路径。先向用户说明未保存范围及实际清理进度，回读确认结果；取得明确决定后恢复原操作：
+
+```sh
+python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --archive-decision retry --expected-archive-digest <失败快照摘要>
+python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --archive-decision discard --expected-archive-digest <失败快照摘要>
+```
+
+`retry` 复用冻结材料；`discard` 只放弃该快照，不能删除已保存档案。清理后结果快照有独立摘要，之前的放弃决定不覆盖它。身份冲突、结果无法回读及本地操作日志不可写时暂停相关步骤，不能用授权伪造成功。
+
 ### 原清理操作的恢复
 
-脚本异常后用 `--resume --operation-id <原操作>` 恢复。若 Agent 已通过原生工具完成动作，增加 `--verify-result` 按实际结果收尾，不重跑删除。`--prepare-only` 只固定范围后交接。已完成对象再次产生内容时保留；归档缺失、未提交源码及配置保留不作为退出门禁。权限、身份或实际绑定写入失败时如实报告未完成。
+脚本异常后用 `--resume --operation-id <原操作>` 恢复。若 Agent 已通过原生工具完成动作，增加 `--verify-result` 按实际结果收尾，不重跑删除。`--prepare-only` 只固定范围后交接。已完成对象再次产生内容时保留；未提交源码及配置保留不作为退出门禁；归档待决策时先处理指定快照。权限、身份或实际绑定写入失败时如实报告未完成。
 
 ## 完成预检与等待合并
 

@@ -1,6 +1,6 @@
 # 更新与回退
 
-当前清单、归档和退出语义使用 epoch 30。epoch 29 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
+当前清单、归档和退出语义使用 epoch 31。epoch 30 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
 
@@ -45,7 +45,7 @@
 
 ## 第二阶段：跨版本编排
 
-升级器只编排产品切换，不实现任务清理逻辑。兼容清单只维护 `station_state_epoch` 一个配置项。升级器在 Git 引用切换前比较当前与目标值：相同可直接更新；不同则必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本按其退出合同执行 release/clean 与 `station purge`。本版归档不阻塞退出，旧版本不得套用本版语义。单独执行 archive 仍占用工位，不满足升级条件。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
+升级器只编排产品切换，不实现任务清理逻辑。兼容清单只维护 `station_state_epoch` 一个配置项。升级器在 Git 引用切换前比较当前与目标值：相同可直接更新；不同则必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本按其退出合同执行 release/clean 与 `station purge`。本版归档失败按[工位合同](../architecture/single-task-station.md#8-脚本执行异常接力与恢复)处理用户决定，旧版本不得套用本版语义。单独执行 archive 仍占用工位，不满足升级条件。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
 
 同 epoch 更新执行 `agenticops update`，随后 doctor 检查、repair 刷新接线。epoch 变化后，研发先在原版本完成任务并解绑全部工位，更新成功后再用目标版本重新 init；不自动 repair、init 或导入旧任务。rollback 只适用于安装目录，并使用相同的“epoch 变化则登记必须为空”规则；产品源码使用 Git 治理流程，不自动移动源码分支。
 

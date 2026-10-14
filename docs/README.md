@@ -1,6 +1,6 @@
 # AgenticOps 文档总纲
 
-任务退出由[单任务工位合同](architecture/single-task-station.md)统一定义：工位与项目两份清单、脚本执行、源码保护、非阻塞归档、任务释放和异常接力。使用指引只说明入口，PROD-003 维护中途退出和完成退出的验收；历史版本方案由 Git/Jira 保存，不作为现役清理规则。
+任务退出由[单任务工位合同](architecture/single-task-station.md)统一定义：工位与项目两份清单、脚本执行、源码保护、归档失败的明确放弃授权、任务释放和异常接力。使用指引只说明入口，PROD-003 维护中途退出和完成退出的验收；历史版本方案由 Git/Jira 保存，不作为现役清理规则。
 
 受管技能的调用与帮助交互由 [Skill 维护规范](skill-maintenance.md#技能调用与帮助)统一定义，覆盖源码维护根和业务工位的维护、共享、项目技能。源码 `AGENTS.md`、只引用它的 `CLAUDE.md` 与工位模板负责导航到同一合同；操作与示例取自现役技能，不建立第二份技能操作清单。
 
@@ -56,7 +56,7 @@ TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapda
 
 TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapdata-ci-test/SKILL.md) 负责用例分析、编写、执行与报告修复；[tapdata-task](../projects/tapdata/skills/tapdata-task/SKILL.md) 负责在研发节点调用、授权、质量记录与外部跟进。集成测试技能按需使用 tapdata-wiki；[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md) 保留具体操作与报告工具说明。技能能力缺失不增加流程门禁，已有验收条件仍由原质量合同处理，不建立第二套测试状态。
 
-任务退出、运行身份与编码准备由[工位合同](architecture/single-task-station.md)统一定义：其中身份章节维护 `run_id` 的职责、固定格式、秒级冲突失败语义、历史读取兼容与变更边界；重置章节负责保留配置和独立源码，将正式档案发布到 Product Root 的 `.archive/<run-id>`，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、由工位 `git_name` 和 run 生成的分支及 PR 处置、以及 epoch 兼容边界；不覆盖工位卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
+任务退出、运行身份与编码准备由[工位合同](architecture/single-task-station.md)统一定义：其中身份章节维护 `run_id` 的职责、固定格式、档案目录原子占位与两秒单次重试语义、历史读取兼容与变更边界；重置章节负责保留配置和独立源码，将正式档案发布到 Product Root 的 `.archive/<run-id>`，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、由工位 `git_name` 和 run 生成的分支及 PR 处置、以及 epoch 兼容边界；不覆盖工位卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/station-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。完整应用源码集 Profile 的现役承诺止于源码准备：[术语表](glossary.md)解释名称，[工位合同](architecture/single-task-station.md)定义源码与未来运行能力的界线，TapData 构建运行指引负责另行构建、启动和实证的操作依据，不把接管成功当成应用可运行。
 
