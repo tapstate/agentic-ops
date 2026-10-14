@@ -549,6 +549,7 @@ def main():
     parser.add_argument("--project")
     parser.add_argument("--source-pool")
     parser.add_argument("--reuse-materials", action="store_true")
+    parser.add_argument("--quiet", action="store_true", help="省略接线成功明细，保留警告与错误")
     parser.add_argument("--accept-checkpoint-migration", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
@@ -672,17 +673,25 @@ def main():
         parser.error(str(error))
 
     update_git_exclude(station, artifacts)
-    print(
-        "AgenticOps 工位接线已刷新：%s（project=%s，agents=%s，ref=%s）"
-        % (station, project, ",".join(agents), document["product_ref"])
-    )
-    for message in messages:
-        print(message)
+    if not arguments.quiet:
+        print(
+            "AgenticOps 工位接线已刷新：%s（project=%s，agents=%s，ref=%s）"
+            % (station, project, ",".join(agents), document["product_ref"])
+        )
+        for message in messages:
+            print(message)
+    if arguments.quiet:
+        for agent in agents:
+            launch = manifests[agent].get("launch", {})
+            if launch.get("mode") == "manual":
+                print("[AgenticOps][初始化][警告] %s：%s" %
+                      (agent, launch.get("message") or "需要手动启动"), file=sys.stderr)
     if "branch_identity" not in station_config:
         print(
-            "AgenticOps：当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
+            "[AgenticOps][初始化][警告] 当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
             "agenticops station identity --station <目录>；"
-            "该值会一次性保存，用于稳定生成并恢复任务工作分支。"
+            "该值会一次性保存，用于稳定生成并恢复任务工作分支。",
+            file=sys.stderr,
         )
     return 0
 

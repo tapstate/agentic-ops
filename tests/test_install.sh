@@ -229,6 +229,24 @@ fi
 git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
+# 下载失败保留底层诊断与退出码，不能输出安装完成。
+install_fail_bin="$test_root/install-fail-bin"
+mkdir -p "$install_fail_bin"
+cat > "$install_fail_bin/git" <<'SH'
+#!/usr/bin/env bash
+printf 'fatal: fixture download denied\n' >&2
+exit 37
+SH
+chmod +x "$install_fail_bin/git"
+install_fail_status=0
+PATH="$install_fail_bin:$PATH" bash "$repo_root/bootstrap/install.sh" \
+  --install-home "$test_root/failed-install" \
+  > "$test_root/install-failure.out" 2> "$test_root/install-failure.err" || install_fail_status=$?
+test "$install_fail_status" -eq 37
+grep -F 'fatal: fixture download denied' "$test_root/install-failure.err" >/dev/null
+grep -F '[AgenticOps][安装][失败] 下载产品（分支=main）（退出码=37）' "$test_root/install-failure.err" >/dev/null
+test ! -s "$test_root/install-failure.out"
+
 # 与 gh 一键安装一致：仅向 Bash 传脚本文本，从源码目录之外运行。
 # 同名本地辅助脚本不能被执行。
 installer_cwd="$test_root/installer-cwd"
@@ -239,7 +257,14 @@ printf '%s\n' 'exit 99' > "$installer_cwd/lifecycle-common.sh"
   cat "$repo_root/bootstrap/install.sh" | bash -s -- \
     --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
     --source-pool "$custom_source_pool"
-)
+) > "$test_root/install.out" 2> "$test_root/install.err"
+
+test "$(grep -Fc '[AgenticOps][安装][完成]' "$test_root/install.out")" -eq 1
+grep -F '[AgenticOps][安装][进行] 下载产品' "$test_root/install.err" >/dev/null
+if grep -E 'Cloning into|Already on|up to date|\[进行\]' "$test_root/install.out"; then
+  printf '安装摘要混入底层进度\n' >&2
+  exit 1
+fi
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
@@ -439,7 +464,16 @@ finally:
 assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
 PY
 
-"$install_root/agenticops" station init --project tapdata --station "$station"
+"$install_root/agenticops" station init --project tapdata --station "$station" \
+  > "$test_root/station-init.out" 2> "$test_root/station-init.err"
+test "$(grep -Fc '[AgenticOps][初始化][完成]' "$test_root/station-init.out")" -eq 1
+grep -F '  项目：tapdata' "$test_root/station-init.out" >/dev/null
+grep -F '  Agent：' "$test_root/station-init.out" >/dev/null
+grep -F '[AgenticOps][初始化][进行] 生成项目与 Agent 接线' "$test_root/station-init.err" >/dev/null
+if grep -E '接线已刷新|Workflow|工具 Hook|\[进行\]' "$test_root/station-init.out"; then
+  printf '初始化摘要混入接线明细\n' >&2
+  exit 1
+fi
 
 test -f "$station/.agenticops/station.json"
 test -f "$station/.agenticops/init.json"

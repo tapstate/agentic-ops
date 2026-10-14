@@ -83,6 +83,26 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
+    def test_init_summary_keeps_actionable_warning_and_failure(self):
+        binding = self.station / '.agenticops/station.json'
+        document = json.loads(binding.read_text())
+        document.pop('branch_identity', None)
+        binding.write_text(json.dumps(document))
+        # 确定性模拟未设置 Git 身份，不依赖测试机器的全局配置。
+        with mock.patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull,
+                                         'GIT_CONFIG_NOSYSTEM': '1'}):
+            result = self.init()
+        self.assertEqual(1, result.stdout.count('[AgenticOps][初始化][完成]'))
+        self.assertNotIn('接线已刷新', result.stdout)
+        self.assertNotIn('[进行]', result.stdout)
+        self.assertIn('[AgenticOps][初始化][警告]', result.stderr)
+        self.assertIn('git_name', result.stderr)
+        result = self.init(project='missing-project', success=False)
+        self.assertNotIn('[完成]', result.stdout)
+        self.assertIn('missing-project', result.stderr)
+        self.assertIn('[AgenticOps][初始化][失败] 检查工位条件', result.stderr)
+        self.assertFalse((ROOT / '.local/lifecycle.lock').exists())
+
     def test_station_status_is_read_only_for_idle_and_active_tasks(self):
         command = [str(self.station / 'agenticops'), 'station', 'status', '--json']
         def query():

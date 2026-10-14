@@ -6,39 +6,9 @@
 
 ## 1. 安装
 
-按[Git SSH 授权指引](security/git-ssh-access.md)确认访问权限后，执行以下命令。它使用默认安装位置和发布分支：
+按[Git SSH 安装](usage/git-ssh-install.md#首次安装)执行默认安装命令。该入口获取安装脚本并调用脚本完成安装，无需手工克隆产品目录、写安装状态或重复指定 `--repository`；自定义目录、源码池、分支及仓库来源也由该页说明。已有 GitHub CLI 时可使用 [gh 一键安装](usage/gh-one-click-install.md)。
 
-```sh
-(
-  set -euo pipefail
-
-  ao_home="$HOME/.agentic-ops"
-  test ! -e "$ao_home" || {
-    printf '安装目录已存在：%s；请使用 agenticops update 更新\n' "$ao_home" >&2
-    exit 2
-  }
-
-  git clone --filter=blob:none --no-checkout \
-    --branch main --single-branch \
-    git@github.com:tapstate/agentic-ops.git "$ao_home"
-
-  git -C "$ao_home" sparse-checkout init --cone
-  git -C "$ao_home" sparse-checkout set \
-    adapters bootstrap contracts gate policies projects workflow
-  git -C "$ao_home" checkout main
-
-  ao_ref="$(git -C "$ao_home" rev-parse HEAD)"
-  python3 "$ao_home/bootstrap/product_state.py" \
-    --product-root "$ao_home" write \
-    --mode installed \
-    --repository git@github.com:tapstate/agentic-ops.git \
-    --branch main \
-    --current-ref "$ao_ref"
-
-)
-```
-
-成功后，产品安装在 `~/.agentic-ops`。接管时按完整工程 Profile 在工位 source 中准备独立业务仓库，源码池由产品根自动管理，仅加速接管时的独立源码下载。
+默认产品安装在 `~/.agentic-ops`，跟随 `main` 发布分支；设置 `AGENTIC_OPS_HOME` 时安装位置使用该值。源码池默认是 `~/.agentic-ops-repos`，仅加速任务接管时的独立源码下载。以下命令以默认安装位置为例，自定义安装时替换产品入口路径。
 
 ## 2. 创建项目工位
 

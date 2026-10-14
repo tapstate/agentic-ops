@@ -102,6 +102,8 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 旧版 AgenticOps 的设计、合同和操作说明以 Git Tag `v0.7` 为准，不在 v1 现役文档树保留重复版本。
 安装目录包含本树的人读文档，供项目 Skill 和 Runbook 的相对链接直接读取；安装、更新与回退共享文档范围，不复制文档到工位。缺失资源补齐的操作由[更新与回退](usage/update-and-rollback.md)维护，维护工具仍不进入安装目录。
 
+首次安装引导以 [Git SSH 安装](usage/git-ssh-install.md)为命令与默认参数的唯一使用说明；[首次使用指引](usage-guide.md)负责安装到首个任务的主路径，[Agent 引导安装](usage/agent-guided-install.md)负责委托边界，[gh 一键安装](usage/gh-one-click-install.md)只负责另一种安装脚本获取方式。安装步骤统一交给 Bootstrap，文档不再手工写安装状态。
+
 ## 空闲工位源码生命周期
 
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。
@@ -113,3 +115,5 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 正式验收的持续执行、慢检查诊断和用户优化决策由[维护指引](maintenance-guide.md#5-验证)维护；检查耗时仅触发诊断提示，取消与失败处理仍由验收器负责。
 
 macOS `.DS_Store` 的清理边界由[工位合同](architecture/single-task-station.md)维护：中央清理名单声明元数据名称，Workflow 在已授权清理内处理普通未跟踪文件；旧计划的成果保全决定继续有效，不遍历保留目录或 Git 内部目录。
+
+Bootstrap 人读控制台输出的规范由[维护指引](maintenance-guide.md#脚本控制台输出规范)维护，覆盖阶段、最终摘要、诊断与退出码，安装与初始化为首批采用入口；[Git SSH 安装](usage/git-ssh-install.md)负责用户可见示例。该主题不定义任务事件、机器 JSON 或持久日志系统。
