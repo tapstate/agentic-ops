@@ -43,7 +43,8 @@ def manifest_at_ref(product_root, reference):
     except UnicodeError as error:
         raise ValueError("目标版本工位兼容性清单编码无效：%s" % reference) from error
     if result.returncode:
-        raise ValueError("目标版本缺少工位兼容性清单：%s" % reference)
+        # 禁止隐式下载的核验只能证明本地不可读，不能把缺失对象误判为远端版本缺少文件。
+        raise ValueError("版本工位兼容性清单无法从本地读取（文件缺失或对象尚未准备）：%s" % reference)
     try:
         document = json.loads(result.stdout)
     except json.JSONDecodeError as error:

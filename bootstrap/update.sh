@@ -67,7 +67,7 @@ counts="$(git -C "$product_root" rev-list --left-right --count "HEAD...$target_r
 ahead="${counts%%[[:space:]]*}"
 behind="${counts##*[[:space:]]}"
 if [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ]; then
-  printf 'AgenticOps：%s与 origin/%s 已分叉（ahead=%s，behind=%s），拒绝更新\n' \
+  printf 'AgenticOps：%s与 origin/%s 已分叉（本地领先=%s，远端领先=%s），拒绝更新\n' \
     "$face" "$branch" "$ahead" "$behind" >&2
   exit 2
 fi
@@ -111,10 +111,10 @@ elif [ "$updated_ref" != "$current_ref" ]; then
 fi
 
 if [ "$mode" = "installed" ]; then
-  printf 'AgenticOps 安装目录已更新：branch=%s，%s -> %s，ahead=%s\n' \
+  printf 'AgenticOps 安装目录已更新：分支=%s，%s -> %s，本地领先=%s\n' \
     "$branch" "$current_ref" "$updated_ref" "$ahead"
 else
-  printf 'AgenticOps 产品源码已更新：branch=%s，%s -> %s，ahead=%s\n' \
+  printf 'AgenticOps 产品源码已更新：分支=%s，%s -> %s，本地领先=%s\n' \
     "$branch" "$current_ref" "$updated_ref" "$ahead"
 fi
 if [ "$updated_ref" != "$current_ref" ]; then

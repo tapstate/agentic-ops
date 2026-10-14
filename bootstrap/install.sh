@@ -72,6 +72,8 @@ fi
 
 ao_stage="下载产品（分支=${branch}）"
 printf '[AgenticOps][安装][进行] %s\n' "$ao_stage" >&2
+# 部分克隆依赖显式材料准备：安装检出会下载当前文件，后续 update 先补对象再本地核验。
+# 不得在通用 Git 核验中取消 GIT_NO_LAZY_FETCH 来补偿安装生命周期的准备缺项。
 git clone --quiet --filter=blob:none --no-checkout --branch "$branch" --single-branch \
   "$repository" "$install_root"
 ao_stage="检出产品文件"
