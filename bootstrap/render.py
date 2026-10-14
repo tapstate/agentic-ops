@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -559,6 +560,9 @@ def main():
     if arguments.accept_checkpoint_migration and not arguments.refresh:
         parser.error("--accept-checkpoint-migration 只能用于显式 repair/refresh")
 
+    operation = "检查" if arguments.check else ("刷新" if arguments.refresh else "初始化")
+    if not arguments.quiet and not arguments.resolve_project:
+        print("[AgenticOps][%s][进行] 核验工位绑定与接线" % operation, file=sys.stderr)
     install_root = Path(arguments.install_home).resolve()
     station = Path(arguments.station).resolve()
     try:
@@ -588,7 +592,7 @@ def main():
                     install_root, station, config, init, tree
                 )
                 print(
-                    "AgenticOps 工位检查通过：%s（project=%s，agents=%s，ref=%s）"
+                    "[AgenticOps][检查][完成] 工位检查通过\n  工位：%s\n  项目：%s\n  Agent：%s\n  版本：%s"
                     % (
                         station,
                         checked_project,
@@ -655,7 +659,7 @@ def main():
                         if tree.is_symlink(target) or tree.is_file(target):
                             tree.unlink(target)
                         else:
-                            parser.error(
+                            raise ValueError(
                                 "工位 Skill 接线位置是目录，拒绝覆盖：%s" % destination
                             )
                     tree.symlink(artifact["target"], target)
@@ -669,28 +673,30 @@ def main():
                 if row["create"]:
                     tree.path(row["path"]).mkdir(mode=0o700, exist_ok=True)
             task_store.initialize_current(station)
-    except ValueError as error:
-        parser.error(str(error))
-
-    update_git_exclude(station, artifacts)
+        update_git_exclude(station, artifacts)
+    except (ValueError, OSError) as error:
+        print("[AgenticOps][%s][失败] %s（退出码=2）" % (operation, error), file=sys.stderr)
+        if arguments.check and str(error) == "产品根目录版本已变化，请执行 agenticops station repair":
+            print("  下一步：agenticops station repair --station %s" % shlex.quote(str(station)), file=sys.stderr)
+        raise SystemExit(2)
     if not arguments.quiet:
         print(
-            "AgenticOps 工位接线已刷新：%s（project=%s，agents=%s，ref=%s）"
-            % (station, project, ",".join(agents), document["product_ref"])
+            "[AgenticOps][%s][完成] 工位接线已刷新\n  工位：%s\n  项目：%s\n  Agent：%s\n  版本：%s"
+            % (operation, station, project, ",".join(agents), document["product_ref"])
         )
         for message in messages:
-            print(message)
+            print("  " + message)
     if arguments.quiet:
         for agent in agents:
             launch = manifests[agent].get("launch", {})
             if launch.get("mode") == "manual":
-                print("[AgenticOps][初始化][警告] %s：%s" %
-                      (agent, launch.get("message") or "需要手动启动"), file=sys.stderr)
+                print("[AgenticOps][%s][警告] %s：%s" %
+                      (operation, agent, launch.get("message") or "需要手动启动"), file=sys.stderr)
     if "branch_identity" not in station_config:
         print(
-            "[AgenticOps][初始化][警告] 当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
+            "[AgenticOps][%s][警告] 当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
             "agenticops station identity --station <目录>；"
-            "该值会一次性保存，用于稳定生成并恢复任务工作分支。",
+            "该值会一次性保存，用于稳定生成并恢复任务工作分支。" % operation,
             file=sys.stderr,
         )
     return 0

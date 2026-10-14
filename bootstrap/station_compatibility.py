@@ -114,7 +114,7 @@ def main(argv=None):
         )
         return 0
     except ValueError as error:
-        print("AgenticOps：%s" % error, file=sys.stderr)
+        print("[AgenticOps][兼容检查][失败] %s（退出码=2）" % error, file=sys.stderr)
         return 2
 
 

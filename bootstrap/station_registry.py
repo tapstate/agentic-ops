@@ -163,7 +163,7 @@ def confirm(args):
 
 
 def refresh(product_root, station):
-    subprocess.run([sys.executable, str(product_root / "bootstrap" / "render.py"), "--install-home", str(product_root), "--station", str(station), "--refresh"], check=True)
+    subprocess.run([sys.executable, str(product_root / "bootstrap" / "render.py"), "--install-home", str(product_root), "--station", str(station), "--refresh", "--quiet"], check=True)
     register(product_root, station)
 
 
@@ -390,7 +390,7 @@ def command_prune(args, product_root):
     confirm(args)
     for station in removable:
         unregister(product_root, station)
-    print("已注销 %s 个无法跟踪的工位。" % len(removable))
+    print("[AgenticOps][工位管理][完成] 已注销 %s 个无法跟踪的工位。" % len(removable))
 
 
 def command_refresh(args, product_root, action):
@@ -402,6 +402,7 @@ def command_refresh(args, product_root, action):
         confirm(args)
     prepared_wikis = set()
     for station in targets:
+        print("[AgenticOps][修复][进行] 刷新工位：%s" % station, file=sys.stderr)
         refresh(product_root, station)
         if getattr(args, "ensure_wiki", False):
             repository = wiki_repository(product_root, station)
@@ -409,8 +410,10 @@ def command_refresh(args, product_root, action):
             key = (repository, binding["source_pool"])
             if key not in prepared_wikis:
                 result = shared_repositories.run(product_root, repository, "ensure", binding["source_pool"])
-                print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
+                print("[AgenticOps][Wiki准备][完成] Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
                 prepared_wikis.add(key)
+
+    print("[AgenticOps][修复][完成] 已修复 %s 个工位" % len(targets))
 
 
 def command_detach(args, product_root, purge=False):
@@ -464,7 +467,7 @@ def command_detach(args, product_root, purge=False):
     for station in targets:
         if str(station) in load_registry(product_root) or (station / '.agenticops/station.json').exists():
             raise ValueError('受管注销结果未核验：' + str(station))
-    print('已%s %s 个工位；保留 source/config、未知残留与正式档案，工程目录未删除。' % ('注销' if purge else '解绑', len(targets)))
+    print('[AgenticOps][工位管理][完成] 已%s %s 个工位；保留 source/config、未知残留与正式档案，工程目录未删除。' % ('注销' if purge else '解绑', len(targets)))
 
 
 def command_pending(args, product_root):
@@ -486,7 +489,7 @@ def command_pending(args, product_root):
         if document.get("product_ref") != args.product_ref:
             pending.append(station)
     if pending:
-        print("AgenticOps：检测到 %s 个已知工位待刷新；请执行 agenticops station repair --all，或在使用时执行 start。" % len(pending))
+        print("[AgenticOps][更新][警告] 检测到 %s 个已知工位待刷新；请执行 agenticops station repair --all，或在使用时执行 start。" % len(pending), file=sys.stderr)
 
 
 def configured_git_name():
@@ -517,7 +520,7 @@ def command_identity(args, product_root):
         existing = document.get("branch_identity")
         if existing is not None:
             name = task_store.station_git_name(station)
-            print("工位 git_name 已配置：%s" % name)
+            print("[AgenticOps][身份配置][完成] 工位 git_name 已配置：%s" % name)
             return
         name, source = configured_git_name()
         document["branch_identity"] = {
@@ -526,7 +529,7 @@ def command_identity(args, product_root):
             "source": source,
         }
         task_store._write_json_atomic(path, document)
-    print("工位 git_name 已配置：%s" % name)
+    print("[AgenticOps][身份配置][完成] 工位 git_name 已配置：%s" % name)
 
 
 def parser():
@@ -587,12 +590,12 @@ def main():
             command_refresh(args, product_root, "repair")
         elif args.command == "ensure-wiki":
             result = ensure_wiki(product_root, Path(args.station).resolve())
-            print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
+            print("[AgenticOps][Wiki准备][完成] Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
         elif args.command == "purge":
             command_detach(args, product_root, purge=True)
         return 0
     except (ValueError, subprocess.CalledProcessError) as error:
-        print("AgenticOps：%s" % error, file=sys.stderr)
+        print("[AgenticOps][工位管理][失败] %s（退出码=2）" % error, file=sys.stderr)
         return 2
 
 

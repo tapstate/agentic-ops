@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import os
 from pathlib import Path
@@ -108,7 +109,8 @@ def main():
         save(args.product_root, document)
         return 0
     except ValueError as error:
-        parser.error(str(error))
+        print("[AgenticOps][产品配置][失败] %s（退出码=2）" % error, file=sys.stderr)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

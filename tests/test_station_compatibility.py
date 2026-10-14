@@ -373,7 +373,7 @@ class StationCompatibilityTests(unittest.TestCase):
         script = (ROOT / "bootstrap" / "update.sh").read_text(encoding="utf-8")
         self.assertLess(
             script.index("station_compatibility.py"),
-            script.index('merge --ff-only "$target_ref"'),
+            script.index('merge --quiet --ff-only "$target_ref"'),
         )
 
     def test_rollback_passes_the_rollback_operation_to_the_checker(self):

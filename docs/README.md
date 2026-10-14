@@ -118,4 +118,4 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 
 macOS `.DS_Store` 的清理边界由[工位合同](architecture/single-task-station.md)维护：中央清理名单声明元数据名称，Workflow 在已授权清理内处理普通未跟踪文件；旧计划的成果保全决定继续有效，不遍历保留目录或 Git 内部目录。
 
-Bootstrap 人读控制台输出的规范由[维护指引](maintenance-guide.md#脚本控制台输出规范)维护，覆盖阶段、最终摘要、诊断与退出码，安装与初始化为首批采用入口；[Git SSH 安装](usage/git-ssh-install.md)负责用户可见示例。该主题不定义任务事件、机器 JSON 或持久日志系统。
+Bootstrap 人读控制台输出的规范由[维护指引](maintenance-guide.md#脚本控制台输出规范)维护，覆盖阶段、最终摘要、诊断与退出码，适用于安装、源码配置、更新、回退和工位检查、修复、启动等生命周期入口；帮助、只读数据和机器回执保留原协议；[Git SSH 安装](usage/git-ssh-install.md)负责用户可见示例。该主题不定义任务事件、机器 JSON 或持久日志系统。

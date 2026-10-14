@@ -181,7 +181,8 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+source_update_error="$test_root/source-update-error"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '产品源码已更新' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
@@ -191,7 +192,7 @@ test -L "$maintainer_root/.claude/skills/fixture-maintenance"
 
 git -C "$source_repo" rm -qr skills/fixture-maintenance
 git -C "$source_repo" commit -qm "remove maintenance skill"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
 test ! -e "$maintainer_root/.agents/skills/fixture-maintenance"
 test ! -e "$maintainer_root/.claude/skills/fixture-maintenance"
 
@@ -203,8 +204,8 @@ local_parent="$(git -C "$maintainer_root" rev-parse HEAD)"
 local_tree="$(git -C "$maintainer_root" write-tree)"
 local_commit="$(printf 'local ahead\n' | git -C "$maintainer_root" commit-tree "$local_tree" -p "$local_parent")"
 git -C "$maintainer_root" update-ref refs/heads/develop "$local_commit" "$local_parent"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
-grep -F '维护分支本地领先 1 个提交；update 不会自动推送' "$source_update_output" >/dev/null
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output" 2> "$source_update_error"
+grep -F '[AgenticOps][更新][警告] 维护分支本地领先 1 个提交；update 不会自动推送' "$source_update_error" >/dev/null
 mkdir "$maintainer_root/.local/lifecycle.lock"
 printf '%s\n' "$$" > "$maintainer_root/.local/lifecycle.lock/owner"
 printf 'test\n' > "$maintainer_root/.local/lifecycle.lock/operation"

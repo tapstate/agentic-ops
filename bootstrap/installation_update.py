@@ -277,7 +277,7 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        print('AgenticOps：%s' % error, file=sys.stderr)
+        print('[AgenticOps][更新][失败] %s（退出码=2）' % error, file=sys.stderr)
         return 2
 
 

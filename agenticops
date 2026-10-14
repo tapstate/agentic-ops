@@ -49,6 +49,8 @@ parse_station() {
 }
 
 start_agent() {
+  ao_stage="核验 Agent 启动条件"
+  trap 'ao_status=$?; printf "[AgenticOps][启动][失败] %s（退出码=%s）\n" "$ao_stage" "$ao_status" >&2; exit "$ao_status"' ERR
   agent_name=""
   agent_bound=0
   non_interactive=0
@@ -70,7 +72,7 @@ start_agent() {
         ;;
       --agent)
         test "$#" -ge 2 || { usage >&2; exit 2; }
-        test "$agent_bound" -eq 0 || { printf 'AgenticOps：start 重复指定 Agent ID\n' >&2; exit 2; }
+        test "$agent_bound" -eq 0 || { printf '[AgenticOps][入口][失败] start 重复指定 Agent ID\n' >&2; exit 2; }
         agent_name="$2"
         agent_bound=1
         shift 2
@@ -81,7 +83,7 @@ start_agent() {
         break
         ;;
       -*)
-        printf 'AgenticOps：未知 start 参数：%s\n' "$1" >&2
+        printf '[AgenticOps][入口][失败] 未知 start 参数：%s\n' "$1" >&2
         usage >&2
         exit 2
         ;;
@@ -90,7 +92,7 @@ start_agent() {
           agent_name="$1"
           agent_bound=1
         else
-          printf 'AgenticOps：start 位置参数过多：%s\n' "$1" >&2
+          printf '[AgenticOps][入口][失败] start 位置参数过多：%s\n' "$1" >&2
           usage >&2
           exit 2
         fi
@@ -98,7 +100,7 @@ start_agent() {
         ;;
     esac
   done
-  test -n "$agent_name" || { printf 'AgenticOps：start 缺少 Agent ID\n' >&2; exit 2; }
+  test -n "$agent_name" || { printf '[AgenticOps][入口][失败] start 缺少 Agent ID\n' >&2; exit 2; }
   launch_json="$(python3 "$product_root/bootstrap/agent_registry.py" \
     --product-root "$product_root" resolve-launch "$agent_name" --station "$station" --json)"
   agent_command="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["command"])' "$launch_json")"
@@ -107,23 +109,27 @@ start_agent() {
     default_arguments+=("$argument")
   done < <(python3 -c 'import json, sys; sys.stdout.buffer.write(b"".join(value.encode("utf-8") + b"\0" for value in json.loads(sys.argv[1])["arguments"]))' "$launch_json")
   command -v "$agent_command" >/dev/null 2>&1 || {
-    printf 'AgenticOps：未找到 Agent 命令：%s\n' "$agent_command" >&2
+    printf '[AgenticOps][入口][失败] 未找到 Agent 命令：%s\n' "$agent_command" >&2
     exit 2
   }
   if [ "$non_interactive" -eq 0 ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
-    printf 'AgenticOps：交互启动需要终端；自动化调用请明确使用 --non-interactive，并传入 Agent 支持的非交互参数。\n' >&2
+    printf '[AgenticOps][入口][失败] 交互启动需要终端；自动化调用请明确使用 --non-interactive，并传入 Agent 支持的非交互参数。\n' >&2
     exit 2
   fi
   # shellcheck source=bootstrap/lifecycle-common.sh
   . "$product_root/bootstrap/lifecycle-common.sh"
   lifecycle_acquire_lock "$product_root" "station-start-refresh:$station"
+  ao_stage="刷新工位接线"
+  printf '[AgenticOps][启动][进行] %s\n' "$ao_stage" >&2
   python3 "$product_root/bootstrap/render.py" \
-    --install-home "$product_root" --station "$station" --refresh
+    --install-home "$product_root" --station "$station" --refresh --quiet
   python3 "$product_root/bootstrap/station_registry.py" \
     --product-root "$product_root" --lifecycle-held register --station "$station"
   lifecycle_release_lock
   trap - EXIT
+  ao_stage="进入工位并启动 Agent"
   cd "$station"
+  printf '[AgenticOps][启动][进行] 启动 Agent：%s\n' "$agent_name" >&2
   exec "$agent_command" ${default_arguments[@]+"${default_arguments[@]}"} ${forwarded[@]+"${forwarded[@]}"}
 }
 
@@ -218,9 +224,9 @@ case "$command_name" in
     product_mode="$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field mode 2>/dev/null || true)"
     if [ "$product_mode" != "installed" ]; then
       if [ "$product_mode" = "source" ]; then
-        printf 'AgenticOps：产品源码目录是可变维护现场，不能作为业务工位 Product Root；请先安装候选快照，再从安装目录执行 station init。\n' >&2
+        printf '[AgenticOps][入口][失败] 产品源码目录是可变维护现场，不能作为业务工位 Product Root；请先安装候选快照，再从安装目录执行 station init。\n' >&2
       else
-        printf 'AgenticOps：无法核验 Product Root 为已安装快照；请先完成 install，再从安装目录执行 station init。\n' >&2
+        printf '[AgenticOps][入口][失败] 无法核验 Product Root 为已安装快照；请先完成 install，再从安装目录执行 station init。\n' >&2
       fi
       exit 2
     fi
@@ -244,7 +250,7 @@ case "$command_name" in
   repair)
     test "$station_scope" -eq 1 || { usage >&2; exit 2; }
     parse_station "$@"
-    repair_args=(--install-home "$product_root" --station "$station" --refresh)
+    repair_args=(--install-home "$product_root" --station "$station" --refresh --quiet)
     ensure_wiki=0
     if [ "$forwarded_count" -ne 0 ]; then
       for argument in "${forwarded[@]}"; do
@@ -258,10 +264,17 @@ case "$command_name" in
     # shellcheck source=bootstrap/lifecycle-common.sh
     . "$product_root/bootstrap/lifecycle-common.sh"
     lifecycle_acquire_lock "$product_root" "station-repair:$station"
+    ao_stage="刷新工位接线"
+    trap 'ao_status=$?; printf "[AgenticOps][修复][失败] %s（退出码=%s）\n" "$ao_stage" "$ao_status" >&2; exit "$ao_status"' ERR
+    printf '[AgenticOps][修复][进行] %s\n' "$ao_stage" >&2
     python3 "$product_root/bootstrap/render.py" "${repair_args[@]}"
+    ao_stage="登记工位并核验任务状态"
+    printf '[AgenticOps][修复][进行] %s\n' "$ao_stage" >&2
     python3 "$product_root/bootstrap/station_registry.py" \
       --product-root "$product_root" --lifecycle-held register --station "$station"
     if [ "$ensure_wiki" -eq 1 ]; then
+      ao_stage="准备项目 Wiki"
+      printf '[AgenticOps][修复][进行] %s\n' "$ao_stage" >&2
       python3 "$product_root/bootstrap/station_registry.py" \
         --product-root "$product_root" ensure-wiki --station "$station"
     fi
@@ -269,8 +282,12 @@ case "$command_name" in
 import sys
 sys.path.insert(0, sys.argv[1])
 from workflow import task_store
-task_store.read_current(sys.argv[2])
-print("AgenticOps 工位修复完成：%s" % sys.argv[2])
+try:
+    task_store.read_current(sys.argv[2])
+except (ValueError, OSError) as error:
+    print("[AgenticOps][修复][失败] 核验任务状态：%s（退出码=2）" % error, file=sys.stderr)
+    raise SystemExit(2)
+print("[AgenticOps][修复][完成] 工位修复完成\n  工位：%s" % sys.argv[2])
 PY
     exit $?
     ;;
@@ -288,7 +305,7 @@ PY
     test "$#" -eq 0 || { usage >&2; exit 2; }
     mode="$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field mode 2>/dev/null || true)"
     test "$mode" = "installed" || {
-      printf 'AgenticOps：产品源码不执行 rollback，请使用 Git 流程\n' >&2
+      printf '[AgenticOps][入口][失败] 产品源码不执行 rollback，请使用 Git 流程\n' >&2
       exit 2
     }
     exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/rollback.sh"
@@ -297,7 +314,7 @@ PY
     usage
     ;;
   *)
-    printf 'AgenticOps：未知命令：%s\n' "$command_name" >&2
+    printf '[AgenticOps][入口][失败] 未知命令：%s\n' "$command_name" >&2
     usage >&2
     exit 2
     ;;

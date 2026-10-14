@@ -66,7 +66,7 @@ class LifecycleCleanTreeTests(unittest.TestCase):
 
 class StationBootstrapTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory(prefix='ao logs ')
         self.station = Path(self.temporary.name) / 'station'
         self.init()
 
@@ -82,6 +82,50 @@ class StationBootstrapTests(unittest.TestCase):
             env={**os.environ, 'AGENTIC_OPS_HOME': str(ROOT)}, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
+
+    def render(self, *args):
+        return subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
+            '--install-home', str(ROOT), '--station', str(self.station), *args],
+            capture_output=True, text=True)
+
+    def test_doctor_version_drift_has_actionable_diagnostic_without_usage(self):
+        import shlex
+        init_path = self.station / '.agenticops/init.json'
+        init = json.loads(init_path.read_text())
+        init['product_ref'] = '0' * 40
+        init_path.write_text(json.dumps(init))
+        before = init_path.read_bytes()
+        result = self.render('--check')
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn('[AgenticOps][检查][失败]', result.stderr)
+        self.assertIn('station repair --station ' + shlex.quote(str(self.station.resolve())), result.stderr)
+        self.assertNotIn('usage:', result.stderr)
+        self.assertNotIn('[完成]', result.stdout)
+        self.assertEqual(before, init_path.read_bytes())
+
+    def test_repair_has_one_final_summary_and_doctor_reports_bound_context(self):
+        result = subprocess.run([str(ROOT / 'agenticops'), 'station', 'repair',
+            '--station', str(self.station)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, result.stdout.count('[完成]'))
+        self.assertIn('[AgenticOps][修复][进行]', result.stderr)
+        self.assertNotIn('接线已刷新', result.stdout)
+        checked = self.render('--check')
+        self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
+        self.assertIn('[AgenticOps][检查][完成]', checked.stdout)
+        self.assertIn('  项目：tapdata', checked.stdout)
+
+    def test_quiet_runtime_failure_keeps_diagnostic_and_argument_errors_keep_usage(self):
+        binding = self.station / '.agenticops/station.json'
+        binding.write_text('{broken')
+        result = self.render('--refresh', '--quiet')
+        self.assertEqual(2, result.returncode)
+        self.assertIn('[AgenticOps][刷新][失败]', result.stderr)
+        self.assertNotIn('usage:', result.stderr)
+        self.assertNotIn('[完成]', result.stdout)
+        invalid = self.render('--unknown')
+        self.assertEqual(2, invalid.returncode)
+        self.assertIn('usage:', invalid.stderr)
 
     def test_init_summary_keeps_actionable_warning_and_failure(self):
         binding = self.station / '.agenticops/station.json'

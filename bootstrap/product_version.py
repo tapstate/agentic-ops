@@ -59,7 +59,8 @@ def main():
         print(describe(args.product_root, allow_dirty=args.allow_dirty))
         return 0
     except ValueError as error:
-        parser.error(str(error))
+        print("[AgenticOps][版本][失败] %s（退出码=2）" % error, file=sys.stderr)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
