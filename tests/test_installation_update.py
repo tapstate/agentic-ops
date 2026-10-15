@@ -2,6 +2,8 @@
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -389,6 +391,216 @@ class InstallationUpdateTests(unittest.TestCase):
         path.write_text(json.dumps(document))
         with self.assertRaisesRegex(ValueError, '结构无效'):
             update.execute(self.install, self.args)
+
+
+class SourceFreeRecoveryTests(unittest.TestCase):
+    """直接执行公开命令；客户端仅有旧安装，产品文件只能由独立 Git 远端下载。"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='ao-source-free-recovery-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.seed = self.root / 'server'
+        self.seed.mkdir()
+        self.git(self.seed, 'init', '-q', '-b', 'channel')
+        self.git(self.seed, 'config', 'user.name', 'Fixture')
+        self.git(self.seed, 'config', 'user.email', 'fixture@example.test')
+        for directory in update.INSTALL_PATHS:
+            shutil.copytree(ROOT / directory, self.seed / directory,
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.local'))
+        shutil.copytree(ROOT / 'skills/shared', self.seed / 'skills/shared')
+        for name in ('agenticops', '.gitignore'):
+            shutil.copy2(ROOT / name, self.seed / name)
+        # 仅在夹具旧客户端中重现已删除的第一父链检查；不依赖测试仓库的 Git 历史。
+        updater = self.seed / 'bootstrap/installation_update.py'
+        fixed = updater.read_text()
+        old_check = """    if before == after:
+        mainline = git(root, 'rev-list', '--first-parent', target).splitlines()
+        if original not in mainline:
+            raise ValueError('原安装不在恢复主线上，不能证明连续兼容')
+"""
+        updater.write_text(fixed.replace('    station_compatibility.check_upgrade(root, original, target)',
+                                        old_check + '    station_compatibility.check_upgrade(root, original, target)'))
+        base = self.commit('base with old updater')
+        (self.seed / 'old-release-note').write_text('old installed version')
+        self.original = self.commit('old installed version')
+        self.git(self.seed, 'checkout', '-qb', 'release', base)
+        (self.seed / 'release-note').write_text('first parent release')
+        self.commit('release first parent')
+        self.git(self.seed, 'merge', '-q', '--no-ff', 'channel', '-m', 'merge old channel')
+        updater.write_text(fixed)
+        self.target = self.commit('reviewed updater fix')
+        self.git(self.seed, 'checkout', '-q', 'channel')
+        self.git(self.seed, 'merge', '-q', '--ff-only', 'release')
+        self.remote = self.seed.as_uri()
+        self.home = self.root / 'user-home'
+        self.home.mkdir()
+        self.work = self.home / 'work'
+        self.work.mkdir()
+        self.install = self.home / '.agentic-ops'
+        self.downloads = self.home / 'tmp'
+        self.downloads.mkdir()
+        self.git(self.home, 'clone', '-q', '--no-checkout', '--single-branch',
+                 '--branch', 'channel', self.remote, str(self.install))
+        self.git(self.install, 'sparse-checkout', 'set', *update.INSTALL_PATHS, 'skills/shared')
+        self.git(self.install, 'checkout', '-q', '--detach', self.original)
+        product_state.save(self.install, {'schema_version': 2, 'mode': 'installed',
+            'repository': self.remote, 'tracking_branch': 'channel', 'current_ref': self.original,
+            'previous_ref': None, 'source_pool': str(self.home / 'source-pool')})
+        self.station = self.home / 'station'
+        for name, content in (('.agenticops/current-task.json', 'opaque active task'),
+                              ('source/repository/file', 'uncommitted user work'),
+                              ('config/environment', 'persistent configuration')):
+            path = self.station / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.registry = self.install / '.local/stations.json'
+        self.registry.write_text(json.dumps({'schema_version': 1, 'stations': [str(self.station)]}))
+        archive = self.install / '.archive/run/snapshot'
+        archive.parent.mkdir(parents=True)
+        archive.write_text('formal archive')
+        self.protected = {path: path.read_bytes() for path in (
+            self.registry, archive, self.station / '.agenticops/current-task.json',
+            self.station / 'source/repository/file', self.station / 'config/environment')}
+        self.document = product_state.load(self.install)
+        self.env = dict(os.environ, HOME=str(self.home), TMPDIR=str(self.downloads),
+                        PYTHONPATH='', PYTHONDONTWRITEBYTECODE='1', GIT_NO_LAZY_FETCH='1')
+        self.env.pop('AGENTIC_OPS_HOME', None)
+        self.env.pop('GIT_DIR', None)
+        self.env.pop('GIT_WORK_TREE', None)
+        self.env.pop('GIT_INDEX_FILE', None)
+        guide = (ROOT / 'docs/usage/update-and-rollback.md').read_text()
+        section = guide.split('<!-- ao-one-time-update-recovery:start -->', 1)[1].split(
+            '<!-- ao-one-time-update-recovery:end -->', 1)[0]
+        self.command = section.split('```sh\n', 1)[1].split('```', 1)[0]
+        pinned = '2d962efe1ccf53deac16e7b011e6b451a244eed2'
+        self.assertEqual(1, self.command.count(pinned))
+        # 唯一替换项是测试远端生成的等价固定候选 SHA；不替换下载/核验/确认/应用命令。
+        self.command = self.command.replace(pinned, self.target)
+        self.assertFalse((self.home / 'source').exists())
+        self.assertFalse((self.install / 'internal').exists())
+        self.assertNotIn(self.original, self.git(self.seed, 'rev-list', '--first-parent', self.target).splitlines())
+
+    def git(self, root, *arguments):
+        result = subprocess.run(['git', '-C', str(root), *arguments], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        return result.stdout.strip()
+
+    def commit(self, message):
+        self.git(self.seed, 'add', '.')
+        self.git(self.seed, 'commit', '-qm', message)
+        return self.git(self.seed, 'rev-parse', 'HEAD')
+
+    def run_command(self, answer='yes\n'):
+        return subprocess.run(['bash', '-c', self.command], cwd=self.work, env=self.env,
+                              input=answer, capture_output=True, text=True, timeout=120)
+
+    def assert_preserved(self, switched=False):
+        for path, content in self.protected.items():
+            self.assertEqual(content, path.read_bytes(), str(path))
+        self.assertEqual([], list(self.downloads.glob('agenticops-recover.*')))
+        self.assertFalse((self.install / '.local/lifecycle.lock').exists())
+        self.assertEqual(self.target if switched else self.original,
+                         self.git(self.install, 'rev-parse', 'HEAD'))
+        if not switched:
+            self.assertEqual(self.document, product_state.load(self.install))
+
+    def test_only_old_install_recovers_then_normal_update_works(self):
+        old = subprocess.run([str(self.install / 'agenticops'), 'update'], cwd=self.work,
+                             env=self.env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(2, old.returncode, old.stderr)
+        self.assertIn('原安装不在恢复主线上', old.stderr)
+        result = self.run_command()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('预检通过', result.stderr)
+        self.assertIn('一次性恢复][完成', result.stdout)
+        document = product_state.load(self.install)
+        self.assertEqual(self.target, document['current_ref'])
+        self.assertEqual(self.original, document['previous_ref'])
+        self.assertEqual(self.document['tracking_branch'], document['tracking_branch'])
+        self.assertEqual(self.document['source_pool'], document['source_pool'])
+        self.assert_preserved(switched=True)
+        # 远端后续同 epoch 提交只能由原安装的普通 update 获取，无临时源码辅助。
+        (self.seed / 'release-note').write_text('next compatible update')
+        next_ref = self.commit('next normal update')
+        normal = subprocess.run([str(self.install / 'agenticops'), 'update'], cwd=self.work,
+                                env=self.env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, normal.returncode, normal.stderr)
+        self.assertEqual(next_ref, product_state.load(self.install)['current_ref'])
+        self.assertEqual(self.target, product_state.load(self.install)['previous_ref'])
+        for path, content in self.protected.items():
+            self.assertEqual(content, path.read_bytes())
+
+    def test_interrupted_switch_keeps_download_and_prints_working_resume(self):
+        updater = self.seed / 'bootstrap/installation_update.py'
+        source = updater.read_text()
+        point = "        if target != original and document['current_ref'] != target:"
+        source = source.replace(point, """        interruption = root / '.local/test-record-interruption'
+        if interruption.exists():
+            interruption.unlink()
+            raise OSError('simulated record interruption')
+""" + point)
+        updater.write_text(source)
+        previous_target = self.target
+        self.target = self.commit('fixture interrupts once before record')
+        self.command = self.command.replace(previous_target, self.target)
+        (self.install / '.local/test-record-interruption').touch()
+        result = self.run_command()
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual(self.target, self.git(self.install, 'rev-parse', 'HEAD'))
+        self.assertEqual(self.original, product_state.load(self.install)['current_ref'])
+        self.assertIn('临时产品保留在', result.stderr)
+        resume = [line for line in result.stderr.splitlines() if line.startswith('python3 ')][-1]
+        self.assertIn('--resume', resume)
+        self.assertIn(self.original, resume)
+        self.assertIn(self.target, resume)
+        recovered = subprocess.run(['bash', '-c', resume], cwd=self.work, env=self.env,
+                                   capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, recovered.returncode, recovered.stderr)
+        self.assertEqual(self.target, product_state.load(self.install)['current_ref'])
+        self.assertEqual(self.original, product_state.load(self.install)['previous_ref'])
+        for path, content in self.protected.items():
+            self.assertEqual(content, path.read_bytes())
+        retained = list(self.downloads.glob('agenticops-recover.*'))
+        self.assertEqual(1, len(retained))
+        shutil.rmtree(retained[0])
+        self.assert_preserved(switched=True)
+
+    def test_cancel_or_eof_never_applies(self):
+        for answer in ('no\n', ''):
+            with self.subTest(answer=answer):
+                result = self.run_command(answer)
+                self.assertEqual(0 if answer else 1, result.returncode, result.stderr)
+                self.assertNotIn('一次性恢复][完成', result.stdout)
+                self.assert_preserved()
+
+    def test_download_failure_preserves_old_install(self):
+        self.seed.rename(self.root / 'offline-server')
+        result = self.run_command()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('从原可信来源获取固定修复版本', result.stderr)
+        self.assert_preserved()
+
+    def test_origin_mismatch_stops_before_download(self):
+        self.git(self.install, 'remote', 'set-url', 'origin', str(self.root / 'other'))
+        result = self.run_command()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('核验原安装身份', result.stderr)
+        self.assert_preserved()
+
+    def test_unpublished_pin_stops_without_switch(self):
+        self.command = self.command.replace(self.target, '0' * 40)
+        result = self.run_command()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('确认已发布到原通道', result.stderr)
+        self.assert_preserved()
+
+    def test_dirty_install_stops_before_download(self):
+        (self.install / 'user-note').write_text('preserve local changes')
+        result = self.run_command()
+        self.assertNotEqual(0, result.returncode)
+        self.assert_preserved()
+        self.assertEqual('preserve local changes', (self.install / 'user-note').read_text())
 
 
 if __name__ == '__main__':

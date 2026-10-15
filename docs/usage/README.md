@@ -1,6 +1,6 @@
 # AgenticOps 扩展使用
 
-[更新与回退](update-and-rollback.md#部分克隆更新与材料准备)负责部分克隆安装的材料准备、预检副作用和失败恢复；设计职责与本地核验限制链接[现役架构](../architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)，不在操作指引重复定义下载或状态逻辑。
+[更新与回退](update-and-rollback.md#部分克隆更新与材料准备)负责部分克隆安装的材料准备、预检副作用和失败恢复，以及[旧更新器无需已有源码的一次性恢复](update-and-rollback.md#旧更新器的一次性恢复无需已有源码)；设计职责与本地核验限制链接[现役架构](../architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)，不在操作指引重复定义下载或状态逻辑。
 
 [Git SSH 安装](git-ssh-install.md)统一说明安装脚本调用、默认值和自定义参数；首次使用与 Agent 引导安装引用该入口，gh 一键安装只补充脚本获取方式，不重复实现安装生命周期。
 
