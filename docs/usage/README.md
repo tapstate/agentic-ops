@@ -15,7 +15,7 @@
 
 [任务存档与恢复](task-archive-and-resume.md)面向使用者，按暂停存档、隔离升级、从 Jira 接续和恢复验证的顺序组织操作及可直接使用的请求示例。它只导航现役授权、工位和升级合同，不定义另一套状态或迁移格式；任务进展仍记录在 Jira。
 
-[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)只负责原版本退出和目标版本重建。共享任务接续 Skill 复用这两页，不建立与 epoch 绑定的转换合同。
+[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)只负责原版本退出和目标版本重建。共享任务接续 Skill 的业务任务路径复用这两页；源码维护任务进入[维护接续指引](../maintenance-guide.md#从-jira-接续维护任务)，不要求业务工位，不建立与 epoch 绑定的转换合同。
 
 [质量检查与证据](quality-checkpoints.md)统一维护阶段评论的人读摘要、Jira 正文表示与回读，以及 PR 提审预检、Checks 具体例外和 GitHub Ready for review 回读闭环。PR Ready 只表示全部目标 PR 已退出 Draft 且回读确认，预检通过不代表提审完成；项目字段采集时机与审批责任由 Project 配置维护。详细结构化证据留在当前 run，不在评论或其它文档重复维护。
 

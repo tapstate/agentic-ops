@@ -105,6 +105,12 @@ Git 克隆只包含该分支已提交内容，不包含当前未提交修改；�
 
 准入清单生成使用 `admission.json` 中各 `task_classes.<class>.doc` 的路径，新任务类型无需修改通用渲染器。路径必须为 `projects/<project>/admission/<英文小写连字符名称>.md`，不允许越界、符号链接或多个任务类型覆盖同一文件。生成器先检查全部目标并渲染正文，再开始写入；`render --check` 只检测漂移，不创建目录。既有 TapData 文档路径和正文保持不变。
 
+### 从 Jira 接续维护任务
+
+使用共享 [ao-task-resume](../skills/shared/ao-task-resume/SKILL.md) 接续 AgenticOps 源码维护任务。核验 Jira 当前目标、负责人、范围与决定，检查本地仓库身份、分支、HEAD、未提交修改以及 GitHub PR/CI；从现有 Story Gate 读取与当前候选匹配的验收材料。缺失材料先核实，只询问影响正确性或授权的缺项。
+
+复用仍适用的设计、代码和验证，按本仓库当前授权及验收合同继续。维护任务不要求业务工位、current/op 或新建 Workflow run，也不调用业务 takeover；外部写入结果未知时先回读原操作，停止依赖步骤并继续独立准备。记录沿用原 Jira 和 Git/PR，不新增任务状态机；接续请求不自动授权提交、推送或发布。
+
 ## 5. 验证
 
 运行代码及 Skill 变更整理为明确候选后，使用普通提交/PR 候选按影响范围生成正式门禁证据：
@@ -141,25 +147,44 @@ internal/release/release.sh prepare --version vX.Y
 internal/release/release.sh publish --version vX.Y --confirm-release
 ```
 
-`publish`、合并和 Tag 需要针对实际候选范围的明确授权。Hotfix 只能使用：
+软门禁模式显式增加 `--allow-soft-gate`。发布脚本回读合并事实、同步 `develop`，最后创建指向实际 Merge commit 的 annotated Tag；发布版本使用 `v1.x`。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。Hotfix 只能使用：
 
 ```sh
 internal/release/hotfix.sh <JIRA-KEY>
 ```
 
-它原子更新 `main` 与 `develop`；冲突、分叉或回读不明时停止。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
+明确调用该 Hotfix 入口是快速修复授权；它原子更新 `main` 与 `develop`，冲突、分叉或回读不明时停止。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
 详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。
 
+### 提交信息构造
+
+- 提交标题使用第一个 `git commit -m "<title>"` 参数。
+- 正文每个自然段必须使用独立的 `-m "<paragraph>"` 参数，Git 会自动以空行分隔各段。
+- 禁止在任何 `-m` 参数中传入字面 `\n`、`\\n`、`echo -e`、`printf`，或依赖下游二次解析来形成多段正文。
+- 正文确实需要复杂格式时，使用 `git commit -F <message-file>`；文件内容必须包含真实换行。
+- 发起提交前，Agent 必须逐段检查提交参数中的标题、变更、原因、验证和风险；任何参数含字面 `\n` 时停止并改正。
+
+推荐模板：
+
+```sh
+git commit \
+  -m "fix(station): AO-108 中文主题" \
+  -m "变更：……" \
+  -m "原因：……" \
+  -m "验证：……" \
+  -m "风险：……"
+```
+
 ## 7. 维护 Agent 协作与模型适配
 
-截至 2026-09-13，OpenAI 的 [GPT-6 Astra 指引](https://developers.openai.com/api/docs/guides/latest-model)说明：模型更敏感于 Skill 和仓库指令，可能多问澄清问题、扩大测试；也支持执行中补充要求和异步工具能力。这些是模型与平台能力说明，不是 AgenticOps 的权限保证。
+截至 2026-10-14，OpenAI 的 [GPT-6 系列指引](https://developers.openai.com/api/docs/guides/latest-model)将 GPT-6.1 Sol 定位为兼顾速度、成本与复杂编码的选择；关于指令敏感、澄清和测试范围的提示主要基于 Astra 观察，需在实际模型与工作负载中验证。[官方提示词审计建议](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)强调精确触发、按需阅读和明确完成边界。这些是模型与平台能力说明，不是 AgenticOps 的权限保证。
 
 产品维护据此采用根 `AGENTS.md` 的协作约定：沿用有效授权、先完成可审查准备、只在真实决策处暂停；技能编写检查见 [Skill 维护规范](skill-maintenance.md)。初始化技能区分明确更新与意图不清的重建，接管测试技能区分必填绑定与可选回复，避免把重复确认当作安全措施。
 
 异步工具、执行中补充要求和推理强度调整以当前 Agent 实际暴露的接口为准；不能因为模型支持就假定 CLI、桌面端或 Adapter 已支持。没有异步能力时按顺序执行并报告阻塞，不新增 Runtime 模拟平台调度，也不自行修改用户模型配置。等待期间可做独立只读分析；恢复后先核验原操作及当前目标，再消费结果。子代理只用于已要求的独立工作，接管测试仍使用一个执行子代理，不扩大并发写入范围。
 
-指引调整的人工场景核对包括：明确更新既有工位时直接 repair；缺工作目录时只问该目录；已有绑定不符时停止覆盖；用户中途收窄目标时停止受影响步骤；外部写结果未知时先回读；测试通过且候选未变时不重复运行。静态核对与固定验收只能证明指令和资源合同，不能宣称 Astra 行为、真实 Jira 接管或多平台端到端已验证。
+指引调整的人工场景核对包括：明确更新既有工位时直接 repair；缺工作目录时只问该目录；已有绑定不符时停止覆盖；用户中途收窄目标时停止受影响步骤；外部写结果未知时先回读并继续不依赖该结果的准备；正文修正且主题结构未变时不改总纲；维护任务接续不索要业务工位，业务接续仍核验绑定；方案第五轮仍有问题时输出当前方案与未决问题交由用户决策；测试通过且候选未变时不重复运行。静态核对与固定验收只能证明指令和资源合同，不能宣称 Astra 行为、真实 Jira 接管或多平台端到端已验证。
 
 
 ## epoch 25 空 runtime 身份恢复

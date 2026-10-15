@@ -6,38 +6,19 @@
 
 AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工具执行，Workflow 在本地流程进入、退出、恢复和完成时检查确定性条件；Policy 配置通用判定，项目差异单独配置。使用者工位不生成通用工具 Hook，旧 Hook 必须显式确认迁移；源码仓库自身的 Git Hook 独立保留。状态检查不承诺阻止任意外部动作，也不提供本地防篡改或身份认证。
 
-## 单一产品架构
+## 架构边界与按需阅读
 
-- `contracts/`：Gate 请求、判定和 Adapter Manifest 的版本化标准契约。
-- `gate/`：平台无关门禁内核，只接受标准操作并执行上下文与策略判定。
-- `policies/`：公司级操作策略和流程连续性原则，不写项目特例。
-- `workflow/`：任务阶段、授权、CI 和证据等小型确定性工具。
-- `projects/<project>/`：项目 Profile、准入规则和 Runbook；项目之间不得混写。
-- `adapters/agents/`：Agent Manifest 与原生指引模板；`adapters/tools/`：原生 MCP 接线声明。两者都不得实现工具拦截或复制策略、状态机及项目规则。
-- `bootstrap/`：安装、更新、回退和工作目录接线，不实现业务流程。
-- `tests/`：产品主链路测试。
-- `internal/`：仅供本仓库使用的故事门禁和发布工具，不进入研发安装目录，也不是第二套产品 Runtime。
-- `docs/`：当前有效的人读目标、架构、安全、测试和故事合同。
-- 根 `agenticops`：中央产品根目录薄入口，只负责安装生命周期、工作目录接线、诊断、修复和启动 Agent，不承载 Gate、Policy、Project 或 Workflow 逻辑。
-
-旧版 AgenticOps 只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、`developer/` 工作面、`ao-work`、`ao_work`、`ao-maint`、Go Runtime、`agentic-cli` 或兼容入口。
-
-## 边界与规则归属
-
-- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查和检查事实源；项目工位的 `.agenticops/` 只保存初始化信息、工位配置，以及唯一当前任务的本地执行、恢复、授权和门禁事件。
-- 公司通用操作边界进入 `policies/`；项目 Jira、分支、准入和验证差异进入 `projects/<project>/`；平台协议差异进入 `adapters/`；确定性状态逻辑才进入 `workflow/`。
-- MCP、Agent 指引和 Skill 接线是 Manifest 与模板生成的产物，不是规则事实源。Gate 不得出现平台协议字段；Adapter 必须无状态，并通过 `tests/test_adapter_boundary.py` 的声明式文件边界、禁止执行器、禁止依赖和禁止状态写入检查。
-- 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。
-- 当前仓库规则只约束 AgenticOps 本身，不得把 TapData、TapState 等业务仓库的分支、测试和目录约定反向写入本仓库规则。
-- AgenticOps 源码仓库、`~/.agentic-ops` 安装目录和各业务项目工位必须分开。
-- 源码仓库和安装目录使用相同产品根目录结构和入口；各自可再生或瞬态的非 Git 本地状态放入本产品根目录的 `.local/`，正式任务档案放入 `.archive/<run-id>`。项目工位的状态绑定统一放入 `.agenticops/`，持久配置、完整独立源码和唯一运行现场分别位于 `config/source/runtime`，可再生平台接线由初始化清单管理，不得复制中央 Policy、Project Skill 或 Runtime。
-- 工位持久化结构使用 `contracts/station-state-compatibility.json` 中单调递增的 `station_state_epoch` 管理兼容边界。修改 `.agenticops/` 路径、状态字段或读写语义时必须明确判断兼容性；不兼容变更必须提升 epoch，兼容变更必须保留旧状态回归验证。升级和回退只能在切换产品版本前比较目标支持范围；跨 epoch 时必须先在原版本结束任务并归档释放或清理，再显式执行工位 purge 注销受管状态，不得在线猜测或迁移旧任务数据。
+- 修改层间职责、目录归属或 Adapter 时读取[工程架构](docs/architecture/agenticops-v1-architecture.md)。保持单一产品内核、无状态声明式 Adapter 和薄启动入口；`internal/` 只服务本仓库，不进入产品运行层。
+- 修改工位路径、状态字段或读写语义时读取[工位合同](docs/architecture/single-task-station.md)及 `contracts/station-state-compatibility.json`，明确兼容性；不兼容提升 epoch，兼容保留旧状态回归。升级与清理读取[更新与回退](docs/usage/update-and-rollback.md)，跨 epoch 必须先原版退出、归档释放或清理并显式 purge，不在线迁移旧任务。
+- Jira、Git、GitHub PR/CI 分别是任务、代码、审查和检查事实源；源码仓库、安装目录和业务工位必须分开。状态布局遵循工位合同，不复制中央规则或 Runtime 到工位。
+- 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。本仓库规则只约束 AgenticOps，不引入业务仓库约定；规则归属遵循工程架构。
+- 旧版只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、`developer/` 工作面、`ao-work`、`ao_work`、`ao-maint`、Go Runtime、`agentic-cli` 或兼容入口。
 
 ## 流程连续性
 
 辅助能力缺失或脚本异常不能默认阻塞整个研发流程。Agent 可在原授权、范围和材料保全要求内接管剩余工作，复用已核验成果，按相同成果标准验收；缺项引导研发补齐。没有安全执行路径时，只暂停受影响步骤，说明已完成内容、剩余缺项及所需决策，继续不依赖该步骤的准备工作。验收能力异常时保持待核验，不以脚本退出码或手改状态代替验收。
 
-以下情况必须停止，不得因“流程要流畅”而放行：事实不可信、权限不足、风险要求人工决策、外部写入结果不明确，以及合并、发布、Tag、保护分支写入、强推和历史改写。不得静默改策略、改 `.agenticops/` 状态或换工具绕过门禁。
+事实不可信、权限不足、风险要求人工决策或外部写入结果不明确时，必须停止受影响动作及其依赖步骤，继续原授权内不依赖它们的只读核验和准备。合并、发布、Tag、保护分支写入、强推和历史改写须取得新的明确授权后才执行。不得因“流程要流畅”静默改策略、改 `.agenticops/` 状态或换工具绕过门禁。
 
 ## 维护 Agent 协作
 
@@ -69,7 +50,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 
 ## 文档治理
 
-- 新建或调整人读文档前，先更新对应主题的规划总纲：现役产品文档以 `docs/README.md` 为总入口；已有主题目录以其 `README.md` 为就近总纲。总纲必须说明主题目标、范围、文档层级、各文档职责和导航关系，再细化正文或子文档。
+- 新建或调整人读文档前，先核对对应主题的规划总纲；仅当主题范围、文档职责、层级或导航变化时先更新总纲，正文修正不要求制造无关的总纲改动。现役产品文档以 `docs/README.md` 为总入口；已有主题目录以其 `README.md` 为就近总纲。总纲说明主题目标、范围、文档层级、各文档职责和导航关系。
 - 仅在单篇文档过长并影响阅读或维护，或一段稳定内容需要被多个文档复用时，才拆分子文档。拆分后由总纲链接子文档并说明职责；不因一次性写作步骤、短期信息或零散主题过度拆分，也不在多个页面重复维护同一规范。
 - 产品方向、架构边界和术语分别以 `docs/strategy/project-goals.md`、`docs/architecture/agenticops-v1-architecture.md` 和 `docs/glossary.md` 为准。操作指引、安全边界、测试合同与用户故事应链接这些权威来源，而不是复制或改写其规则。
 - Jira 继续是工作项、进度、阻塞和验收的唯一事实源；文档只记录稳定的产品规则、操作说明、架构和可复用合同，不新增平行执行计划。
@@ -87,16 +68,11 @@ bash internal/tests/test_release.sh
 
 四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。新增或升级任何 Python 第三方组件（运行时、维护工具、测试或锁文件）前，必须先向用户说明组件、用途、版本范围、许可与供应链影响，并取得明确决策；不得因实现方便而自行引入、安装或替换依赖。
 
-同版本必须先具备成对的工位生成与清理机制；跨版本升级只编排原版本清理成功后的版本切换与目标版本生成，不实现第二套清理或解析其它版本任务。兼容清单只声明唯一的 `station_state_epoch`，升级前据此判断是否要求全部任务归档释放并受控解绑；旧安装先使用原版本保存材料并受控解绑，再重新安装和初始化。新协议只保障本版之后的升级与回退，不能追溯保护旧客户端；不兼容或清理不完整时停止，不在线迁移或自动删除保留材料。
-
 ## 分支与发布
 
 - 默认分支是 `main`，日常开发分支是 `develop`；`main` 禁止直接提交和普通直推。
-- 正常发布使用 `internal/release/release.sh prepare --version vX.Y`，再使用 `publish --version vX.Y`。软门禁模式显式增加 `--allow-soft-gate`。
-- `main` 只通过 Merge commit 合入；发布脚本回读合并事实、同步 `develop`，最后才创建指向实际 Merge commit 的 annotated Tag。
-- Hotfix 只使用 `internal/release/hotfix.sh <JIRA-KEY>`。该调用是快速修复授权，脚本只允许原子更新 `main` 和 `develop`；冲突、分叉或回读不明时失败关闭。
-- 候选修改 Agent Hook、共享 Adapter Runtime、Tool Adapter 分类策略、Git Hook、故事门禁、注册表、锁文件或发布脚本时，自动发布失败关闭，必须通过受保护 `main` 的独立人工审查 PR 完成信任根升级。
-- 源码版本格式为 `<分支>-<标签>-<提交数>-<提交编号>`，由 `python3 internal/version.py` 输出；发布版本使用 `v1.x`。
+- 发布与 Hotfix 执行前读取[维护指引](docs/maintenance-guide.md#6-发布与-hotfix)，使用既有发布脚本；`main` 仅以 Merge commit 合入，Tag 绑定实际合并提交。
+- 候选涉及信任根（Hook、Adapter Runtime/分类策略、故事门禁、注册表、锁文件或发布脚本）时，自动发布失败关闭，须经受保护 `main` 的独立人工审查 PR。
 
 ## 提交与授权
 
@@ -104,24 +80,7 @@ bash internal/tests/test_release.sh
 
 命令或脚本传递多段文本时，必须按目标工具实际支持的参数或文件格式构造；不得将转义序列当作多段文本，并依赖下游进行二次解析。
 
-### Git 提交信息构造（强制）
-
-- 提交标题使用第一个 `git commit -m "<title>"` 参数。
-- 正文每个自然段必须使用独立的 `-m "<paragraph>"` 参数，Git 会自动以空行分隔各段。
-- 禁止在任何 `-m` 参数中传入字面 `\n`、`\\n`、`echo -e`、`printf`，或依赖下游二次解析来形成多段正文。
-- 正文确实需要复杂格式时，使用 `git commit -F <message-file>`；文件内容必须包含真实换行。
-- 发起提交前，Agent 必须逐段检查提交参数中的标题、变更、原因、验证和风险；任何参数含字面 `\n` 时停止并改正。
-
-推荐模板：
-
-```sh
-git commit \
-  -m "fix(station): AO-108 中文主题" \
-  -m "变更：……" \
-  -m "原因：……" \
-  -m "验证：……" \
-  -m "风险：……"
-```
+构造提交信息时读取[提交信息构造](docs/maintenance-guide.md#提交信息构造)：标题与各正文段分别使用独立 `-m`，复杂正文使用含真实换行的 `-F` 文件；执行前检查，不向 `-m` 传入字面 `\n` 或依赖二次解析。
 
 没有可确认的 Jira key 时不得提交。只有用户明确要求提交，或工作项级连续授权覆盖提交时，才可执行 `git commit`；推送同理。工作项级授权必须绑定 Jira 工作项、运行编号、仓库、工作分支、目标分支、修改范围和验证方式。所有权、范围、风险或必要验证变化时授权失效。合并、发布、Tag、直接修改 `main`、强推和历史改写始终需要新的明确授权。
 
