@@ -67,7 +67,7 @@ def lifecycle_lock(root, mode):
 
 def clean(root):
     if git(root, 'status', '--porcelain', '--untracked-files=all'):
-        raise ValueError('安装目录存在未提交修改，拒绝更新')
+        raise ValueError('安装目录存在未提交修改，拒绝更新；先用 git status 核对并保全修改，处理完后重试原命令；更新器不会自动 stash 或覆盖文件')
     for row in git(root, 'ls-files', '-v').splitlines():
         if row and row[0].islower():
             raise ValueError('安装目录使用 assume-unchanged 隐藏受管文件，拒绝更新')
@@ -77,7 +77,7 @@ def ancestor(root, earlier, later):
     result = subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', earlier, later],
                             capture_output=True, env=git_environment(), timeout=30)
     if result.returncode:
-        raise ValueError('目标不可向前到达、越出来源分支或历史不足，拒绝切换')
+        raise ValueError('目标不可向前到达、越出来源分支或历史不足，拒绝切换（待核验祖先=%s，后继=%s）；核对记录的来源分支与完整 SHA，补齐历史后重试。若维护补丁已偏离原通道，保留旧安装，按更新与回退指引处理；不要 reset 或强制合并' % (earlier, later))
 
 
 def install_paths(root, target):
@@ -113,7 +113,7 @@ def missing_blobs(root, objects):
 def prepare_materials(root, original, target):
     """只补对象库；不检出、不放宽核验环境、不修改版本记录或工位。"""
     # cone 模式同时检出根文件；范围扩展会先作用于当前版本，因此两端都必须准备。
-    # 中间提交的兼容清单也可能是独有 blob，不能只补齐两端后声称连续兼容。
+    # epoch 是端点状态兼容合同，不读取或下载中间提交的兼容清单。
     # 不下载 tests/internal/维护 Skill 等排除目录；显式 fetch 仍受 NO_LAZY_FETCH=1 约束。
     objects = set()
     # 目标范围可能新纳入当前版本已有的祖先文件，需以两端范围的并集准备两端对象。
@@ -128,14 +128,6 @@ def prepare_materials(root, original, target):
             if kind == 'blob' and ('/' not in path or any(path.startswith(directory + '/')
                     or '/' in directory and path.rsplit('/', 1)[0] == directory.rsplit('/', 1)[0]
                     for directory in directories)):
-                objects.add(exact(object_ref))
-    history = git(root, 'rev-list', '--first-parent', target, '^' + original).splitlines()
-    for reference in history + [original]:
-        row = git(root, 'ls-tree', reference, '--', station_compatibility.MANIFEST_PATH)
-        if row:
-            metadata, _ = row.split('\t', 1)
-            _, kind, object_ref = metadata.split()
-            if kind == 'blob':
                 objects.add(exact(object_ref))
     objects = sorted(objects)
     missing = missing_blobs(root, objects)
@@ -158,7 +150,7 @@ def prepare(root, args):
         raise ValueError('定点、预检和恢复只适用于安装目录；源码使用原 update')
     clean(root)
     if git(root, 'remote', 'get-url', 'origin') != document['repository']:
-        raise ValueError('origin 与产品记录不一致')
+        raise ValueError('origin 与产品记录不一致；核对 .local/product.json 的 repository 与 git remote get-url origin，确认可信来源后再修复配置，不要直接覆盖产品文件')
     original = exact(args.expected_current_ref or document['current_ref'])
     if args.to_ref and not args.expected_current_ref:
         raise ValueError('--to-ref 必须同时绑定 --expected-current-ref')
@@ -183,7 +175,7 @@ def prepare(root, args):
     marker = 'agenticops-update:%s:%s:%s:%s' % (args.mode, branch, original, target)
     if not args.resume:
         if head != original or current != original:
-            raise ValueError('安装 HEAD/产品记录与原 SHA 不符；不自动恢复')
+            raise ValueError('安装 HEAD/产品记录与原 SHA 不符（HEAD=%s，记录=%s，预期=%s）；先核对原更新结果。若为中断，只按原模式、来源及原/目标完整 SHA 加 --resume 续接；不要重写版本记录' % (head, current, original))
     else:
         if (head, current) not in ((original, original), (target, original), (target, target)):
             raise ValueError('续接出现第三值或非法 HEAD/记录组合')
@@ -199,14 +191,7 @@ def prepare(root, args):
     before = station_compatibility.manifest_at_ref(root, original)['station_state_epoch']
     after = station_compatibility.manifest_at_ref(root, target)['station_state_epoch']
     if args.mode == 'recover-install' and before != after:
-        raise ValueError('原版本维护恢复必须同 epoch')
-    if before == after:
-        mainline = git(root, 'rev-list', '--first-parent', target).splitlines()
-        if original not in mainline:
-            raise ValueError('原安装不在恢复主线上，不能证明连续兼容')
-        for reference in mainline[:mainline.index(original) + 1]:
-            if station_compatibility.manifest_at_ref(root, reference)['station_state_epoch'] != before:
-                raise ValueError('恢复路径经过不同 epoch，不能只核验端点')
+        raise ValueError('原版本维护恢复必须同 epoch（当前=%s，目标=%s）；请选择与原安装同 epoch 的维护补丁。跨 epoch 升级须先使用原版本退出并 purge 全部工位，再执行 update' % (before, after))
     station_compatibility.check_upgrade(root, original, target)
     stations = station_compatibility.load_station_registry(root, required=args.mode == 'recover-install' or before != after)
     if any(not Path(station).is_absolute() for station in stations):
@@ -278,6 +263,20 @@ def main(argv=None):
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print('[AgenticOps][更新][失败] %s（退出码=2）' % error, file=sys.stderr)
+        print('[AgenticOps][更新][处理] 安装目录=%s；模式=%s。保留安装与工位，按上述原因处理；操作指引：docs/usage/update-and-rollback.md' %
+              (Path(args.product_root).resolve(), args.mode), file=sys.stderr)
+        # 只回读，不把异常退出等同于回退；可能已切换 HEAD 但尚未写完产品记录。
+        try:
+            document = product_state.load(args.product_root)
+            head = git(args.product_root, 'rev-parse', 'HEAD')
+            print('[AgenticOps][更新][现场] HEAD=%s；产品记录=%s；跟踪分支=%s' %
+                  (head, document['current_ref'], document['tracking_branch']), file=sys.stderr)
+            if head != document['current_ref'] or args.resume:
+                print('[AgenticOps][更新][处理] 可能存在未完成切换；先核对原操作，使用原模式、来源及原/目标完整 SHA 加 --resume 续接，不要直接重试无参 update。', file=sys.stderr)
+            else:
+                print('[AgenticOps][更新][处理] HEAD 与产品记录一致；此回读不代表更新成功或已回退。切换前拒绝可在消除原因后重试原命令；切换中断须先核验原操作。', file=sys.stderr)
+        except (ValueError, OSError, subprocess.SubprocessError):
+            print('[AgenticOps][更新][处理] 无法核验安装版本；保留现场，请维护者核对 HEAD、产品记录与原操作后再决定恢复方式。', file=sys.stderr)
         return 2
 
 

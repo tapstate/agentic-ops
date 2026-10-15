@@ -63,7 +63,7 @@ class InstallationUpdateTests(unittest.TestCase):
         self.registry.write_text(json.dumps({'schema_version': 1, 'stations': [str(station)]}))
         return state / 'current-task.json'
 
-    def partial_install(self, middle_epoch=27):
+    def partial_install(self, merged=False):
         """file:// 强制走 upload-pack；配置服务端 filter，并证明缺失对象而非静默完整克隆。"""
         self.git(self.seed, 'checkout', '-qB', 'channel', self.original)
         (self.seed / 'docs').mkdir()
@@ -71,7 +71,7 @@ class InstallationUpdateTests(unittest.TestCase):
         (self.seed / 'skills').mkdir()
         (self.seed / 'skills/README.md').write_text('original cone ancestor file\n')
         self.original = self.commit('original sparse scope')
-        self.manifest.write_text(json.dumps({'station_state_epoch': middle_epoch}, indent=2))
+        self.manifest.write_text(json.dumps({'station_state_epoch': 27}, indent=2))
         middle = self.commit('distinct intermediate manifest')
         self.manifest.write_text(json.dumps({'station_state_epoch': 27}))
         (self.seed / 'bootstrap').mkdir()
@@ -82,6 +82,16 @@ class InstallationUpdateTests(unittest.TestCase):
         (self.seed / 'internal').mkdir()
         (self.seed / 'internal/excluded.txt').write_text('must stay missing\n')
         target = self.commit('target product')
+        if merged:
+            # 原安装在第二父链：模拟 main 合并 develop 后再同步回 develop。
+            self.git(self.seed, 'checkout', '-qb', 'release', self.original + '^')
+            (self.seed / 'release-note').write_text('release branch change\n')
+            self.commit('release first parent')
+            self.git(self.seed, 'merge', '-q', '--no-ff', 'channel', '-m', 'merge channel')
+            target = self.git(self.seed, 'rev-parse', 'HEAD')
+            self.git(self.seed, 'checkout', '-q', 'channel')
+            self.git(self.seed, 'merge', '-q', '--ff-only', 'release')
+            self.assertNotIn(self.original, self.git(self.seed, 'rev-list', '--first-parent', target).splitlines())
         self.git(self.seed, 'branch', 'initial', self.original)
         self.git(self.seed, 'config', 'uploadpack.allowFilter', 'true')
         remote = self.seed.as_uri()
@@ -104,12 +114,15 @@ class InstallationUpdateTests(unittest.TestCase):
         self.args.to_ref, self.args.expected_current_ref = target, self.original
         update.git(self.install, 'fetch', 'origin', 'refs/heads/channel:refs/remotes/origin/channel')
         required = [self.git(self.seed, 'rev-parse', reference + ':' + path) for reference, path in (
-            (target, 'bootstrap/install.sh'), (middle, update.station_compatibility.MANIFEST_PATH),
+            (target, 'bootstrap/install.sh'),
             (self.original, 'docs/old.md'), (target, 'skills/README.md'),
             (self.original, 'skills/README.md'),
             (target, 'skills/shared/example/SKILL.md'))]
+        intermediate = self.git(self.seed, 'rev-parse', middle + ':' + update.station_compatibility.MANIFEST_PATH)
+        self.assertEqual([intermediate], update.missing_blobs(self.install, [intermediate]))
         excluded = self.git(self.seed, 'rev-parse', target + ':internal/excluded.txt')
         self.assertEqual(sorted(required), update.missing_blobs(self.install, sorted(required)))
+        self.intermediate_manifest = intermediate
         self.assertEqual([excluded], update.missing_blobs(self.install, [excluded]))
         return target, required, excluded
 
@@ -143,6 +156,7 @@ class InstallationUpdateTests(unittest.TestCase):
         self.assertEqual([excluded], update.missing_blobs(self.install, [excluded]))
         self.assertIn('安装目录已更新：分支=', output.getvalue())
         self.assertNotIn('branch=', output.getvalue())
+        self.assertEqual([self.intermediate_manifest], update.missing_blobs(self.install, [self.intermediate_manifest]))
         self.assertEqual('1', update.git_environment()['GIT_NO_LAZY_FETCH'])
 
     def test_real_partial_clone_material_fetch_failure_preserves_install_and_task(self):
@@ -177,13 +191,31 @@ class InstallationUpdateTests(unittest.TestCase):
         self.assertEqual('updated', update.execute(self.install, self.args)['status'])
         self.assertEqual(before, task.read_bytes())
 
-    def test_real_partial_clone_intermediate_epoch_still_rejects(self):
-        self.partial_install(middle_epoch=28)
+    def test_real_partial_clone_second_parent_updates_and_recovery(self):
+        target, required, excluded = self.partial_install(merged=True)
+        task = self.bound()
+        before = task.read_bytes()
         document = product_state.load(self.install)
-        with self.assertRaisesRegex(ValueError, '路径经过不同 epoch'):
-            update.execute(self.install, self.args)
-        self.assertEqual(self.original, update.git(self.install, 'rev-parse', 'HEAD'))
-        self.assertEqual(document, product_state.load(self.install))
+        for mode in ('default', 'pinned', 'recover-install'):
+            with self.subTest(mode=mode):
+                self.git(self.install, 'checkout', '-q', '--detach', self.original)
+                product_state.save(self.install, document)
+                self.args.mode = 'recover-install' if mode == 'recover-install' else 'update'
+                self.args.source_branch = 'channel' if mode == 'recover-install' else None
+                self.args.to_ref = None if mode == 'default' else target
+                self.args.expected_current_ref = None if mode == 'default' else self.original
+                self.args.writers_stopped = True
+                self.args.check = True
+                self.assertEqual('check', update.execute(self.install, self.args)['status'])
+                self.assertEqual(self.original, update.git(self.install, 'rev-parse', 'HEAD'))
+                self.args.check = False
+                self.assertEqual('updated', update.execute(self.install, self.args)['status'])
+                self.assertEqual(target, product_state.load(self.install)['current_ref'])
+                self.assertEqual(self.original, product_state.load(self.install)['previous_ref'])
+                self.assertEqual('channel', product_state.load(self.install)['tracking_branch'])
+                self.assertEqual(before, task.read_bytes())
+        self.assertEqual([], update.missing_blobs(self.install, sorted(required)))
+        self.assertEqual([excluded], update.missing_blobs(self.install, [excluded]))
 
     def test_real_partial_clone_success_receipt_without_objects_still_rejects(self):
         self.partial_install()
@@ -274,17 +306,39 @@ class InstallationUpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             update.execute(self.install, self.args)
 
-    def test_recovery_checks_every_mainline_epoch_and_missing_registry(self):
-        self.git(self.seed, 'checkout', '-qb', 'maintenance', self.new)
-        self.manifest.write_text(json.dumps({'station_state_epoch': 27}))
-        target = self.commit('reverted epoch is not compatible history')
-        self.args.mode, self.args.source_branch, self.args.to_ref = 'recover-install', 'maintenance', target
-        with self.assertRaisesRegex(ValueError, '路径经过'):
+    def test_recovery_rejects_cross_epoch_and_missing_registry(self):
+        self.args.mode, self.args.source_branch = 'recover-install', 'channel'
+        self.args.to_ref = self.new
+        with self.assertRaisesRegex(ValueError, '当前=27，目标=28.*请选择'):
             update.execute(self.install, self.args)
         self.args.to_ref = self.patch
         self.registry.unlink()
         with self.assertRaisesRegex(ValueError, '登记清单缺失'):
             update.execute(self.install, self.args)
+
+    def test_cli_failure_reports_reason_versions_and_next_step(self):
+        (self.install / 'dirty').write_text('preserve')
+        diagnostic = io.StringIO()
+        with redirect_stderr(diagnostic):
+            self.assertEqual(2, update.main(['--product-root', str(self.install)]))
+        message = diagnostic.getvalue()
+        for text in ('未提交修改', 'git status', '保全修改', str(self.install),
+                     'HEAD=' + self.original, '产品记录=' + self.original,
+                     'docs/usage/update-and-rollback.md', '不代表更新成功或已回退'):
+            self.assertIn(text, message)
+
+    def test_cli_interrupted_switch_does_not_claim_unchanged(self):
+        diagnostic = io.StringIO()
+        with mock.patch.object(product_state, 'save', side_effect=OSError('record interrupted')):
+            with redirect_stderr(diagnostic):
+                self.assertEqual(2, update.main(['--product-root', str(self.install),
+                    '--to-ref', self.patch, '--expected-current-ref', self.original]))
+        message = diagnostic.getvalue()
+        self.assertIn('HEAD=' + self.patch, message)
+        self.assertIn('产品记录=' + self.original, message)
+        self.assertIn('--resume', message)
+        self.assertIn('不要直接重试无参 update', message)
+        self.assertNotIn('本次未执行版本切换', message)
 
     def test_switch_then_record_interruption_reuses_same_mode_and_previous_ref(self):
         with mock.patch.object(product_state, 'save', side_effect=OSError('record interrupted')):

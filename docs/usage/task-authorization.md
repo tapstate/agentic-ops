@@ -53,7 +53,9 @@ python3 <agenticops-root>/workflow/task.py repository amend \
 
 ## 从 Jira 任务接续
 
-用户要求继续某个 Jira 任务时，使用共享 [ao-task-resume](../../skills/shared/ao-task-resume/SKILL.md)。入口只需要 Jira key；旧 run、会话或档案用于查缺，不作为必填恢复参数。先核验工位绑定及 current/op：兼容且原 run 可用时沿原操作恢复；旧现场不兼容时先由原版本退出，不用目标版本读取旧状态；空闲工位则依据外部成果建立新 run。用户已选择升级后继续的，不重复询问是否放弃业务任务。
+本节说明业务任务接续；AgenticOps 源码维护任务使用[维护接续指引](../maintenance-guide.md#从-jira-接续维护任务)，不进入业务工位接管流程。
+
+用户要求继续某个 Jira 业务任务时，使用共享 [ao-task-resume](../../skills/shared/ao-task-resume/SKILL.md)。入口只需要 Jira key；旧 run、会话或档案用于查缺，不作为必填恢复参数。先核验工位绑定及 current/op：兼容且原 run 可用时沿原操作恢复；旧现场不兼容时先由原版本退出，不用目标版本读取旧状态；空闲工位则依据外部成果建立新 run。用户已选择升级后继续的，不重复询问是否放弃业务任务。
 
 ### 持续记录与升级前核对
 

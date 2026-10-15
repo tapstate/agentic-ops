@@ -159,6 +159,8 @@ AI 只在脚本有残留或异常时接手未完成事项。复用原操作、�
 
 ## 10. 升级与恢复
 
+`station_state_epoch` 是状态兼容性的唯一代际判据：同 epoch 保证状态兼容，可在满足独立安装切换条件后安全升级；不兼容变更必须提升 epoch，编号不得回退或复用。普通更新、定点更新和维护恢复只比较原版本与目标版本的 epoch，不要求原提交位于目标第一父链，也不检查中间提交的 epoch。Git 祖先关系、可信来源、工作树与停写要求仍独立核验。
+
 升级只编排原版本任务退出及工位注销、产品切换和新工位生成；不实现另一套任务清理。具体操作见[更新与回退](../usage/update-and-rollback.md)。
 
 ### 同 epoch 恢复与跨 epoch 切换目标设计
@@ -175,7 +177,7 @@ AI 只在脚本有残留或异常时接手未完成事项。复用原操作、�
 
 `agenticops update --to-ref <完整SHA> --expected-current-ref <完整SHA>` 只用于已安装产品：目标必须在记录的 origin/tracking_branch 可核验历史上，原提交为目标祖先且目标为远端通道 tip 的祖先；仅 fast-forward，不换通道、不覆盖修改。省略参数保持现役更新语义，源码模式不增加定点更新。跨 epoch 仍要求可读取的空登记；目标与原版本 epoch 相同才可保留旧工位继续退出。历史不足或无法证明引用关系时停止，不用当前分支名或相同 epoch 替代 Git 核验。
 
-如果缺陷在现役分支提升 epoch 后才发现，同 epoch 补丁可能只能在原版本维护分支产生。`agenticops recover-install --source-branch <明确维护分支> --to-ref <补丁完整SHA> --expected-current-ref <原安装完整SHA>` 作为明确的原版本维护操作，复用同一 Bootstrap 更新实现，不是普通 update 的强制选项。仅接受 installed 模式、记录的同一 origin、原提交向前可达的目标及目标所属的明确维护分支；原提交须在恢复路径上，沿该路径的主线兼容清单均保持原 epoch，缺清单或出现不同 epoch 均拒绝。合并支线的语义兼容性仍须由候选审查和回归证明，不能只查端点 epoch。目标分支及候选未经核验、权限或授权不足时不应用。
+如果缺陷在现役分支提升 epoch 后才发现，同 epoch 补丁可能只能在原版本维护分支产生。`agenticops recover-install --source-branch <明确维护分支> --to-ref <补丁完整SHA> --expected-current-ref <原安装完整SHA>` 作为明确的原版本维护操作，复用同一 Bootstrap 更新实现，不是普通 update 的强制选项。仅接受 installed 模式、记录的同一 origin、原提交向前可达的目标及目标所属的明确维护分支；状态兼容性遵循本节 epoch 合同，原版本与补丁必须同 epoch，两端清单缺失或无效均拒绝；正常合并的第二父链不构成拒绝理由。具体退出缺陷是否修复仍由候选审查和回归证明。目标分支及候选未经核验、权限或授权不足时不应用。
 
 恢复执行必须满足产品树干净、HEAD 与产品记录匹配、完整引用及安装配置可信；保留 tracking_branch、stations.json、正式档案和全部工位数据，只按正常生命周期更新 current_ref、previous_ref 和可再生版本提示。不覆盖其它维护修改；脏安装保留并先独立处理，不自动 stash、reset 或吸收无关修改。恢复模式不自动修复注册表、抬改工位 epoch、清理业务内容或提交推送。
 
