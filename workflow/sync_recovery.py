@@ -46,8 +46,11 @@ def require_receipt(base, task):
     if operation.get("run_id") != task["run_id"] and operation.get("status") == "done":
         operation = {}
     target = archive_store.run_directory(base, task["run_id"])
-    frozen = (current.get("archive_ref") or target.exists() or target.is_symlink()
-              or any(key in operation for key in ("archive_record", "archive_evidence", "archive_artifacts", "archive_logs"))
+    # 接管即以空目录占用编号；只有实际内容或冻结快照才表示证据已冻结。
+    archive_content = target.is_symlink() or (target.exists() and (
+        not target.is_dir() or any(target.iterdir())))
+    frozen = (current.get("archive_ref") or archive_content
+              or any(key in operation for key in ("archive_payload", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs"))
               or any(key.startswith("archive-publish:") for key in operation.get("steps", {})))
     if frozen:
         raise ValueError("归档证据已冻结；禁止补写活动回执，请交维护侧核对原操作与档案")

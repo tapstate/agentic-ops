@@ -2747,7 +2747,7 @@ class SyncRecoveryTests(unittest.TestCase):
         record = self.publication()
         self.terminal()
         original = quality.state_path(self.base, self.task).read_bytes()
-        for extra in ({"archive_record": {}}, {"archive_evidence": "{}"},
+        for extra in ({"archive_payload": {}}, {"archive_record": {}}, {"archive_evidence": "{}"},
                       {"steps": {"archive-publish:0": {"before": {}, "expected": {}, "receipt": None}}},
                       {"request": {"confirmed_digest": "a" * 64}}, {"cleanup_plan": {}},
                       {"plan_revisions": []}, {"handoff": {}}):
@@ -2756,6 +2756,40 @@ class SyncRecoveryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.readback(record)
                 self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_empty_takeover_reservation_allows_original_comment_readback(self):
+        from workflow import archive_store
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        record = self.publication()
+        before = task_store.current_path(self.base).read_bytes()
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+        self.assertEqual(before, task_store.current_path(self.base).read_bytes())
+        self.assertEqual([], list(target.iterdir()))
+
+    def test_archive_content_or_unsafe_target_still_rejects_comment_readback(self):
+        from workflow import archive_store
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        record = self.publication()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        for name in ('record.json', 'result-fixture.json', 'unknown'):
+            with self.subTest(name=name):
+                item = target / name
+                item.write_text('{}')
+                with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+                    self.readback(record)
+                self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+                item.unlink()
+        target.rmdir()
+        destination = self.base / 'external-archive'
+        destination.mkdir()
+        target.symlink_to(destination, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        target.unlink()
+        target.write_text('invalid archive target')
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
 
     def test_early_unconfirmed_archive_allows_original_readback(self):
         from workflow import station_operation

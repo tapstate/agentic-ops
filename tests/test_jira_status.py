@@ -165,6 +165,8 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
 
     def test_takeover_prepares_once_and_readback_completes(self):
+        from workflow import archive_store
+        reservation = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
         current = task_store.current_path(self.base)
         before = current.read_bytes()
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
@@ -176,6 +178,7 @@ class JiraStatusTests(unittest.TestCase):
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
         self.assertEqual(done["outcome"], "succeeded")
         self.assertEqual(current.read_bytes(), before)
+        self.assertEqual([], list(reservation.iterdir()))
 
     def test_jira_done_does_not_complete_local_task(self):
         current = task_store.current_path(self.base)
