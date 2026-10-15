@@ -27,7 +27,8 @@ metadata:
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
 5. 修改仓通过 repository add --repo <repo> --work-branch <branch> --base-branch <PR目标> --scope <范围> --verification <方式> --operation-id <新op-id> --expected-revision <revision> --expected-run-id <run> --issue-key <issue> --dir <station> 登记并准备工作分支；只允许冻结基线内仓库。范围变化使旧授权失效。
 6. 续办原 run 不重写已有基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。追加当前 Profile 允许的可选仓库时，使用[同周期方案返工](../../../../docs/usage/task-authorization.md#同周期方案返工)，保留成果并重新确认受影响方案和授权；更换工程版本或超出支持范围时须归档清理后重接，不能偷改冻结清单。
-7. snapshot 固化 Jira 初始事实，jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
+7. 接管成功并核验基线后，在本轮主动处理 `takeover_comment`，不等待 Q1、实施方案确认或研发提醒。先用 snapshot 固化 Jira 初始事实，再从 `external_sync.py status` 取得当前 run 的评论待办与正文，按[接管摘要发布与回读](../../../../docs/usage/quality-checkpoints.md#接管摘要发布与回读)复用稳定 id 和现有评论链发布基本信息并回读确认；已有接管及对应 Jira 回写授权直接复用，不重复索取。已回读完成不重复发送，已有 intent/unknown/created 先核对原评论。评论、回执或回读异常只暂停对应同步，说明原因并保留待办，继续无依赖研发；不能重跑已成功 takeover 或用 Q1 评论替代接管摘要。
+8. jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
 
 ## 清理、归档和释放
 
