@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 import uuid
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
@@ -59,9 +60,11 @@ def call(argv, input_text=None, timeout=120):
     return result.stdout
 
 
-def validate(config):
+def validate(config, runtime_only=False):
     required = {"schema_version", "nodes", "image", "platform", "mongo_uri_file", "mongo_driver", "build", "assets", "node_binary", "ports", "java", "heartbeat"}
-    if not isinstance(config, dict) or set(config) != required or type(config["schema_version"]) is not int or config["schema_version"] != 1:
+    if runtime_only:
+        required = RUNTIME_FIELDS
+    if not isinstance(config, dict) or set(config) != required or type(config["schema_version"]) is not int or config["schema_version"] != (2 if runtime_only else 1):
         raise EnvironmentError("配置字段或 schema_version 无效")
     if not isinstance(config["nodes"], dict) or not 1 <= len(config["nodes"]) <= 3:
         raise EnvironmentError("nodes 必须提供 1～3 个节点及组件列表")
@@ -74,22 +77,23 @@ def validate(config):
         raise EnvironmentError("image 无效")
     if config["platform"] not in ("linux/amd64", "linux/arm64"):
         raise EnvironmentError("platform 必须为 linux/amd64 或 linux/arm64")
-    for field in ("mongo_uri_file", "mongo_driver", "node_binary"):
+    for field in (("mongo_uri_file",) if runtime_only else ("mongo_uri_file", "mongo_driver", "node_binary")):
         if not isinstance(config[field], str) or not config[field]:
             raise EnvironmentError(field + " 必须为文件路径")
-    if not re.fullmatch(r"[A-Za-z0-9_./-]+", config["node_binary"]) or Path(config["node_binary"]).is_absolute() or ".." in Path(config["node_binary"]).parts:
+    if not runtime_only and (not re.fullmatch(r"[A-Za-z0-9_./-]+", config["node_binary"]) or Path(config["node_binary"]).is_absolute() or ".." in Path(config["node_binary"]).parts):
         raise EnvironmentError("node_binary 必须为安全的包内相对路径")
     if not isinstance(config["java"], dict) or set(config["java"]) != {"tm", "engine"} or not all(isinstance(v, str) and v for v in config["java"].values()):
         raise EnvironmentError("java 必须提供 tm 与 engine 参数")
-    hb = config["heartbeat"]
-    if not isinstance(hb, dict) or set(hb) != {"collection", "uuid_field", "time_field", "max_age_seconds", "startup_timeout_seconds"}:
-        raise EnvironmentError("heartbeat 字段无效")
-    for key in ("collection", "uuid_field", "time_field"):
-        if not isinstance(hb[key], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]*", hb[key]):
-            raise EnvironmentError("监控字段名无效")
-    for key in ("max_age_seconds", "startup_timeout_seconds"):
-        if type(hb[key]) is not int or not 20 <= hb[key] <= 900:
-            raise EnvironmentError("监控超时必须为 20～900 秒")
+    if not runtime_only:
+        hb = config["heartbeat"]
+        if not isinstance(hb, dict) or set(hb) != {"collection", "uuid_field", "time_field", "max_age_seconds", "startup_timeout_seconds"}:
+            raise EnvironmentError("heartbeat 字段无效")
+        for key in ("collection", "uuid_field", "time_field"):
+            if not isinstance(hb[key], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]*", hb[key]):
+                raise EnvironmentError("监控字段名无效")
+        for key in ("max_age_seconds", "startup_timeout_seconds"):
+            if type(hb[key]) is not int or not 20 <= hb[key] <= 900:
+                raise EnvironmentError("监控超时必须为 20～900 秒")
     if not isinstance(config["ports"], dict) or set(config["ports"]) != set(config["nodes"]):
         raise EnvironmentError("ports 必须逐节点配置")
     used = []
@@ -108,6 +112,8 @@ def validate(config):
             used.append(port)
         if not isinstance(item["license"], str):
             raise EnvironmentError("license 必须为路径或空字符串")
+    if runtime_only:
+        return config
     if not isinstance(config["build"], list) or not isinstance(config["assets"], list):
         raise EnvironmentError("build/assets 必须为数组")
     for step in config["build"]:
@@ -183,6 +189,94 @@ class Environment:
                 raise EnvironmentError("缺少项目准备文件，请由 Agent 按项目开发指引补齐")
             config = combine_config(config, read_json(preparation_path))
         return name, validate(config)
+
+    def input_path(self, path):
+        """输入准备只接受工位 config 内的普通路径，不跟随链接。"""
+        path = Path(path)
+        root = self.station / "config"
+        if not path.is_absolute():
+            path = root / path
+        if path.resolve() != path or root not in path.parents:
+            raise EnvironmentError("输入文件必须位于工位 config 内且不得经过符号链接")
+        return path
+
+    def input_secrets(self, config):
+        licenses = {port["license"] for port in config["ports"].values() if port["license"]}
+        if len(licenses) > 1 or any(Path(value).name != "license.txt" for value in licenses):
+            raise EnvironmentError("新配置所有节点必须复用同一份 license.txt")
+        if licenses and any(not port["license"] for port in config["ports"].values()):
+            raise EnvironmentError("需要许可证时所有节点必须引用同一份 license.txt")
+        for value in [config["mongo_uri_file"], *licenses]:
+            if not re.fullmatch(r"[A-Za-z0-9_./-]+", value) or Path(value).is_absolute() or ".." in Path(value).parts:
+                raise EnvironmentError("秘密引用必须为安全的相对文件路径，不得填写秘密内容")
+        paths = [self.input_path(self.station / "config/secrets" / config["mongo_uri_file"])]
+        for port in config["ports"].values():
+            if port["license"]:
+                path = self.input_path(self.station / "config" / port["license"])
+                if self.station / "config/secrets" not in path.parents:
+                    raise EnvironmentError("许可证必须位于 config/secrets 内")
+                paths.append(path)
+        if self.station / "config/secrets" not in paths[0].parents:
+            raise EnvironmentError("Mongo URI 必须位于 config/secrets 内")
+        return list(dict.fromkeys(paths))
+
+    def prepare_inputs(self, name):
+        if not name or not NAME.fullmatch(name):
+            raise EnvironmentError("prepare-inputs 需要有效的 --env 名称")
+        if (self.config_dir / (name + ".json")).exists():
+            raise EnvironmentError("配置已存在，请复用已有配置；不初始化覆盖")
+        draft = self.input_path(self.config_dir / "drafts" / (name + ".json"))
+        if draft.exists():
+            config = read_json(draft)
+        else:
+            config = read_json(HERE.parent / "templates/station/test-env.json")
+            config["mongo_uri_file"] = "tapdata-test-env/" + name + "/mongodb-uri"
+            config["ports"]["node1"]["license"] = "secrets/tapdata-test-env/" + name + "/license.txt"
+        # 架构尚待用户选择；只为验证其余结构临时填值，不保存或推定目标架构。
+        candidate = dict(config)
+        if candidate.get("platform") == "":
+            candidate["platform"] = "linux/amd64"
+        validate(candidate, runtime_only=True)
+        paths = self.input_secrets(config)
+        for path in paths:
+            if path.exists() and (not path.is_file() or path.stat().st_mode & 0o077):
+                raise EnvironmentError("已有秘密文件必须为仅当前用户可读的普通文件；请先修正权限")
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                try:
+                    os.fchmod(fd, 0o600)
+                finally:
+                    os.close(fd)
+        if not draft.exists():
+            write_json(draft, config)
+        return {"environment": name, "config_file": str(draft), "applied": False,
+                "inputs": [
+                    {"field": "platform", "label": "目标架构", "value": config["platform"], "choices": ["linux/amd64", "linux/arm64"]},
+                    {"field": "product_mode", "label": "产品模式（复用会话已确认值）"},
+                    {"field": "nodes", "label": "节点组件", "value": config["nodes"]},
+                    {"field": "ports", "label": "端口与许可证引用", "value": config["ports"]},
+                    {"field": "java", "label": "Java 资源参数", "value": config["java"]}],
+                "missing": (["platform"] if not config["platform"] else []) +
+                           [str(path) for path in paths if not path.read_bytes().strip()],
+                "secret_files": [str(path) for path in paths]}
+
+    def check_inputs(self, path):
+        config = read_json(self.input_path(path))
+        validate(config, runtime_only=True)
+        for secret in self.input_secrets(config):
+            if not secret.is_file() or secret.stat().st_mode & 0o077 or not secret.read_bytes().strip():
+                raise EnvironmentError("秘密文件必须存在、非空且仅当前用户可读；请填写文件并检查权限")
+        _, uri = self.secret(config)
+        parsed = urlsplit(uri)
+        if not parsed.hostname or not parsed.path.strip("/") or any(c.isspace() for c in uri) or parsed.fragment:
+            raise EnvironmentError("Mongo URI 必须提供有效主机和目标数据库，不得含空白或片段")
+        return {"configuration_valid": True, "connectivity_verified": False,
+                "license_validity_verified": False, "applied": False}
 
     def configure(self, name, path, preparation_path=None):
         if not name or not NAME.fullmatch(name):
@@ -582,10 +676,10 @@ class Environment:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
+    parser.add_argument("operation", choices=["prepare-inputs", "check-inputs", "configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
     parser.add_argument("--station", required=True)
     parser.add_argument("--env")
-    parser.add_argument("--config", help="configure 使用的完整 JSON 文件")
+    parser.add_argument("--config", help="configure 或 check-inputs 使用的 JSON 文件")
     parser.add_argument("--preparation", help="configure 使用的 Agent 项目准备文件；用户不填写")
     parser.add_argument("--reuse-mongo", action="store_true", help="用户明确选择保留目标库已有集合；只适用于 deploy")
     parser.add_argument("--bundle", help="inspect-mongo 使用的受管 Linux 装配目录；缺省使用当前制品")
@@ -594,8 +688,8 @@ def main(argv=None):
     try:
         if args.switch and args.operation != "deploy":
             raise EnvironmentError("--switch 只适用于 deploy")
-        if args.config and args.operation != "configure":
-            raise EnvironmentError("--config 只适用于 configure")
+        if args.config and args.operation not in ("configure", "check-inputs"):
+            raise EnvironmentError("--config 只适用于 configure/check-inputs")
         if args.preparation and args.operation != "configure":
             raise EnvironmentError("--preparation 只适用于 configure")
         if args.reuse_mongo and args.operation != "deploy":
@@ -604,7 +698,13 @@ def main(argv=None):
             raise EnvironmentError("--bundle 只适用于 inspect-mongo")
         env = Environment(args.station)
         with env.lock():
-            if args.operation == "configure":
+            if args.operation == "prepare-inputs":
+                result = env.prepare_inputs(args.env)
+            elif args.operation == "check-inputs":
+                if not args.config:
+                    raise EnvironmentError("check-inputs 需要 --config 文件")
+                result = env.check_inputs(args.config)
+            elif args.operation == "configure":
                 if not args.env or not NAME.fullmatch(args.env) or not args.config:
                     raise EnvironmentError("configure 需要 --env 名称与 --config 文件")
                 result = env.configure(args.env, args.config, args.preparation)

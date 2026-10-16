@@ -9,15 +9,14 @@ metadata:
 
 先读取工位绑定和[开发环境指引](../../runbooks/test-environment.md)。当前工位 config 保存多份配置，runtime 只保留一个活动现场；各配置共享当前工位源码，不把配置名称解释为分支或独立源码。使用工位绑定的 Product Root 中的项目脚本，不复制中央脚本到工位，不修改 `.agenticops/` 状态。
 
-## 首次部署：配置名 → 架构 → 模板 → 补齐 → 自动部署
+## 新配置：集中输入 → 填写后检查 → 自动部署
 
-先回读 `list` 和工位已有配置，区分首次部署、新增命名配置与更新活动环境。已有事实和有效授权直接复用；用户只需要说明运行架构与配置，不要求填写编译命令、制品路径或项目准备文件。
+先回读 `list` 和工位已有配置，区分首次部署、新增命名配置与更新活动环境。已有事实和有效授权直接复用；用户只需要说明运行架构与配置，不要求填写编译命令、制品路径或项目准备文件。输入和秘密文件合同以[开发环境指引](../../runbooks/test-environment.md#首次部署输入与配置命名)为准。
 
-1. 取得环境配置名。未命名时建议 `local`；其它用途使用稳定的小写 kebab-case 名称。不要把架构、节点数量、随机 ID 或工位名自动拼进配置名。同一用途跨工位沿用相同名称；用户已有明确名称继续保留。
-2. 确认目标架构 `linux/amd64` 或 `linux/arm64`，不从宿主机架构推定。复用已确认值；首次未知时说明两项选择，不重复询问。
-3. 输出[运行配置模板](../../templates/station/test-env.json)，按[命名与输入合同](../../runbooks/test-environment.md#首次部署输入与配置命名)填入配置名、架构及已知默认值。展示可编辑的运行配置和文件位置，不展示构建、Maven、Jar 或内部 preparation 内容。用户可直接用自然语言补充，由 Agent 写入模板。
-4. 集中引导补齐缺项：节点组件、外部 Mongo 连接文件、产品模式、许可证文件及特殊端口/资源要求。默认先提出单节点 TM+FE；用户选 APIServer 才加入。所有节点至少一个 TM，Mongo 必须从容器可达。企业版本地 DAAS 在构建前取得许可证路径；只报告文件是否可用，不回显内容。产品模式作为本轮部署意图记录，不让用户修改 Maven Profile。已有数据库模式冲突时说明影响并等待具体决定，不能自动改库。
-5. 运行配置补齐后，Agent 按[项目开发指引](../../runbooks/tapdata-development.md#docker-开发环境的构建准备)完成工具、依赖、源码构建和完整装配，生成内部 preparation，再 `configure` 和 `deploy`。这部分属于已授权部署的准备工作；普通构建异常自行排查，只有真实缺少凭证、权限或人工决定才询问缺项，不把内部字段交给用户填写。
+1. 将配置名（建议 local）、目标架构、产品模式、节点组件及特殊端口/资源要求集中呈现为输入项，填入已知值和默认值，只索取缺项或更正。架构必须来自明确选择，不从宿主机推定；默认提出单节点 TM+FE，APIServer 仅显式选择时加入。不能把互不依赖的字段拆成多轮询问。
+2. 配置名已知即运行 `prepare-inputs --env <name>`，在向用户展示路径前创建草稿和秘密文件；名称已有明确值时，可将普通输入项与已创建文件的绝对路径在同轮给出。用户本地填写 Mongo URI 和一份共享 license.txt，所有节点复用该许可证。普通输入可自然语言回复，由 Agent 更新草稿；不让用户在聊天中提交秘密。产品模式无需许可证时，统一清空各节点 license 引用。重复调用保留已填文件；已有正式配置直接复用。
+3. 用户填写完成后运行 `check-inputs --config <草稿绝对路径>` 检查规范；失败时只补充或纠正具体问题，保留已有答案和秘密文件，然后重验。静态检查通过不代表连接、认证或许可证有效。只有真实依赖才追加交互，例如名称未定无法创建最终路径、产品模式决定许可要求，或后续预检发现数据库已有集合。
+4. 规范检查通过后，Agent 按[项目开发指引](../../runbooks/tapdata-development.md#docker-开发环境的构建准备)完成工具、依赖、源码构建和完整装配，生成内部 preparation，再 `configure` 和 `deploy`。普通准备属于已授权部署范围；只有真实缺少凭证、权限或人工决定才询问缺项，不把内部字段交给用户填写。
 
 部署前按 Runbook 只读检查 Mongo 目标库已有集合。发现旧表时展示库名/集合数及保留影响，询问用户保留还是清理；只有用户明确保留才使用 --reuse-mongo。用户选择清理时先提供绑定具体目标库的命令供其审核、复制执行；不能主动运行清理。只有用户明确输入对应命令并要求 Agent 代执行时才按该精确范围执行，回读后再部署。命令不能包含明文 URI/凭据，不删除整个 Mongo 实例或其它数据库。
 
@@ -27,6 +26,8 @@ Mongo URI 和许可证保存在命名环境的受控秘密文件中；生命周�
 
 ```sh
 python3 <product-root>/projects/tapdata/scripts/test_environment.py list --station <station>
+python3 <product-root>/projects/tapdata/scripts/test_environment.py prepare-inputs --station <station> --env <name>
+python3 <product-root>/projects/tapdata/scripts/test_environment.py check-inputs --station <station> --config <草稿绝对路径>
 python3 <product-root>/projects/tapdata/scripts/test_environment.py configure --station <station> --env <name> --config <运行配置文件> --preparation <Agent准备文件>
 python3 <product-root>/projects/tapdata/scripts/test_environment.py inspect-mongo --station <station> --env <name>
 python3 <product-root>/projects/tapdata/scripts/test_environment.py deploy --station <station> --env <name>
