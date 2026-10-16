@@ -99,15 +99,13 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
             try:
                 archive_store.reserve(base, issue_key, run_id)
                 break
-            except OSError as error:
+            except FileExistsError as error:
                 if attempt == 0:
                     time.sleep(2)
                     continue
-                if isinstance(error, FileExistsError):
-                    raise ValueError(
-                        "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
-                    ) from error
-                raise OSError("编号占位目录创建失败；等待 2 秒自动重试一次仍失败：%s" % error) from error
+                raise ValueError(
+                    "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
+                ) from error
     elif kind != "work-clean" and (current["current"] is None or current["current"]["run_id"] != run_id):
         raise ValueError("工位 run 已变化")
     value = {

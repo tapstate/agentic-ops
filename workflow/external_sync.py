@@ -140,6 +140,31 @@ def warnings(base, task, report=None):
     return result
 
 
+def takeover_body(task, publication_id):
+    """只从已保存的接管事实生成摘要，不推断方案、修改仓或验收结果。"""
+    fields = task.get("facts", {}).get("jira_snapshot", {}).get("issue", {}).get("fields", {})
+    lines = ["%s：已接管" % task["issue_key"]]
+    if fields.get("summary"):
+        lines.append("任务：%s" % fields["summary"])
+    assignee = fields.get("assignee") or {}
+    if assignee.get("displayName"):
+        lines.append("接管时 Jira 负责人：%s" % assignee["displayName"])
+    lines.extend(["运行：%s" % task["run_id"], "任务类型：%s" % task["task_class"]])
+    baseline = task.get("engineering_baseline", {})
+    if baseline.get("profile", {}).get("id"):
+        lines.append("工程 Profile：%s" % baseline["profile"]["id"])
+    version = baseline.get("resolution_input", {}).get("version")
+    if version:
+        lines.append("接管版本／主仓分支：%s" % version)
+    repositories = baseline.get("repositories", {})
+    lines.append("源码准备：已完成")
+    if repositories:
+        lines.append("冻结仓库数：%s" % len(repositories))
+    lines.extend(["接管仅证明本地准备完成，不代表 Q1、实施方案或验收已通过。",
+                  "记录：%s" % publication_id])
+    return "\n\n".join(lines)
+
+
 def actions(base, task, report=None):
     """从既有事实派生工作清单；查询不写草稿、意图或第二份队列。"""
     from workflow import sync_recovery
@@ -191,10 +216,8 @@ def actions(base, task, report=None):
     if enabled and rules.get("publication_mode") == "checkpoint":
         intake_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
         if intake_id not in publications:
-            body = "%s：已接管\n\n运行：%s；任务类型：%s。接管仅证明本地准备完成，不代表 Q1 或实施方案已确认。\n\n记录：%s" % (
-                task["issue_key"], task["run_id"], task["task_class"], intake_id)
             if task.get("source_prepared"):
-                add(intake_id, "takeover_comment", "not_attempted", body=body)
+                add(intake_id, "takeover_comment", "not_attempted", body=takeover_body(task, intake_id))
         for cp, view in report.get("checkpoints", {}).items():
             if view["reviewed"] and not view["published"] and cp not in covered:
                 key = cp + "-" + quality.digest([task["run_id"], view["publication_body"]])[:20]

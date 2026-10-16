@@ -1,4 +1,5 @@
 """执行编号、工位 git_name 与自动工作分支的回归。"""
+import errno
 import json
 from pathlib import Path
 import sys
@@ -107,13 +108,33 @@ class TaskIdentityTests(unittest.TestCase):
         with mock.patch.object(task_store, 'new_run_id', side_effect=AssertionError('不能重新分配')):
             self.assertEqual(op, station_operation.begin(self.station, 'takeover', 'op-retry-identity', 0, {'issue_key': 'TAP-123'}))
 
-    def test_unwritable_directory_retries_once_then_preserves_failure(self):
+    def test_non_collision_errors_fail_immediately_and_preserve_original_error(self):
         self.binding()
-        with mock.patch.object(archive_store, 'reserve', side_effect=PermissionError('unwritable')) as reserve, mock.patch.object(station_operation.time, 'sleep') as sleep:
-            with self.assertRaisesRegex(OSError, '自动重试一次仍失败.*unwritable'):
-                station_operation.begin(self.station, 'takeover', 'op-unwritable-identity', 0, {'issue_key': 'TAP-123'})
-        sleep.assert_called_once_with(2)
-        self.assertEqual(2, reserve.call_count)
+        for error in (PermissionError(errno.EPERM, 'not permitted', '/product/.archive'),
+                      PermissionError(errno.EACCES, 'denied', '/product/.archive'),
+                      OSError(errno.ENOSPC, 'no space', '/product/.archive')):
+            with self.subTest(errno=error.errno), \
+                    mock.patch.object(archive_store, 'reserve', side_effect=error) as reserve, \
+                    mock.patch.object(station_operation.time, 'sleep') as sleep:
+                with self.assertRaises(OSError) as caught:
+                    station_operation.begin(self.station, 'takeover', 'op-unwritable-identity', 0, {'issue_key': 'TAP-123'})
+                self.assertIs(error, caught.exception)
+                reserve.assert_called_once()
+                sleep.assert_not_called()
+                self.assertIsNone(station_operation.read(self.station))
+                self.assertIsNone(task_store.read_current(self.station)['current'])
+
+    def test_permission_error_after_collision_stops_without_another_retry(self):
+        self.binding()
+        error = PermissionError(errno.EPERM, 'not permitted', '/product/.archive')
+        with mock.patch.object(archive_store, 'reserve', side_effect=[FileExistsError('occupied'), error]) as reserve, \
+                mock.patch.object(task_store, 'timestamp_hex', side_effect=['69d8a1f0', '69d8a1f2']), \
+                mock.patch.object(station_operation.time, 'sleep') as sleep:
+            with self.assertRaises(PermissionError) as caught:
+                station_operation.begin(self.station, 'takeover', 'op-retry-denied', 0, {'issue_key': 'TAP-123'})
+            self.assertIs(error, caught.exception)
+            self.assertEqual(2, reserve.call_count)
+            sleep.assert_called_once_with(2)
         self.assertIsNone(station_operation.read(self.station))
 
     def test_saved_intent_with_lost_receipt_keeps_directory_for_recovery(self):

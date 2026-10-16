@@ -2747,7 +2747,7 @@ class SyncRecoveryTests(unittest.TestCase):
         record = self.publication()
         self.terminal()
         original = quality.state_path(self.base, self.task).read_bytes()
-        for extra in ({"archive_record": {}}, {"archive_evidence": "{}"},
+        for extra in ({"archive_payload": {}}, {"archive_record": {}}, {"archive_evidence": "{}"},
                       {"steps": {"archive-publish:0": {"before": {}, "expected": {}, "receipt": None}}},
                       {"request": {"confirmed_digest": "a" * 64}}, {"cleanup_plan": {}},
                       {"plan_revisions": []}, {"handoff": {}}):
@@ -2756,6 +2756,40 @@ class SyncRecoveryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.readback(record)
                 self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_empty_takeover_reservation_allows_original_comment_readback(self):
+        from workflow import archive_store
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        record = self.publication()
+        before = task_store.current_path(self.base).read_bytes()
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+        self.assertEqual(before, task_store.current_path(self.base).read_bytes())
+        self.assertEqual([], list(target.iterdir()))
+
+    def test_archive_content_or_unsafe_target_still_rejects_comment_readback(self):
+        from workflow import archive_store
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        record = self.publication()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        for name in ('record.json', 'result-fixture.json', 'unknown'):
+            with self.subTest(name=name):
+                item = target / name
+                item.write_text('{}')
+                with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+                    self.readback(record)
+                self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+                item.unlink()
+        target.rmdir()
+        destination = self.base / 'external-archive'
+        destination.mkdir()
+        target.symlink_to(destination, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        target.unlink()
+        target.write_text('invalid archive target')
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
 
     def test_early_unconfirmed_archive_allows_original_readback(self):
         from workflow import station_operation
@@ -2779,6 +2813,46 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(action["record"]["operation_id"], record["operation_id"])
         self.assertEqual(action["record"]["body"], record["body"])
         self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_takeover_summary_is_read_only_and_completes_existing_publication_flow(self):
+        from workflow import external_sync
+        self.task['source_prepared'] = True
+        self.task['facts']['jira_snapshot'] = {'issue': {'fields': {
+            'summary': '任务级资源监控', 'assignee': {'displayName': '测试研发'}}}}
+        self.save_task()
+        report = self.view()
+        actions = external_sync.actions(self.base, self.task, report)['sync_actions']
+        row = next(item for item in actions if item['kind'] == 'takeover_comment')
+        self.assertEqual('not_attempted', row['status'])
+        for text in ('任务级资源监控', '测试研发', 'test-fixture',
+                     self.task['run_id'], '源码准备：已完成', '不代表 Q1'):
+            self.assertIn(text, row['body'])
+        self.assertNotIn(str(self.base), row['body'])
+        prepared = copy.deepcopy(self.task)
+        prepared['engineering_baseline']['profile']['id'] = 'full-application'
+        prepared['engineering_baseline']['resolution_input']['version'] = 'develop'
+        summary = external_sync.takeover_body(prepared, row['id'])
+        self.assertIn('工程 Profile：full-application', summary)
+        self.assertIn('接管版本／主仓分支：develop', summary)
+        self.assertEqual(report, self.view())
+        self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])
+        record = self.apply('draft', {'id': row['id'], 'body': row['body']})['publications'][row['id']]
+        self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest']})['publications'][row['id']]
+        self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
+        pending = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
+        self.assertEqual('readback', pending['next_action'])
+        self.assertEqual(row['body'], pending['record']['body'])
+        self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
+            'issue_key': self.task['issue_key'], 'comment_id': 'takeover-comment', 'body': row['body'],
+            'source_ref': 'fixture:jira/takeover-comment'})
+        self.assertFalse(any(item['id'] == row['id'] for item in external_sync.actions(self.base, self.task)['sync_actions']))
+
+    def test_takeover_summary_is_not_emitted_before_source_prepared(self):
+        from workflow import external_sync
+        self.task['source_prepared'] = False
+        self.assertFalse(any(item['kind'] == 'takeover_comment'
+            for item in external_sync.actions(self.base, self.task)['sync_actions']))
 
     def test_historical_checkpoints_return_complete_body_and_stable_id(self):
         from workflow import external_sync

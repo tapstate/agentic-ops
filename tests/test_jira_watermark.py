@@ -80,6 +80,8 @@ class JiraWatermarkTests(unittest.TestCase):
         return {"source_ref": "fixture:jira/TAP-123", "issue": {"key": "TAP-123", "fields": fields}}
 
     def test_prepare_then_verified_readback(self):
+        from workflow import archive_store
+        reservation = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
         record = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
         self.assertEqual(record["outcome"], "ready")
         self.assertEqual(record["field_id"], "customfield_10421")
@@ -90,6 +92,7 @@ class JiraWatermarkTests(unittest.TestCase):
         done = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot(version))
         self.assertEqual(done["outcome"], "verified")
         self.assertEqual(jira_watermark.takeover_warnings(self.base, self.task), [])
+        self.assertEqual([], list(reservation.iterdir()))
 
     def test_matching_readback_skips_external_write(self):
         version = product_version.describe(self.product)
