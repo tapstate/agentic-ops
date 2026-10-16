@@ -75,6 +75,119 @@ class FakeEnvironment(mod.Environment):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_prepare_inputs_and_user_validation_without_build(self):
+        result = self.env.prepare_inputs("review")
+        draft = Path(result["config_file"])
+        self.assertEqual(self.env.names(), ["dev"])
+        self.assertIn("platform", result["missing"])
+        self.assertEqual(len(result["secret_files"]), 2)
+        for file in result["secret_files"]:
+            self.assertEqual(Path(file).stat().st_mode & 0o777, 0o600)
+        config = mod.read_json(draft)
+        config["platform"] = "linux/arm64"
+        config["nodes"]["node2"] = ["FE"]
+        config["ports"]["node2"] = {"tm": None, "api": None, "license": config["ports"]["node1"]["license"]}
+        mod.write_json(draft, config)
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.check_inputs(draft)
+        for file in result["secret_files"]:
+            Path(file).write_text("license-content" if file.endswith("license.txt") else "mongodb://user:private@mongo:27017/dev")
+        repeated = self.env.prepare_inputs("review")
+        self.assertEqual(repeated["missing"], [])
+        self.assertNotIn("user:private@", json.dumps(repeated))
+        self.assertEqual(mod.read_json(draft), config)
+        self.assertEqual(Path(result["secret_files"][1]).read_text(), "license-content")
+        checked = self.env.check_inputs(draft)
+        self.assertTrue(checked["configuration_valid"])
+        self.assertFalse(checked["connectivity_verified"])
+        self.assertFalse(self.env.root.exists())
+        config["ports"]["node2"]["license"] = "secrets/another/license.txt"
+        mod.write_json(draft, config)
+        with self.assertRaisesRegex(mod.EnvironmentError, "同一份"):
+            self.env.check_inputs(draft)
+
+    def test_input_validation_rejects_bad_structure_and_secrets(self):
+        result = self.env.prepare_inputs("review")
+        draft = Path(result["config_file"])
+        config = mod.read_json(draft)
+        config["platform"] = "linux/arm64"
+        for file in result["secret_files"]:
+            Path(file).write_text("license" if file.endswith("license.txt") else "mongodb://mongo:27017/dev")
+        mod.write_json(draft, config)
+        for field, value in [("platform", "darwin/arm64"), ("nodes", {"node1": ["FE"]}), ("mongo_uri_file", "../outside")]:
+            bad = copy.deepcopy(config)
+            bad[field] = value
+            mod.write_json(draft, bad)
+            with self.assertRaises(mod.EnvironmentError):
+                self.env.check_inputs(draft)
+        mod.write_json(draft, config)
+        uri = Path(result["secret_files"][0])
+        for value in ["", "   ", "bad-uri", "mongodb://", "mongodb://mongo", "mongodb://mongo/dev#fragment", "mongodb://localhost:27017/dev"]:
+            uri.write_text(value)
+            with self.assertRaises(mod.EnvironmentError):
+                self.env.check_inputs(draft)
+        uri.write_text("mongodb://mongo:27017/dev")
+        uri.chmod(0o644)
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.check_inputs(draft)
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.prepare_inputs("review")
+        uri.chmod(0o600)
+        uri.unlink()
+        uri.symlink_to(self.station / "config/secrets/mongodb-uri")
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.check_inputs(draft)
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.prepare_inputs("review")
+
+    def test_single_license_is_mounted_by_all_nodes(self):
+        license_file = self.station / "config/secrets/tapdata-test-env/dev/license.txt"
+        license_file.parent.mkdir(parents=True)
+        license_file.write_text("shared-license")
+        license_file.chmod(0o600)
+        self.config["nodes"]["node2"] = ["FE"]
+        license_ref = "secrets/tapdata-test-env/dev/license.txt"
+        self.config["ports"]["node1"]["license"] = license_ref
+        self.config["ports"]["node2"] = {"tm": None, "api": None, "license": license_ref}
+        self.save("dev")
+        self.env.deploy("dev")
+        compose = mod.read_json(self.env.root / "compose.json")
+        for service in compose["services"].values():
+            self.assertIn(str(license_file) + ":/license/license.txt:ro", service["volumes"])
+
+    def test_input_cli_reports_invalid_then_corrected_configuration(self):
+        command = [sys.executable, str(SCRIPT), "prepare-inputs", "--station", str(self.station), "--env", "cli"]
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prepared = json.loads(result.stdout)
+        draft = Path(prepared["config_file"])
+        command[2] = "check-inputs"
+        command[-2:] = ["--config", str(draft)]
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("platform", result.stderr)
+        config = mod.read_json(draft)
+        config["platform"] = "linux/amd64"
+        config["ports"]["node1"]["license"] = ""
+        mod.write_json(draft, config)
+        Path(prepared["secret_files"][0]).write_text("mongodb://user:never-echo-this@mongo:27017/test")
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["configuration_valid"])
+        self.assertNotIn("never-echo-this", result.stdout + result.stderr)
+
+    def test_prepare_preserves_saved_environment_and_rejects_linked_draft(self):
+        before = (self.env.config_dir / "dev.json").read_bytes()
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.prepare_inputs("dev")
+        self.assertEqual((self.env.config_dir / "dev.json").read_bytes(), before)
+        outside = self.station.parent / "outside"
+        outside.mkdir()
+        (self.env.config_dir / "drafts").symlink_to(outside)
+        with self.assertRaises(mod.EnvironmentError):
+            self.env.prepare_inputs("review")
+        self.assertEqual(list(outside.iterdir()), [])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
