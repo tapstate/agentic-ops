@@ -550,7 +550,7 @@ def main():
         # ---- profile 完整性 --------------------------------------------
         profile = json.loads((ROOT / "projects" / "tapdata" / "profile.json").read_text(encoding="utf-8"))
         repositories = json.loads((ROOT / "projects" / "tapdata" / "repositories.json").read_text(encoding="utf-8"))
-        check("仓库目录基线分支含 common-lib=develop", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "develop")
+        check("仓库目录基线分支含 common-lib=main", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "main")
         check("Profile 不保留未消费的顶层状态映射", "statuses" in profile, False)
         check("Profile 不保留未消费的顶层转换", "transitions" in profile, False)
         check("TapData 接管同步从 Analyzed 开始", profile["jira"]["status_sync"]["attempts"]["takeover"]["from"], ["Analyzed"])

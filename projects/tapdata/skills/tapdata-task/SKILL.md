@@ -75,6 +75,8 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 
 ## 实现、PR、CI 和完成
 
+修改 `tapdata-common-lib` 下代码前，先按[公共库升级](../../runbooks/common-lib-upgrade.md)判断兼容性，并落实不兼容变更的 release 分支前置条件；CI 验证同时核对 Nexus 发布及消费依赖结果。
+
 - 创建或编辑 PR 正文时，按[PR 正文发布与回读](../../../../docs/usage/quality-checkpoints.md#pr-正文发布与回读)每仓准备真实多行 UTF-8 文件，调用 `workflow/pr_body.py preflight`；CLI 用 `--body-file`，不把正文拼入 Shell。原生写入后回读 `number,url,body` 并用 `compare` 核对目标与全文，再报告描述已核验。提示不自动替换合法转义；已存在 PR 保留人工修改，未知结果先回读原 PR，不重建。纯正文修正不触发来源分支合并或代码重验，正文问题不阻塞无依赖工作，不改变 PR Ready 门禁。
 
 - 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。

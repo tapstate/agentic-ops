@@ -37,6 +37,18 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
                 with self.assertRaisesRegex(align.AlignmentError, "未登记的目标仓库"):
                     align.resolve_scope(repositories, "tapdata/tapdata", [repository])
 
+    def test_develop_common_lib_uses_main_and_matches_catalog(self):
+        config, repositories = align.load_configuration(ROOT)
+        rules = config["derivation"]
+        for repository in rules["linked_repositories"]:
+            expected = "main" if repository in ("tapdata/tapdata-common-lib", "tapdata/tapdata-license") else "develop"
+            with self.subTest(repository=repository):
+                self.assertEqual(expected, align.derived_target(repository, "develop", rules, {}, None, {})[0])
+                self.assertEqual(expected, config["versions"]["current"]["branches"][repository])
+                self.assertEqual(expected, repositories[repository]["baseline_branch"])
+                self.assertEqual(expected, repositories[repository]["dev_branch"])
+                self.assertEqual("main", align.derived_target(repository, "main", rules, {}, None, {})[0])
+
     @staticmethod
     def git(path, *arguments):
         return subprocess.run(
