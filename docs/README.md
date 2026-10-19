@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+研发工位问题反馈属于“使用与维护”主题：[问题反馈流程](usage/problem-feedback.md)集中维护所有项目共用的 [ao-feedback](../skills/shared/ao-feedback/SKILL.md) 上报入口、问题总结、必要复现资料及提交 AO Jira 的使用合同，并说明维护者从 AO 问题列表统一处理后的反馈闭环；[扩展使用总纲](usage/README.md)负责场景导航，维护指引只引用列表受理边界。该能力复用原生 Jira 和现有现场材料，交付与验收记录在 Jira，不以文档存在证明旧安装或会话的技能已可用。
+
 维护提示词以根 `AGENTS.md` 保存常驻边界和按需导航，[维护指引](maintenance-guide.md)保存接续、提交与发布操作，[Skill 维护规范](skill-maintenance.md)保存技能编写和发现合同。共享任务接续先区分源码维护与业务工位，分别进入维护指引和任务授权指引；需求方案的评审上限与到限交接由共享需求技能维护，不在各入口复制。
 
 安装更新的材料准备与本地核验边界由[现役架构](architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)维护设计；[更新与回退](usage/update-and-rollback.md#部分克隆更新与材料准备)说明中文输出、预检副作用和获取失败后的恢复。该主题只负责产品安装生命周期，不扩展工位状态或通用核验的联网能力。

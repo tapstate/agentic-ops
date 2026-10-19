@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+[问题反馈流程](problem-feedback.md)负责所有项目研发工位共用的 [ao-feedback](../../skills/shared/ao-feedback/SKILL.md) 上报流程：研发在接管和执行任务中遇到问题，由 Agent 总结问题、整理必要复现资料并提交 AO；维护者通过 AO 项目问题列表统一受理和处理，技能不承担维护职责。排障仍由[常见问题](faq.md)导航，业务任务执行和退出沿用各自合同；反馈不切换工位任务、不新增本地队列。使用时核验绑定安装、接线和对应 Agent 实际能力，源码候选验证不代表旧安装已采用。
+
 [更新与回退](update-and-rollback.md#部分克隆更新与材料准备)负责部分克隆安装的材料准备、预检副作用和失败恢复；设计职责与本地核验限制链接[现役架构](../architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)，不在操作指引重复定义下载或状态逻辑。
 
 [Git SSH 安装](git-ssh-install.md)统一说明安装脚本调用、默认值和自定义参数；首次使用与 Agent 引导安装引用该入口，gh 一键安装只补充脚本获取方式，不重复实现安装生命周期。
@@ -81,6 +83,7 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 | 缺陷与功能质量协作 | [质量检查与证据](quality-checkpoints.md) | 当前 run 的交互文件分配、影响版本与优先修复线、稳定方案确认、精确代码证据、从 Jira「已链接工作项」识别 Test 用例、按任务类型读取事实、TapTest 状态接纳与本地执行分离、阶段回填、全流程 Jira 字段统一采集与转换重入、PR Ready 三类核对和逐检查点 Jira 回读；复用任务授权及阶段，项目标准从 Project 配置读取 |
 | 日常维护安装 | [更新与回退](update-and-rollback.md) | 安装已存在、更新失败、接线漂移或需要回退 |
 | 排障与恢复 | [常见问题](faq.md) | 安装、启动、Hook 或已接管任务出现问题 |
+| 工位遇到问题需要反馈 | [问题反馈流程](problem-feedback.md) | 所有项目的研发通过统一入口总结问题、提交必要复现资料到 AO，由维护者从问题列表处理并回写结果 |
 
 [常见问题](faq.md)负责同 epoch 旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责跨工位状态代际的原版本退出、purge 与切换重建，不由 repair 在线迁移。外部操作不再由通用 Hook 拦截。
 

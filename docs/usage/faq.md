@@ -1,5 +1,9 @@
 # 常见问题
 
+## 工位接管或执行任务遇到问题，需要反馈
+
+所有项目共用的 `ao-feedback` 上报入口、问题总结和必要复现资料见[问题反馈流程](problem-feedback.md)，维护者通过 AO 项目问题列表统一处理。该页区分目标技能与当前能力；仅请求排障不自动上传现场，明确要求反馈后才按授权提交。工位不能启动、接管未成功或归因未明时，也可以先整理已有现象并反馈。
+
 ## `gh auth status` 或安装命令失败
 
 确认 Git、Python 3.9+ 和 GitHub CLI 已安装；再检查当前 GitHub 账号是否能读取 `tapstate/agentic-ops`。需要重新登录时按[gh 一键安装](gh-one-click-install.md)操作。没有 `gh` 时使用[Git SSH 安装](git-ssh-install.md)。

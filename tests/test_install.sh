@@ -123,7 +123,10 @@ for agent_skill_root in .agents/skills .claude/skills; do
   done
 done
 for agent_skill_root in .agents/skills .claude/skills; do
-  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$maintainer_root/$agent_skill_root/ao-requirement")" = "$maintainer_root/skills/shared/ao-requirement"
+  for shared_skill in ao-requirement ao-task-resume ao-feedback; do
+    test -L "$maintainer_root/$agent_skill_root/$shared_skill"
+    test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$maintainer_root/$agent_skill_root/$shared_skill")" = "$maintainer_root/skills/shared/$shared_skill"
+  done
 done
 exclude_before="$(file_digest "$maintainer_root/.git/info/exclude")"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
@@ -282,6 +285,8 @@ test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
 test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
 test -f "$install_root/skills/shared/ao-requirement/SKILL.md"
 test -f "$install_root/skills/shared/ao-task-resume/SKILL.md"
+test -f "$install_root/skills/shared/ao-feedback/SKILL.md"
+test -f "$install_root/docs/usage/problem-feedback.md"
 test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/skills/ao-ws-init"
@@ -487,10 +492,10 @@ test ! -e "$station/.claude/settings.json"
 test ! -e "$station/.codex/hooks.json"
 test -f "$station/.test-agent/settings.json"
 for agent_skill_root in .agents/skills .claude/skills; do
-  test -L "$station/$agent_skill_root/ao-requirement"
-  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-requirement")" = "$install_root/skills/shared/ao-requirement"
-  test -L "$station/$agent_skill_root/ao-task-resume"
-  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-task-resume")" = "$install_root/skills/shared/ao-task-resume"
+  for shared_skill in ao-requirement ao-task-resume ao-feedback; do
+    test -L "$station/$agent_skill_root/$shared_skill"
+    test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/$shared_skill")" = "$install_root/skills/shared/$shared_skill"
+  done
 done
 test -L "$station/.agents/skills/tapdata-task"
 test -L "$station/.claude/skills/tapdata-task"
@@ -603,7 +608,7 @@ assert {"AGENTS.md", "agenticops", ".mcp.json", "CLAUDE.md", ".test-agent/settin
 assert not {".claude/settings.json", ".codex/hooks.json"} & set(artifacts)
 assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
-for name in ("tapdata-wiki", "tapdata-ci-test"):
+for name in ("tapdata-wiki", "tapdata-ci-test", "ao-feedback"):
     for discovery in (".agents/skills", ".claude/skills"):
         assert artifacts[discovery + "/" + name]["kind"] == "symlink"
 assert ".agents/skills/ao-test-takeover" not in artifacts
