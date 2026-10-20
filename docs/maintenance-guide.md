@@ -142,6 +142,13 @@ internal/acceptance.sh --list
 
 ## 6. 发布与 Hotfix
 
+发布前比较候选与目标 `main` 的 `contracts/station-state-compatibility.json` 中 `station_state_epoch`，选择发布方式：
+
+- 未跨 epoch：默认使用 Hotfix，尽量不创建新版本标签。确有独立版本发布需要时，在 Jira 说明理由，并取得针对该候选的正式发布与 Tag 授权。
+- 跨 epoch：必须使用正式发布流程并创建新版本标签，不得以无标签 Hotfix 代替。Tag 绑定实际 Merge commit；工位升级仍遵循[更新与回退](usage/update-and-rollback.md)的原版本退出、归档、purge 与重建要求。
+
+epoch 只表示工位状态兼容性，不得为创建标签而提升 epoch，也不得为使用 Hotfix 而保留本应提升的 epoch。上述选择不豁免既有验证、发布授权或信任根变更的独立人工审查要求。
+
 正常发布：
 
 ```sh
