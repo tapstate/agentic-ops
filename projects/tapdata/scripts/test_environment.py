@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """TapData 工位 Docker 环境生命周期；仅使用 Python 3.9 标准库。"""
+
+# 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
+if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
+    from pathlib import Path as _AoPath
+    _ao_loader = _AoPath(__file__).resolve().parents[3] / "bootstrap/product_access.py"
+    _ao_namespace = {"__file__": str(_ao_loader), "_AO_LOADER_SOURCE": _ao_loader.read_bytes()}
+    exec(compile(_ao_namespace["_AO_LOADER_SOURCE"], str(_ao_loader), "exec"), _ao_namespace)
+    raise SystemExit(_ao_namespace["python_entry"](__file__))
+
 import argparse
 import contextlib
 import fcntl
@@ -470,6 +479,9 @@ class Environment:
             nodes.append({"name": node_name, "uuid": old_nodes.get(node_name, {}).get("uuid", str(uuid.uuid4())), "components": components})
         tm_names = [n["name"] for n in nodes if "TM" in n["components"]]
         secret, _ = self.secret(config)
+        # 容器生命周期超过部署调用；挂载构建快照，避免产品更新混入运行中脚本。
+        for filename in ('test-environment-entrypoint.sh', 'test-environment-node.js'):
+            shutil.copyfile(HERE / filename, candidate / filename)
         services = {}
         for node in nodes:
             directory = self.root / "nodes" / node["name"]
@@ -482,7 +494,7 @@ class Environment:
             write_json(settings_file, settings)
             # Docker Desktop 不能在父目录绑定挂载内创建缺失的文件挂载点。
             write_json(directory / "settings.json", settings)
-            volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(HERE / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(HERE / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
+            volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(candidate / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(candidate / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
             if config["ports"][node["name"]]["license"]:
                 license_path = contained(self.station / "config", config["ports"][node["name"]]["license"])
                 if not license_path.is_file():

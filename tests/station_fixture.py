@@ -1,7 +1,34 @@
 """测试专用单工位状态夹具；不提供产品迁移入口。"""
 import json
+import shutil
 from pathlib import Path
 from workflow import engineering_baseline, task_store
+
+
+def product_cli(station, relative):
+    """旧场景的最小规则夹具补齐同源 CLI，避免跨产品根混用代码与规则。"""
+    source = Path(__file__).resolve().parents[1]
+    try:
+        binding = json.loads((Path(station) / '.agenticops/station.json').read_text())
+        root = Path(binding['product_root']).resolve()
+    except (OSError, ValueError, KeyError, TypeError):
+        return source / relative  # 缺绑定的拒绝场景仍走实际 CLI。
+    if root == source:
+        return source / relative
+    if not (root / 'workflow/task.py').is_file():
+        def missing_only(src, dst):
+            if not Path(dst).exists():
+                shutil.copy2(src, dst)
+            return dst
+        for directory in ('bootstrap', 'workflow', 'gate', 'contracts', 'policies'):
+            shutil.copytree(source / directory, root / directory, dirs_exist_ok=True,
+                            copy_function=missing_only, ignore=shutil.ignore_patterns('__pycache__'))
+        from bootstrap import product_state
+        if not product_state.state_path(root).exists():
+            product_state.save(root, {'schema_version': 2, 'mode': 'source',
+                'repository': 'fixture', 'tracking_branch': 'develop', 'current_ref': 'a' * 40,
+                'previous_ref': None, 'source_pool': str(root / 'pool')})
+    return root / relative
 
 
 def save_task(base, task):

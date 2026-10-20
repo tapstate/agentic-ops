@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from station_fixture import product_cli
 from bootstrap import product_version  # noqa: E402
 from workflow import ci, evidence, jira_watermark, project_rules, task as workflow_task  # noqa: E402
 from workflow import task_store, quality  # noqa: E402
@@ -53,7 +54,7 @@ def run_tool(tool, *args, cwd):
         if command == "advance" and "--expected-stage" not in args:
             args += ["--expected-stage", snapshot["stage"]]
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "workflow" / tool), *args],
+        [sys.executable, str(product_cli(args[args.index("--dir") + 1] if "--dir" in args else cwd, "workflow/" + tool)), *args],
         capture_output=True,
         text=True,
         cwd=cwd,

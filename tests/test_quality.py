@@ -20,7 +20,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
-from station_fixture import save_task as save_station_task, initialize_station
+from station_fixture import product_cli, save_task as save_station_task, initialize_station
 from workflow import pr_body
 
 
@@ -1432,7 +1432,7 @@ class QualityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "归档"):
                 action()
         for script in ("jira_status.py", "jira_watermark.py"):
-            result = subprocess.run([sys.executable, str(ROOT / "workflow" / script), "status",
+            result = subprocess.run([sys.executable, str(product_cli(self.base, "workflow/" + script)), "status",
                 "--dir", str(self.base), "--issue-key", "TAP-123"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(before, {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()})
@@ -1465,7 +1465,7 @@ class QualityTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "CI 状态"):
                         read()
                 self.assertEqual(raw, path.read_bytes())
-        result = subprocess.run([sys.executable, str(ROOT / "workflow/ci.py"), "status",
+        result = subprocess.run([sys.executable, str(product_cli(self.base, "workflow/ci.py")), "status",
             "--dir", str(self.base), "--issue-key", "TAP-123", "--repo", "tapdata/tapdata", "--pr", "1"],
             capture_output=True, text=True)
         self.assertEqual(4, result.returncode)
@@ -1640,7 +1640,7 @@ class QualityTests(unittest.TestCase):
                 path.write_text(raw)
                 with self.assertRaisesRegex(ValueError, "JSON 对象"):
                     evidence.load_events(path)
-                result = subprocess.run([sys.executable, str(ROOT / 'workflow/evidence.py'),
+                result = subprocess.run([sys.executable, str(product_cli(self.base, 'workflow/evidence.py')),
                     '--dir', str(self.base), '--issue-key', 'TAP-123'], capture_output=True, text=True)
                 self.assertEqual(4, result.returncode)
                 self.assertEqual('', result.stdout)
@@ -2229,7 +2229,7 @@ class FeatureFlowTests(unittest.TestCase):
         return task.load(self.ws, "TAP-123")
 
     def cli(self, tool, *args, expected=0, mutation=True):
-        command = [sys.executable, str(ROOT / "workflow" / tool), *args,
+        command = [sys.executable, str(product_cli(self.ws, "workflow/" + tool)), *args,
                    "--issue-key", "TAP-123", "--dir", str(self.ws)]
         if mutation and args[0] != "takeover":
             command += ["--expected-run-id", self.read()["run_id"]]

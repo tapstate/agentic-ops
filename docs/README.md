@@ -72,7 +72,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 当前任务的读写校验由[工位合同](architecture/single-task-station.md)说明：复用版本化状态契约、保留合法恢复状态、拒绝损坏数据且不在线修复；Gate 上下文复用只读状态入口，不另维护宽松格式。
 
-新任务前的版本检查与兼容自动更新以[更新与回退](usage/update-and-rollback.md#新任务前检查与更新目标设计)维护操作选择，[工程架构](architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)维护多工位调用互斥，[PROD-001](user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)维护可复用验收。该目标尚未实现，不代表旧安装具备自动更新能力。
+新任务前的版本检查与兼容自动更新以[更新与回退](usage/update-and-rollback.md#新任务前检查与更新目标设计)维护操作选择，[工程架构](architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)维护多工位调用互斥，[PROD-001](user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)维护可复用验收。入口已接入产品租约和新任务前检查；旧安装不自动获得此能力，真实平台会话生效须独立验收。
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 

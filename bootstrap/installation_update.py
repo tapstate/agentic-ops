@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """安装版本定点切换与有限续接；只读取产品配置、兼容清单和工位索引。"""
+
+# 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
+if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
+    from pathlib import Path as _AoPath
+    _ao_loader = _AoPath(__file__).resolve().parents[1] / "bootstrap/product_access.py"
+    _ao_namespace = {"__file__": str(_ao_loader), "_AO_LOADER_SOURCE": _ao_loader.read_bytes()}
+    exec(compile(_ao_namespace["_AO_LOADER_SOURCE"], str(_ao_loader), "exec"), _ao_namespace)
+    raise SystemExit(_ao_namespace["python_entry"](__file__))
+
 import argparse
 from contextlib import contextmanager
 import json
@@ -8,10 +17,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from bootstrap import product_state, station_compatibility
+from bootstrap import product_state, station_compatibility, product_access
 from workflow.git_environment import git_environment
 
 INSTALL_PATHS = ('adapters', 'bootstrap', 'contracts', 'docs', 'gate', 'policies', 'projects', 'workflow')
@@ -190,10 +200,27 @@ def prepare(root, args):
     print('[AgenticOps][更新][进行] 核验版本兼容性与切换条件', file=sys.stderr)
     before = station_compatibility.manifest_at_ref(root, original)['station_state_epoch']
     after = station_compatibility.manifest_at_ref(root, target)['station_state_epoch']
+    if getattr(args, 'automatic', False):
+        if before != after or target != tip:
+            raise ValueError('自动更新目标或 epoch 已变化；重新检查，不沿用本次选择')
+        if not args.writers_stopped:
+            raise ValueError('自动更新无法证明未受管会话停写')
+        automatic_protocol(root, original)
+        automatic_protocol(root, target)
     if args.mode == 'recover-install' and before != after:
         raise ValueError('原版本维护恢复必须同 epoch（当前=%s，目标=%s）；请选择与原安装同 epoch 的维护补丁。跨 epoch 升级须先使用原版本退出并 purge 全部工位，再执行 update' % (before, after))
     station_compatibility.check_upgrade(root, original, target)
     stations = station_compatibility.load_station_registry(root, required=args.mode == 'recover-install' or before != after)
+    if getattr(args, 'automatic', False):
+        stations = station_compatibility.load_station_registry(root, required=True)
+        if json.loads(args.expected_stations or 'null') != stations:
+            raise ValueError('检查后登记工位范围变化；重新检查，不扩大自动更新范围')
+        from workflow import station_context
+        for station in stations:
+            binding = station_context.read_binding(station)
+            if Path(binding['product_root']).resolve() != root:
+                raise ValueError('登记工位绑定漂移，拒绝自动更新')
+            station_context.require_epoch(station, root)
     if any(not Path(station).is_absolute() for station in stations):
         raise ValueError('工位登记路径无效，不能确认恢复范围')
     explicit = bool(args.to_ref or args.mode == 'recover-install')
@@ -206,13 +233,75 @@ def prepare(root, args):
         'reflog_action': marker}
 
 
+def probe(root):
+    """发现版本与切换资格分开；不会执行目标代码或改变安装范围。"""
+    packet = {'status': 'invalid_local_state', 'product_root': str(root),
+              'checked_at': datetime.now(timezone.utc).isoformat(), 'blockers': [], 'compatible': None}
+    try:
+        document = product_state.load(root)
+        if document['mode'] != 'installed':
+            raise ValueError('新任务更新检查只适用于安装目录')
+        clean(root)
+        original = exact(document['current_ref'])
+        if git(root, 'rev-parse', 'HEAD') != original:
+            raise ValueError('HEAD 与产品记录不一致，须先恢复原操作')
+        if git(root, 'remote', 'get-url', 'origin') != document['repository']:
+            raise ValueError('origin 与安装来源记录不一致')
+        branch = document['tracking_branch']
+        git(root, 'check-ref-format', '--branch', branch)
+        stations = station_compatibility.load_station_registry(root, required=True)
+        if any(not Path(path).is_absolute() for path in stations):
+            raise ValueError('工位登记路径无效')
+        packet.update(original_ref=original, source_branch=branch, repository=document['repository'], stations=stations)
+    except (ValueError, OSError) as error:
+        return dict(packet, reason=str(error))
+    try:
+        git(root, 'fetch', 'origin', 'refs/heads/%s:refs/remotes/origin/%s' % (branch, branch))
+        target = exact(git(root, 'rev-parse', 'refs/remotes/origin/' + branch))
+        packet['target_ref'] = target
+    except (ValueError, OSError) as error:
+        return dict(packet, status='check_unavailable', reason=str(error))
+    try:
+        ancestor(root, original, target)
+        prepare_materials(root, original, target)
+        before = station_compatibility.manifest_at_ref(root, original)['station_state_epoch']
+        after = station_compatibility.manifest_at_ref(root, target)['station_state_epoch']
+        packet.update(original_epoch=before, target_epoch=after, compatible=before == after)
+    except (ValueError, OSError) as error:
+        return dict(packet, status='target_unknown', reason=str(error))
+    if before != after:
+        packet['blockers'].append('incompatible_epoch')
+    if stations:
+        packet['blockers'].append('unmanaged_sessions_unverified')
+    packet['status'] = 'up_to_date' if original == target else 'update_available'
+    return packet
+
+
+def automatic_protocol(root, reference):
+    """受信版本仍须声明入口屏障；旧版首次接入/回退不能推断受保护。"""
+    paths = git(root, 'ls-tree', '-r', '--name-only', reference).splitlines()
+    if 'bootstrap/product_access.py' not in paths:
+        raise ValueError('版本没有产品租约入口；首次采用须手工停写更新')
+    for path in paths:
+        if path.endswith('.py') and path.startswith(('bootstrap/', 'workflow/', 'gate/', 'projects/')) and '/tests/' not in path:
+            source = git(root, 'show', reference + ':' + path)
+            if '__main__' in source and path != 'bootstrap/product_access.py':
+                if '_AO_PRODUCT_ENTRY' not in source or 'python_entry' not in source:
+                    raise ValueError('版本入口尚未接入租约：' + path)
+    for path in ('agenticops', 'bootstrap/update.sh', 'bootstrap/rollback.sh', 'bootstrap/setup.sh', 'bootstrap/station-init.sh'):
+        if 'AO_PRODUCT_SHELL_BEGIN' not in git(root, 'show', reference + ':' + path):
+            raise ValueError('版本 shell 入口尚未接入租约：' + path)
+
+
 def execute(root, args):
-    with lifecycle_lock(root, args.mode):
+    with product_access.lease(root, 'shared' if args.check else 'exclusive'), lifecycle_lock(root, args.mode):
         document, packet = prepare(root, args)
         if args.check:
             print('[AgenticOps][更新][完成] 预检通过，本次未执行版本切换', file=sys.stderr)
             return packet
         original, target = packet['original_ref'], packet['target_ref']
+        if product_access.inherited(root, 'exclusive') is None:
+            raise ValueError('版本切换前产品独占租约丢失')
         print('[AgenticOps][更新][进行] 准备安装范围并切换产品版本', file=sys.stderr)
         refresh_scope(root, target)
         if packet['head'] != target:
@@ -233,7 +322,8 @@ def execute(root, args):
         # 只提示接线版本漂移；不采用、迁移或写入旧任务。
         if target != original:
             subprocess.run([sys.executable, str(ROOT / 'bootstrap/station_registry.py'), '--product-root', str(root),
-                            'pending', '--product-ref', target], check=True, env=git_environment())
+                            'pending', '--product-ref', target], check=True, env=product_access.child_environment(root, git_environment()),
+                           pass_fds=product_access.child_fds(root))
         packet['status'] = 'updated' if target != original else 'unchanged'
         packet['boundary'] = '仅产品安装切换；任务归档、释放、注销与新版接管须分别核验'
         print('[AgenticOps][更新][完成] %s：分支=%s，%s → %s' %
@@ -250,6 +340,9 @@ def parser():
     p.add_argument('--expected-current-ref')
     p.add_argument('--source-branch')
     p.add_argument('--check', action='store_true')
+    p.add_argument('--probe', action='store_true', help='配合 --check，分别报告新版、兼容性和切换阻塞')
+    p.add_argument('--automatic', action='store_true', help='启动侧同 epoch 自动更新；仍需停写事实与独占租约')
+    p.add_argument('--expected-stations', help='启动侧绑定检查时的登记工位 JSON 数组')
     p.add_argument('--resume', action='store_true')
     p.add_argument('--writers-stopped', action='store_true', help='已按原生事实核验全部共享产品调用停写；不认证声明者')
     return p
@@ -258,7 +351,13 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        result = execute(Path(args.product_root).resolve(), args)
+        if args.probe:
+            if not args.check or args.resume or args.to_ref or args.mode != 'update':
+                raise ValueError('--probe 只能用于普通 update --check')
+            with product_access.lease(args.product_root):
+                result = probe(Path(args.product_root).resolve())
+        else:
+            result = execute(Path(args.product_root).resolve(), args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:

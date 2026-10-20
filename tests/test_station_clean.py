@@ -12,6 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import test_station_lifecycle as fixture
+from station_fixture import product_cli
 from workflow import station, station_clean as clean, station_clean_rules as rules, station_reset_result as reset
 from workflow import station_archive, station_operation as operations, station_resources as resources, task_store
 
@@ -303,7 +304,7 @@ class CleanupTests(unittest.TestCase):
     def test_script_cli_executes_without_handwritten_plan(self):
         task = self.ready(); path = self.generated()
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-        p = subprocess.run([sys.executable, str(fixture.ROOT / 'workflow/station-clean.py'), '--dir', str(self.ws), '--execute'], capture_output=True, text=True, env=env)
+        p = subprocess.run([sys.executable, str(product_cli(self.ws, 'workflow/station-clean.py')), '--dir', str(self.ws), '--execute'], capture_output=True, text=True, env=env)
         self.assertEqual(0, p.returncode, p.stderr); self.assertFalse(path.exists())
         self.assertTrue(json.loads(p.stdout)['cleanup']['released'])
 

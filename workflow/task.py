@@ -2,6 +2,15 @@
 """单任务工位：takeover/archive/release/clean 及确定性任务检查点。"""
 from __future__ import annotations
 
+# 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
+if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
+    from pathlib import Path as _AoPath
+    _ao_loader = _AoPath(__file__).resolve().parents[1] / "bootstrap/product_access.py"
+    _ao_namespace = {"__file__": str(_ao_loader), "_AO_LOADER_SOURCE": _ao_loader.read_bytes()}
+    exec(compile(_ao_namespace["_AO_LOADER_SOURCE"], str(_ao_loader), "exec"), _ao_namespace)
+    raise SystemExit(_ao_namespace["python_entry"](__file__))
+
+
 import argparse
 import json
 import sys
@@ -743,6 +752,8 @@ def main():
         child.set_defaults(func=cmd_replan)
 
     p = sub.add_parser("takeover")
+    p.add_argument('--update-current-ref', help='本次继续旧版选择的原完整 SHA，由入口消费')
+    p.add_argument('--update-target-ref', help='本次继续旧版选择的目标完整 SHA，由入口消费')
     p.add_argument("--issue-key", required=True)
     p.add_argument("--task-class", required=True)
     p.add_argument("--version", required=True)
