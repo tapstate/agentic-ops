@@ -47,6 +47,10 @@ async function main() {
         SCRIPT_DIR: 'etc', reportInterval: 20000, Decimal128ToNumber: 'false', uuid: settings.uuid
       }}
     };
+    if (settings.fe_process_id) {
+      config.tapdata.cloud.process_id = settings.fe_process_id;
+      config.tapdata.cloud.baseURLs = settings.backend_url;
+    }
     // Launcher 的 yamljs 不接受 JSON 文档；标量以 JSON 转义生成 YAML 双引号值。
     for (const root of ['/tapdata/apps', '/tapdata/work']) {
       fs.mkdirSync(path.join(root, 'etc'), {recursive: true});

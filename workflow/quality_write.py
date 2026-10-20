@@ -320,15 +320,101 @@ def jira_field_body(base, task, field):
         return "\n".join(lines)
     if field == "fix_details":
         model = quality.replay(quality.load(base, task))
-        if not any(item["executions"] for item in model["items"].values()) and not model.get("verification"):
-            return None
         rules, ctx = quality.config(base, task), quality.context(base, task)
-        checkpoint = rules.get("tests_passed", {}).get("checkpoint", "q4-acceptance")
-        view = quality.checkpoint_view(model, checkpoint, rules, ctx)
-        body = stage_summary(model, checkpoint, rules, ctx, view)
-        return "修复总结（%s）：\n\n%s" % ("已验收" if view["reviewed"] else "待验收", body.replace(
-            "修复总结：写入 Fix Details 后回读核验；本评论不代替字段同步。\n\n", ""))
+        return delivery_summary(model, rules or {}, ctx)
     return None
+
+
+def delivery_summary(model, rules, ctx):
+    """只渲染已有事实建议；技术解释由 Agent 核对 diff 后写入完整 proposals。"""
+    from workflow import verification
+    lines = ["交付总结素材（需结合实际代码补全变更、作用及限制后形成完整正文）"]
+    checkpoint = (rules.get("tests_passed") or {}).get("checkpoint")
+    if checkpoint in {point["id"] for point in rules.get("checkpoints", [])}:
+        view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+        outcome = quality.checkpoint_outcome(view)
+        labels = {"accept": "验收通过", "rework": "返工", "defer": "延期",
+                  "accept_risk": "接受风险", "not_applicable": "不适用", "observed": "事实记录"}
+        status = labels.get(outcome, "待核验") if view["reviewed"] else "待核验"
+        if view["reviewed"] and view["mode"] == "jira_status":
+            status = "按关联 Test 状态接纳（不代表本地执行 PASS）"
+        lines.append("验收处置：%s；检查点：%s" % (status, checkpoint))
+        decision = (view.get("decision") or {}).get("decision", {})
+        if decision:
+            lines.append("记录处置%s：%s；%s" % (
+                "" if view["reviewed"] else "（已失效或待核验）",
+                decision["outcome"], decision["reason"]))
+            _follow_up(lines, decision)
+        lines.extend("验收待核验：%s" % problem for problem in view["problems"])
+    else:
+        lines.append("验收处置：待核验；项目未明确适用验收检查点，不能自动推导结论。")
+    for repo, binding in sorted(ctx.get("repositories", {}).items()):
+        lines.append("仓库：%s；当前代码：%s" % (repo, binding.get("live_revision") or "待核验"))
+        for item in model["items"].values():
+            plan = item["plan"]
+            if plan["repository"] != repo:
+                continue
+            current = quality.item_view(item, rules, ctx)
+            decision = (current.get("decision") or {}).get("decision", {})
+            lines.append("检查项：%s；范围：%s；方式：%s；计划版本：%s" % (
+                plan["case_ref"], plan["scope"], plan["method"], plan["target_revision"]))
+            if "jira_status" in current:
+                assessment = current["jira_status"]
+                lines.append("关联 Test 状态：%s；来源：%s；状态接纳不改写执行事实。" % (
+                    "满足" if current["selected"] and assessment["passed"] else "待核验",
+                    assessment.get("source_ref") or "待回读"))
+            lines.append("检查项处置：%s；%s" % (
+                decision.get("outcome", "未确认"),
+                "确认有效" if current["decision_valid"] else "未确认或确认已失效"))
+            if decision:
+                lines.append("处置理由：%s" % decision["reason"])
+                _follow_up(lines, decision)
+            # 保存的执行是历史事实；只有有效处置选中的执行才是已确认依据。
+            for execution in item["executions"]:
+                accepted_evidence = (current["decision_valid"] and
+                                     decision.get("evidence_id") == execution["id"])
+                lines.append("执行记录%s：%s；版本：%s；证据：%s；观察：%s" % (
+                    "（当前处置依据）" if accepted_evidence else "（历史或未确认依据）",
+                    execution["raw_result"], execution["target_revision"],
+                    execution["source_ref"], execution["observation"]))
+                if execution.get("nonexecution_reason"):
+                    lines.append("未执行原因：%s" % execution["nonexecution_reason"])
+            if not item["executions"]:
+                lines.append("尚无本地执行记录；不能据此声明本地 PASS。")
+        for kind, entry in sorted(model.get("verification", {}).get(repo, {}).items()):
+            material = entry["data"]
+            problems = verification.material_problems(entry, repo, kind, ctx, rules)
+            lines.append("已有验证 %s：%s；版本：%s；证据：%s" % (
+                kind, "待核验或已失效" if problems else "材料核对有效（结果见下）",
+                material["target_revision"], material["source_ref"]))
+            lines.extend("材料问题：%s" % problem for problem in problems)
+            for result in material.get("results", []):
+                lines.append("范围：%s；原始结果：%s；报告：%s；用例/失败/错误/跳过：%s/%s/%s/%s" % (
+                    result["scope"], result["result"], result["report_ref"],
+                    result.get("tests", "未知"), result.get("failures", "未知"),
+                    result.get("errors", "未知"), result.get("skipped", "未知")))
+                if result.get("nonexecution_reason"):
+                    lines.append("未执行原因：%s" % result["nonexecution_reason"])
+                risk = result.get("decision") or {}
+                if risk:
+                    lines.append("缺口及处置：%s；%s" % (risk["uncovered"], risk["reason"]))
+                    _follow_up(lines, risk)
+            for item in material.get("items", []):
+                lines.append("审查项 %s：%s；%s；来源：%s" % (
+                    item["id"], item["status"], item["reason"], item["source_ref"]))
+                if item.get("verification_ref"):
+                    lines.append("返工验证：%s" % item["verification_ref"])
+                risk = item.get("decision") or {}
+                if risk:
+                    lines.append("审查缺口：%s；%s" % (risk["uncovered"], risk["reason"]))
+                    _follow_up(lines, risk)
+        for key, failure in ctx.get("failures", {}).items():
+            if failure["repository"] == repo:
+                lines.append("失败跟进 %s：%s；后续以当前失败记录为准。" % (key, failure["status"]))
+    if not model["items"] and not model.get("verification"):
+        lines.append("尚无验证材料；方案不代表实施或验收结果。")
+    lines.append("已有材料不代表合入或发布；发布前复核当前代码、证据和远端原文，保留人工修改。")
+    return "\n\n".join(lines)
 
 
 def check_unresolved_runs(base, task, body):

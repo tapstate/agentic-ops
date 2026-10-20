@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -112,6 +113,32 @@ class SharedSkillsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 refresh_wiring(self.product, expected_artifacts(self.product), tree)
         self.assertEqual(target.read_text(), 'user content')
+
+    def test_feedback_and_its_contract_are_shared_across_projects_and_agents(self):
+        source = ROOT / 'skills/shared/ao-feedback'
+        feedback = self.product / 'skills/shared/ao-feedback'
+        shutil.copytree(source, feedback)
+        shutil.copytree(ROOT / 'docs', self.product / 'docs')
+        manifests = discover(self.product)
+        for project in ('demo', 'another-product'):
+            skill(self.product / 'projects' / project / 'skills', 'project-test')
+            station = self.root / project
+            station.mkdir()
+            artifacts, _ = render.expected_artifacts(
+                self.product, station, project, ['codex', 'claude'], manifests)
+            for directory in ('.agents/skills', '.claude/skills'):
+                target = directory + '/ao-feedback'
+                self.assertEqual(artifacts[target]['kind'], 'symlink')
+                link = station / target
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(artifacts[target]['target'])
+                self.assertEqual(link.resolve(), feedback)
+                entry = (link / 'SKILL.md').resolve()
+                self.assertEqual(entry.read_bytes(), (source / 'SKILL.md').read_bytes())
+                for reference in re.findall(r'\]\(([^)]+)\)', entry.read_text()):
+                    destination = entry.parent / reference.split('#', 1)[0]
+                    self.assertTrue(destination.is_file(), str(destination))
+                self.assertNotIn(directory + '/maintenance-test', artifacts)
 
     def test_both_agents_receive_same_skill_help_contract_navigation(self):
         self.assertEqual((ROOT / 'CLAUDE.md').read_text().strip(), '@AGENTS.md')

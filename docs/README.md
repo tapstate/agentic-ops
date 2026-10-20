@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+研发工位问题反馈属于“使用与维护”主题：[问题反馈流程](usage/problem-feedback.md)集中维护所有项目共用的 [ao-feedback](../skills/shared/ao-feedback/SKILL.md) 上报入口、问题总结、必要复现资料及提交 AO Jira 的使用合同，并说明维护者从 AO 问题列表统一处理后的反馈闭环；[扩展使用总纲](usage/README.md)负责场景导航，维护指引只引用列表受理边界。该能力复用原生 Jira 和现有现场材料，交付与验收记录在 Jira，不以文档存在证明旧安装或会话的技能已可用。
+
 维护提示词以根 `AGENTS.md` 保存常驻边界和按需导航，[维护指引](maintenance-guide.md)保存接续、提交与发布操作，[Skill 维护规范](skill-maintenance.md)保存技能编写和发现合同。共享任务接续先区分源码维护与业务工位，分别进入维护指引和任务授权指引；需求方案的评审上限与到限交接由共享需求技能维护，不在各入口复制。
 
 安装更新的材料准备与本地核验边界由[现役架构](architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)维护设计；[更新与回退](usage/update-and-rollback.md#部分克隆更新与材料准备)说明中文输出、预检副作用和获取失败后的恢复。该主题只负责产品安装生命周期，不扩展工位状态或通用核验的联网能力。
@@ -70,7 +72,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 当前任务的读写校验由[工位合同](architecture/single-task-station.md)说明：复用版本化状态契约、保留合法恢复状态、拒绝损坏数据且不在线修复；Gate 上下文复用只读状态入口，不另维护宽松格式。
 
-新任务前的版本检查与兼容自动更新以[更新与回退](usage/update-and-rollback.md#新任务前检查与更新目标设计)维护操作选择，[工程架构](architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)维护多工位调用互斥，[PROD-001](user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)维护可复用验收。该目标尚未实现，不代表旧安装具备自动更新能力。
+新任务前的版本检查与兼容自动更新以[更新与回退](usage/update-and-rollback.md#新任务前检查与更新目标设计)维护操作选择，[工程架构](architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)维护多工位调用互斥，[PROD-001](user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)维护可复用验收。入口已接入产品租约和新任务前检查；旧安装不自动获得此能力，真实平台会话生效须独立验收。
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
@@ -109,6 +111,8 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 安装目录包含本树的人读文档，供项目 Skill 和 Runbook 的相对链接直接读取；安装、更新与回退共享文档范围，不复制文档到工位。缺失资源补齐的操作由[更新与回退](usage/update-and-rollback.md)维护，维护工具仍不进入安装目录。
 
 首次安装引导以 [Git SSH 安装](usage/git-ssh-install.md)为命令与默认参数的唯一使用说明；[首次使用指引](usage-guide.md)负责安装到首个任务的主路径，[Agent 引导安装](usage/agent-guided-install.md)负责委托边界，[gh 一键安装](usage/gh-one-click-install.md)只负责另一种安装脚本获取方式。安装步骤统一交给 Bootstrap，文档不再手工写安装状态。
+
+空闲工位连接外部 TM 的 FE 部署目标设计由[开发环境指引](../projects/tapdata/runbooks/test-environment.md#空闲工位连接外部-tm-的目标设计)统一维护，覆盖源码准备、Launcher 协议、完整装配、组件验收及退出后接管边界。环境入口支持外部模式和空闲源码准备，不改变下述现有工位合同；实现与真实环境验收分别记录在 Jira。
 
 ## 空闲工位源码生命周期
 

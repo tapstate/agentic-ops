@@ -27,6 +27,7 @@ class JiraWatermarkTests(unittest.TestCase):
         self.product = self.base / "product"
         shutil.copytree(ROOT / "projects" / "tapdata", self.product / "projects" / "tapdata")
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
+        shutil.copy2(ROOT / ".gitignore", self.product / ".gitignore")
         subprocess.run(["git", "init", "-q", "-b", "develop"], cwd=self.product, check=True)
         subprocess.run(["git", "add", "."], cwd=self.product, check=True)
         subprocess.run(

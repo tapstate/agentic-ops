@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """TapData 工位 Docker 环境生命周期；仅使用 Python 3.9 标准库。"""
+
+# 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
+if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
+    from pathlib import Path as _AoPath
+    _ao_loader = _AoPath(__file__).resolve().parents[3] / "bootstrap/product_access.py"
+    _ao_namespace = {"__file__": str(_ao_loader), "_AO_LOADER_SOURCE": _ao_loader.read_bytes()}
+    exec(compile(_ao_namespace["_AO_LOADER_SOURCE"], str(_ao_loader), "exec"), _ao_namespace)
+    raise SystemExit(_ao_namespace["python_entry"](__file__))
+
 import argparse
 import contextlib
 import fcntl
@@ -17,6 +26,9 @@ import uuid
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[2]))
+from workflow import station_context, task_store, station_operation
+
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LABEL = "io.agenticops.station"
 PREPARATION_FIELDS = {"mongo_driver", "node_binary", "build", "assets", "heartbeat"}
@@ -52,26 +64,55 @@ def contained(root, value):
     return result
 
 
-def call(argv, input_text=None, timeout=120):
+def call(argv, input_text=None, timeout=120, failure_messages=None):
     result = subprocess.run(argv, input=input_text, text=True, capture_output=True, timeout=timeout)
     if result.returncode:
+        if failure_messages:
+            try:
+                code = json.loads(result.stdout).get("probe_error")
+            except (ValueError, AttributeError):
+                code = None
+            if isinstance(code, str) and code in failure_messages:
+                raise EnvironmentError(failure_messages[code])
         # Docker/驱动错误可能含 URI，不将 stderr 或展开参数送入用户输出。
         raise EnvironmentError("外部命令失败，请核验工具、网络及授权（退出码 %s）" % result.returncode)
     return result.stdout
+
+
+def external_url(value):
+    if not isinstance(value, str) or any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value:
+        raise EnvironmentError("外部 TM 地址必须为 HTTP(S) 服务根地址")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise EnvironmentError("外部 TM 地址无效") from None
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname or
+            parsed.username is not None or parsed.password is not None or
+            "?" in value or "#" in value or parsed.path not in ("", "/") or
+            (port is not None and not 1 <= port <= 65535)):
+        raise EnvironmentError("外部 TM 地址须无凭据、查询、片段和子路径")
+    return value.rstrip("/")
 
 
 def validate(config, runtime_only=False):
     required = {"schema_version", "nodes", "image", "platform", "mongo_uri_file", "mongo_driver", "build", "assets", "node_binary", "ports", "java", "heartbeat"}
     if runtime_only:
         required = RUNTIME_FIELDS
-    if not isinstance(config, dict) or set(config) != required or type(config["schema_version"]) is not int or config["schema_version"] != (2 if runtime_only else 1):
+    if not isinstance(config, dict) or set(config) - {"external_tm_url", "fe_heartbeat"} != required or type(config["schema_version"]) is not int or config["schema_version"] != (2 if runtime_only else 1):
         raise EnvironmentError("配置字段或 schema_version 无效")
     if not isinstance(config["nodes"], dict) or not 1 <= len(config["nodes"]) <= 3:
         raise EnvironmentError("nodes 必须提供 1～3 个节点及组件列表")
     for name, components in config["nodes"].items():
         if not isinstance(name, str) or not NAME.fullmatch(name) or not isinstance(components, list) or not components or any(not isinstance(c, str) for c in components) or len(set(components)) != len(components) or any(c not in ("TM", "FE", "APIServer") for c in components):
             raise EnvironmentError("节点必须提供唯一的 TM/FE/APIServer 组件列表")
-    if not any("TM" in components for components in config["nodes"].values()):
+    if runtime_only and "fe_heartbeat" in config:
+        raise EnvironmentError("FE 监控属于项目准备，不是用户运行配置")
+    if "external_tm_url" in config:
+        external_url(config["external_tm_url"])
+        if any(components != ["FE"] for components in config["nodes"].values()):
+            raise EnvironmentError("外部 TM 模式只允许 FE-only 节点")
+    elif not any("TM" in components for components in config["nodes"].values()):
         raise EnvironmentError("环境至少需要一个 TM，供 Launcher 与 FE 连接")
     if not isinstance(config["image"], str) or not config["image"] or any(c.isspace() for c in config["image"]):
         raise EnvironmentError("image 无效")
@@ -94,6 +135,11 @@ def validate(config, runtime_only=False):
         for key in ("max_age_seconds", "startup_timeout_seconds"):
             if type(hb[key]) is not int or not 20 <= hb[key] <= 900:
                 raise EnvironmentError("监控超时必须为 20～900 秒")
+        if "external_tm_url" in config or "fe_heartbeat" in config:
+            fe = config.get("fe_heartbeat")
+            fields = {"collection", "uuid_field", "time_field", "type_field", "type_value", "deleted_field", "stopped_field"}
+            if not isinstance(fe, dict) or set(fe) != fields or any(not isinstance(v, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]*", v) for v in fe.values()):
+                raise EnvironmentError("外部 TM 模式需要已核验的 fe_heartbeat 字段映射")
     if not isinstance(config["ports"], dict) or set(config["ports"]) != set(config["nodes"]):
         raise EnvironmentError("ports 必须逐节点配置")
     used = []
@@ -133,9 +179,9 @@ def validate(config, runtime_only=False):
 
 def combine_config(runtime, preparation):
     """新配置只保存运行输入；旧 schema 1 的执行结构继续复用。"""
-    if not isinstance(runtime, dict) or set(runtime) != RUNTIME_FIELDS or type(runtime["schema_version"]) is not int or runtime["schema_version"] != 2:
+    if not isinstance(runtime, dict) or set(runtime) - {"external_tm_url"} != RUNTIME_FIELDS or type(runtime["schema_version"]) is not int or runtime["schema_version"] != 2:
         raise EnvironmentError("运行配置字段或 schema_version 无效")
-    if not isinstance(preparation, dict) or set(preparation) != PREPARATION_FIELDS | {"schema_version"} or type(preparation["schema_version"]) is not int or preparation["schema_version"] != 1:
+    if not isinstance(preparation, dict) or set(preparation) - {"fe_heartbeat"} != PREPARATION_FIELDS | {"schema_version"} or type(preparation["schema_version"]) is not int or preparation["schema_version"] != 1:
         raise EnvironmentError("项目准备文件字段或 schema_version 无效")
     combined = dict(runtime)
     combined.update(preparation)
@@ -145,9 +191,11 @@ def combine_config(runtime, preparation):
 class Environment:
     def __init__(self, station):
         self.station = Path(station).resolve()
-        binding = read_json(self.station / ".agenticops/station.json")
+        binding = station_context.read_binding(self.station)
+        station_context.require_epoch(self.station, binding["product_root"])
         if binding.get("project") != "tapdata" or not re.fullmatch(r"[a-f0-9]{32}", binding.get("station_id", "")):
             raise EnvironmentError("需要已绑定 TapData 的工位")
+        self.binding = binding
         self.identity = binding["station_id"]
         self.project = "ao-tapdata-" + self.identity
         self.config_dir = self.station / "config/tapdata-test-env"
@@ -160,7 +208,22 @@ class Environment:
         self.network_ids = []
 
     @contextlib.contextmanager
-    def lock(self):
+    def lock(self, operation_name=None):
+        # 与接管、源码刷新和退出共用锁；不创建任务或更改 current。
+        with task_store.task_state_lock(self.station):
+            if station_context.read_binding(self.station) != self.binding:
+                raise EnvironmentError("工位绑定已变化，请重新读取现场")
+            operation = station_operation.read(self.station)
+            if operation and operation["status"] != "done":
+                read_only = operation_name in ("status", "list", "check-inputs")
+                cleanup = operation_name == "uninstall" and operation["kind"] in ("clean", "release", "work-clean")
+                if not (read_only or cleanup):
+                    raise EnvironmentError("工位存在未完成操作，请先恢复原操作")
+            with self.configuration_lock():
+                yield
+
+    @contextlib.contextmanager
+    def configuration_lock(self):
         self.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (self.config_dir / ".lock").open("a") as stream:
             os.chmod(stream.name, 0o600)
@@ -220,18 +283,27 @@ class Environment:
             raise EnvironmentError("Mongo URI 必须位于 config/secrets 内")
         return list(dict.fromkeys(paths))
 
-    def prepare_inputs(self, name):
+    def prepare_inputs(self, name, external_tm_url=None):
         if not name or not NAME.fullmatch(name):
             raise EnvironmentError("prepare-inputs 需要有效的 --env 名称")
         if (self.config_dir / (name + ".json")).exists():
             raise EnvironmentError("配置已存在，请复用已有配置；不初始化覆盖")
         draft = self.input_path(self.config_dir / "drafts" / (name + ".json"))
+        if external_tm_url is not None:
+            external_tm_url = external_url(external_tm_url)
         if draft.exists():
             config = read_json(draft)
+            if external_tm_url is not None and config.get("external_tm_url") != external_tm_url:
+                raise EnvironmentError("已有草稿目标不同，请核验并编辑原草稿；不覆盖")
         else:
             config = read_json(HERE.parent / "templates/station/test-env.json")
             config["mongo_uri_file"] = "tapdata-test-env/" + name + "/mongodb-uri"
             config["ports"]["node1"]["license"] = "secrets/tapdata-test-env/" + name + "/license.txt"
+            if external_tm_url is not None:
+                config["external_tm_url"] = external_tm_url
+                license_ref = config["ports"]["node1"]["license"]
+                config["nodes"] = {"node1": ["FE"], "node2": ["FE"]}
+                config["ports"] = {n: {"tm": None, "api": None, "license": license_ref} for n in config["nodes"]}
         # 架构尚待用户选择；只为验证其余结构临时填值，不保存或推定目标架构。
         candidate = dict(config)
         if candidate.get("platform") == "":
@@ -259,6 +331,7 @@ class Environment:
                     {"field": "platform", "label": "目标架构", "value": config["platform"], "choices": ["linux/amd64", "linux/arm64"]},
                     {"field": "product_mode", "label": "产品模式（复用会话已确认值）"},
                     {"field": "nodes", "label": "节点组件", "value": config["nodes"]},
+                    {"field": "external_tm_url", "label": "外部 TM（缺省为本地模式）", "value": config.get("external_tm_url")},
                     {"field": "ports", "label": "端口与许可证引用", "value": config["ports"]},
                     {"field": "java", "label": "Java 资源参数", "value": config["java"]}],
                 "missing": (["platform"] if not config["platform"] else []) +
@@ -460,7 +533,12 @@ class Environment:
         _, uri = self.secret(config)
         driver = self.source_path(config["mongo_driver"])
         script = HERE / "test-environment-probe.js"
-        output = call(["docker", "run", "--rm", "-i", "--platform", config["platform"], "--env", "NODE_PATH=/driver", "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--mount", "type=bind,src=%s,dst=/driver,readonly" % driver, "--mount", "type=bind,src=%s,dst=/probe.js,readonly" % script, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "/probe.js"], input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": nodes}), timeout=60)
+        output = call(["docker", "run", "--rm", "-i", "--platform", config["platform"], "--env", "NODE_PATH=/driver", "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--mount", "type=bind,src=%s,dst=/driver,readonly" % driver, "--mount", "type=bind,src=%s,dst=/probe.js,readonly" % script, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "/probe.js"], input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": nodes, "external_tm_url": config.get("external_tm_url"), "fe_heartbeat": config.get("fe_heartbeat")}), timeout=90, failure_messages={
+            "mongo_connect": "MongoDB 连接失败；核验容器网络与连接配置",
+            "mongo_auth": "MongoDB 认证失败；核验秘密文件与认证库",
+            "mongo_topology": "MongoDB 拓扑或副本成员不可达",
+            "tm_http": "外部 TM HTTP 不可达；核验地址、网络和 TLS",
+            "monitoring": "监控查询失败；核验目标分支字段、权限和节点身份"})
         return json.loads(output)
 
     def generate(self, name, config, candidate, record, previous=None):
@@ -470,19 +548,24 @@ class Environment:
             nodes.append({"name": node_name, "uuid": old_nodes.get(node_name, {}).get("uuid", str(uuid.uuid4())), "components": components})
         tm_names = [n["name"] for n in nodes if "TM" in n["components"]]
         secret, _ = self.secret(config)
+        # 容器生命周期超过部署调用；挂载构建快照，避免产品更新混入运行中脚本。
+        for filename in ('test-environment-entrypoint.sh', 'test-environment-node.js'):
+            shutil.copyfile(HERE / filename, candidate / filename)
         services = {}
         for node in nodes:
             directory = self.root / "nodes" / node["name"]
             if directory.resolve() != directory:
                 raise EnvironmentError("节点目录不得经过符号链接")
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            backend_urls = ["http://%s:3030/api/" % ("127.0.0.1" if n == node["name"] else n) for n in tm_names]
+            backend_urls = [external_url(config["external_tm_url"]) + "/api/"] if "external_tm_url" in config else ["http://%s:3030/api/" % ("127.0.0.1" if n == node["name"] else n) for n in tm_names]
             settings = {"components": node["components"], "backend_url": ",".join(backend_urls), "uuid": node["uuid"], "tm_opts": config["java"]["tm"], "engine_opts": config["java"]["engine"], "node_binary": config["node_binary"], "startup_timeout_seconds": config["heartbeat"]["startup_timeout_seconds"]}
+            if "external_tm_url" in config:
+                settings["fe_process_id"] = node["uuid"]
             settings_file = candidate / (node["name"] + "-settings.json")
             write_json(settings_file, settings)
             # Docker Desktop 不能在父目录绑定挂载内创建缺失的文件挂载点。
             write_json(directory / "settings.json", settings)
-            volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(HERE / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(HERE / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
+            volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(candidate / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(candidate / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
             if config["ports"][node["name"]]["license"]:
                 license_path = contained(self.station / "config", config["ports"][node["name"]]["license"])
                 if not license_path.is_file():
@@ -490,7 +573,7 @@ class Environment:
                 volumes.append(str(license_path) + ":/license/license.txt:ro")
             services[node["name"]] = {"image": config["image"], "platform": config["platform"], "hostname": self.project + "-" + node["name"], "user": "%s:%s" % (os.getuid(), os.getgid()), "environment": {"TAPDATA_ARCH": config["platform"].split("/")[1], "HOME": "/tapdata/home", "JAVA_TOOL_OPTIONS": "-Duser.home=/tapdata/home"}, "init": True, "restart": "unless-stopped", "labels": {LABEL: self.identity}, "extra_hosts": ["host.docker.internal:host-gateway"], "entrypoint": ["/bin/bash", "/bootstrap/entrypoint.sh"], "volumes": volumes, "ports": ["127.0.0.1:%s:%s" % (config["ports"][node["name"]][key], internal) for key, internal in (("tm", 3030), ("api", 3080)) if config["ports"][node["name"]][key] is not None], "stop_grace_period": "45s", "healthcheck": {"test": ["CMD", "/bundle/" + config["node_binary"], "/bootstrap/node.js", "health"], "interval": "10s", "timeout": "5s", "start_period": "%ss" % config["heartbeat"]["startup_timeout_seconds"], "retries": 3}}
         for node in nodes:
-            if "TM" not in node["components"]:
+            if "TM" not in node["components"] and tm_names:
                 services[node["name"]]["depends_on"] = {n: {"condition": "service_healthy"} for n in tm_names}
         write_json(candidate / "compose.json", {"services": services, "networks": {"default": {"labels": {LABEL: self.identity}}}})
         state = {"station_id": self.identity, "environment": name, "config_digest": digest(config), "secret_digest": digest(self.secret(config)[1]), "config": config, "build": candidate.name, "artifact_digest": record["artifact_digest"], "nodes": nodes, "phase": "prepared"}
@@ -527,8 +610,8 @@ class Environment:
         if len(containers) == len(expected) and all(r["running"] for r in reports):
             try:
                 monitoring = self.probe(state["config"], self.root / "builds" / state["build"] / "bundle", state["nodes"])
-            except (EnvironmentError, subprocess.TimeoutExpired):
-                monitoring = {"verified": False, "nodes": [], "reason": "MongoDB/监控事实未核验"}
+            except (EnvironmentError, subprocess.TimeoutExpired) as error:
+                monitoring = {"verified": False, "nodes": [], "reason": str(error) if isinstance(error, EnvironmentError) else "监控查询超时"}
         ready = len(reports) == len(expected) and all(r["running"] and r["health"] == "healthy" and r.get("observation_fresh", False) and r.get("components_ready", False) for r in reports) and monitoring.get("verified", False)
         result = {"active": state["environment"], "phase": state["phase"], "ready": ready, "containers": reports, "monitoring": monitoring, "artifact_digest": state["artifact_digest"]}
         try:
@@ -636,8 +719,10 @@ class Environment:
         for port in config["ports"].values():
             if port["license"] and not contained(self.station / "config", port["license"]).is_file():
                 raise EnvironmentError("许可证文件缺失")
+        if "external_tm_url" in config and reuse_mongo:
+            raise EnvironmentError("外部 TM 模式始终保留已有数据库，不使用 --reuse-mongo")
         candidate, record = self.build(config)
-        if not update and record.get("mongo_preflight", {}).get("collection_count", 0) and not reuse_mongo:
+        if "external_tm_url" not in config and not update and record.get("mongo_preflight", {}).get("collection_count", 0) and not reuse_mongo:
             raise EnvironmentError("目标 MongoDB 已有集合；请用户选择保留，或自行执行已审核的清理命令后重新检查；保留需显式 --reuse-mongo。未停止原环境")
         generated = self.generate(name, config, candidate, record, previous=state if update else None)
         call(["docker", "compose", "-p", self.project, "-f", str(candidate / "compose.json"), "config", "--quiet"])
@@ -676,9 +761,10 @@ class Environment:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["prepare-inputs", "check-inputs", "configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
+    parser.add_argument("operation", choices=["prepare-source", "prepare-inputs", "check-inputs", "configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
     parser.add_argument("--station", required=True)
     parser.add_argument("--env")
+    parser.add_argument("--external-tm-url", help="prepare-inputs 生成双 FE 外部 TM 草稿")
     parser.add_argument("--config", help="configure 或 check-inputs 使用的 JSON 文件")
     parser.add_argument("--preparation", help="configure 使用的 Agent 项目准备文件；用户不填写")
     parser.add_argument("--reuse-mongo", action="store_true", help="用户明确选择保留目标库已有集合；只适用于 deploy")
@@ -696,10 +782,18 @@ def main(argv=None):
             raise EnvironmentError("--reuse-mongo 只适用于 deploy")
         if args.bundle and args.operation != "inspect-mongo":
             raise EnvironmentError("--bundle 只适用于 inspect-mongo")
+        if args.external_tm_url is not None and args.operation != "prepare-inputs":
+            raise EnvironmentError("--external-tm-url 只适用于 prepare-inputs")
         env = Environment(args.station)
-        with env.lock():
-            if args.operation == "prepare-inputs":
-                result = env.prepare_inputs(args.env)
+        with env.lock(args.operation):
+            if args.operation == "prepare-source":
+                from projects.tapdata.scripts.environment_source import prepare, PreparationError
+                try:
+                    result = prepare(env.station)
+                except PreparationError as error:
+                    raise EnvironmentError(str(error)) from None
+            elif args.operation == "prepare-inputs":
+                result = env.prepare_inputs(args.env, args.external_tm_url)
             elif args.operation == "check-inputs":
                 if not args.config:
                     raise EnvironmentError("check-inputs 需要 --config 文件")

@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from station_fixture import product_cli
 from bootstrap import product_version  # noqa: E402
 from workflow import ci, evidence, jira_watermark, project_rules, task as workflow_task  # noqa: E402
 from workflow import task_store, quality  # noqa: E402
@@ -53,7 +54,7 @@ def run_tool(tool, *args, cwd):
         if command == "advance" and "--expected-stage" not in args:
             args += ["--expected-stage", snapshot["stage"]]
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "workflow" / tool), *args],
+        [sys.executable, str(product_cli(args[args.index("--dir") + 1] if "--dir" in args else cwd, "workflow/" + tool)), *args],
         capture_output=True,
         text=True,
         cwd=cwd,
@@ -550,7 +551,7 @@ def main():
         # ---- profile 完整性 --------------------------------------------
         profile = json.loads((ROOT / "projects" / "tapdata" / "profile.json").read_text(encoding="utf-8"))
         repositories = json.loads((ROOT / "projects" / "tapdata" / "repositories.json").read_text(encoding="utf-8"))
-        check("仓库目录基线分支含 common-lib=develop", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "develop")
+        check("仓库目录基线分支含 common-lib=main", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "main")
         check("Profile 不保留未消费的顶层状态映射", "statuses" in profile, False)
         check("Profile 不保留未消费的顶层转换", "transitions" in profile, False)
         check("TapData 接管同步从 Analyzed 开始", profile["jira"]["status_sync"]["attempts"]["takeover"]["from"], ["Analyzed"])

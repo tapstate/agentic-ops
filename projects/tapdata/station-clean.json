@@ -2,6 +2,12 @@
   "version": 3,
   "rules": [
     {
+      "scope": "runtime",
+      "pattern": "tapdata-source-preparation-*",
+      "type": "directory",
+      "action": "generated"
+    },
+    {
       "scope": "repository",
       "pattern": "**/target",
       "type": "directory",

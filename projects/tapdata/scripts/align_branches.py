@@ -16,6 +16,15 @@
 """
 from __future__ import annotations
 
+# 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
+if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
+    from pathlib import Path as _AoPath
+    _ao_loader = _AoPath(__file__).resolve().parents[3] / "bootstrap/product_access.py"
+    _ao_namespace = {"__file__": str(_ao_loader), "_AO_LOADER_SOURCE": _ao_loader.read_bytes()}
+    exec(compile(_ao_namespace["_AO_LOADER_SOURCE"], str(_ao_loader), "exec"), _ao_namespace)
+    raise SystemExit(_ao_namespace["python_entry"](__file__))
+
+
 import argparse
 import hashlib
 import json
@@ -134,7 +143,7 @@ def validate_configuration(config, repositories):
     if any(rules.get(name) not in known for name in ("product_repository", "license_repository")):
         raise AlignmentError("derivation 的主仓或 license 仓库未在目录登记")
     linked = set(rules["linked_repositories"])
-    for name in ("same_name_repositories", "plugin_release_repositories"):
+    for name in ("same_name_repositories", "plugin_release_repositories", "develop_main_repositories"):
         values = rules.get(name)
         if not isinstance(values, list) or not set(values) <= linked:
             raise AlignmentError("derivation.%s 必须是 linked_repositories 的子集" % name)
@@ -633,7 +642,7 @@ def derived_target(repository, version, rules, refs, product_path, plugin_cache,
     if version == "main":
         return "main", "main_rule", "main 的 linked 仓统一使用 main"
     if version == "develop":
-        return ("main", "develop_rule", "develop 时 license 固定使用 main") if repository == rules["license_repository"] else ("develop", "develop_rule", "develop 的 linked 仓使用 develop")
+        return ("main", "develop_rule", "develop 时该仓库按配置使用 main") if repository in rules["develop_main_repositories"] else ("develop", "develop_rule", "develop 的其余 linked 仓使用 develop")
     if repository in rules["same_name_repositories"]:
         if version in refs.get(repository, {}):
             return version, "same_name", "远端分支完全同名匹配"

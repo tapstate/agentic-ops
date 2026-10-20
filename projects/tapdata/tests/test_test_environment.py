@@ -193,7 +193,9 @@ class EnvironmentTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.station = Path(self.tmp.name).resolve() / "station"
         (self.station / ".agenticops").mkdir(parents=True)
-        mod.write_json(self.station / ".agenticops/station.json", {"project": "tapdata", "station_id": "a" * 32})
+        mod.write_json(self.station / ".agenticops/station.json", {"schema_version": 4, "project": "tapdata", "station_id": "a" * 32, "product_root": str(ROOT), "source_pool": str(self.station.parent / "pool"), "agents": ["codex"], "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
+        mod.write_json(self.station / ".agenticops/init.json", mod.read_json(ROOT / "contracts/station-state-compatibility.json"))
+        mod.task_store.initialize_current(self.station)
         self.runtime_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env.json")
         self.preparation_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env-preparation.json")
         self.config = {**self.runtime_template, **self.preparation_template}
@@ -229,7 +231,7 @@ class EnvironmentTests(unittest.TestCase):
     def separate_inputs(self):
         runtime = {key: value for key, value in self.config.items() if key in mod.RUNTIME_FIELDS}
         runtime["schema_version"] = 2
-        preparation = {key: value for key, value in self.config.items() if key in mod.PREPARATION_FIELDS}
+        preparation = {key: value for key, value in self.config.items() if key in mod.PREPARATION_FIELDS | {"fe_heartbeat"}}
         preparation["schema_version"] = 1
         runtime_path = self.station / "runtime-input.json"
         preparation_path = self.station / "preparation-input.json"
@@ -325,6 +327,13 @@ class EnvironmentTests(unittest.TestCase):
         original_start = self.env.start
 
         def start(state):
+            candidate = self.env.root / 'builds' / state['build']
+            compose = mod.read_json(candidate / 'compose.json')
+            for name, destination in (('test-environment-entrypoint.sh', 'entrypoint.sh'), ('test-environment-node.js', 'node.js')):
+                self.assertEqual((candidate / name).read_bytes(), (mod.HERE / name).read_bytes())
+                for service in compose['services'].values():
+                    self.assertIn(str(candidate / name) + ':/bootstrap/' + destination + ':ro', service['volumes'])
+                    self.assertNotIn(str(mod.HERE / name) + ':/bootstrap/' + destination + ':ro', service['volumes'])
             for node in state["nodes"]:
                 target = self.env.root / "nodes" / node["name"] / "settings.json"
                 source = self.env.root / "builds" / state["build"] / (node["name"] + "-settings.json")
@@ -870,7 +879,7 @@ callbacks.end().then(()=>console.log(JSON.stringify({exitCode:localProcess.exitC
     def test_unreachable_advertised_member_fails_closed(self):
         result = self.probe(mod.time.time() * 1000, reachable=False)
         self.assertEqual(result["exitCode"], 1)
-        self.assertEqual(result["output"], [])
+        self.assertEqual(json.loads(result["output"][0]), {"probe_error": "mongo_topology"})
 
 
 if __name__ == "__main__":

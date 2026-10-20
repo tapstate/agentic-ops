@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# AO_PRODUCT_SHELL_BEGIN
+exec python3 -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]).resolve(); l=p.parents[0]/"bootstrap/product_access.py"; n={"__file__":str(l),"_AO_LOADER_SOURCE":l.read_bytes()}; exec(compile(n["_AO_LOADER_SOURCE"],str(l),"exec"),n); raise SystemExit(n["shell_entry"](str(p),sys.argv[2:]))' "$0" "$@"
+# AO_PRODUCT_SHELL_END
 set -euo pipefail
 
 script_path="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$0")"
@@ -12,7 +15,7 @@ usage() {
   agenticops agents
   agenticops version
   agenticops station <init|status|doctor|repair|start|list|identity|prune|purge|source-update> [参数]
-  agenticops update [--to-ref <完整SHA> --expected-current-ref <完整SHA>] [--check|--resume] [--writers-stopped]
+  agenticops update [--to-ref <完整SHA> --expected-current-ref <完整SHA>] [--check [--probe]|--resume] [--writers-stopped]
   agenticops recover-install --source-branch <维护分支> --to-ref <完整SHA> --expected-current-ref <完整SHA> [--check|--resume] [--writers-stopped]
   agenticops rollback
 
@@ -67,7 +70,7 @@ start_agent() {
         shift
         ;;
       --help|-h)
-        printf '用法：agenticops station start <Agent ID> [--station <目录>] [--non-interactive] [-- <Agent 参数>]\n'
+        printf '用法：agenticops station start <Agent ID> [--station <目录>] [--non-interactive] [--writers-stopped | --update-current-ref <SHA> --update-target-ref <SHA>] [-- <Agent 参数>]\n'
         return 0
         ;;
       --agent)

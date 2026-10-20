@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# AO_PRODUCT_SHELL_BEGIN
+exec python3 -c 'import sys; from pathlib import Path; p=Path(sys.argv[1]).resolve(); l=p.parents[1]/"bootstrap/product_access.py"; n={"__file__":str(l),"_AO_LOADER_SOURCE":l.read_bytes()}; exec(compile(n["_AO_LOADER_SOURCE"],str(l),"exec"),n); raise SystemExit(n["shell_entry"](str(p),sys.argv[2:]))' "$0" "$@"
+# AO_PRODUCT_SHELL_END
 set -euo pipefail
 
 ao_stage="核验产品根目录与操作条件"

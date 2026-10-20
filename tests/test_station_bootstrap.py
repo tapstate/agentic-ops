@@ -117,12 +117,15 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_quiet_runtime_failure_keeps_diagnostic_and_argument_errors_keep_usage(self):
         binding = self.station / '.agenticops/station.json'
+        original = binding.read_bytes()
         binding.write_text('{broken')
         result = self.render('--refresh', '--quiet')
         self.assertEqual(2, result.returncode)
-        self.assertIn('[AgenticOps][刷新][失败]', result.stderr)
+        self.assertIn('[AgenticOps][产品租约][失败]', result.stderr)
         self.assertNotIn('usage:', result.stderr)
         self.assertNotIn('[完成]', result.stdout)
+        self.assertEqual('{broken', binding.read_text())
+        binding.write_bytes(original)
         invalid = self.render('--unknown')
         self.assertEqual(2, invalid.returncode)
         self.assertIn('usage:', invalid.stderr)

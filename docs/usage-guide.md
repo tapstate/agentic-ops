@@ -60,5 +60,6 @@ Agent 会先读取 Jira 和项目准入规则，确认产品版本并接管完�
 - [任务授权指引](usage/task-authorization.md)：用脚本从空闲工位接管 Jira 任务，再完成准入、基线和实施授权。
 - [更新与回退](usage/update-and-rollback.md)：更新安装、修复工位接线或回退一次更新。
 - [常见问题](usage/faq.md)：安装失败、Hook、任务恢复和本地清理。
+- [问题反馈流程](usage/problem-feedback.md)：所有项目研发在工位接管和执行任务中，通过统一入口总结问题、整理必要复现资料并提交 AO，由维护者从问题列表统一处理；技能可用性以实际交付为准。
 
 维护 AgenticOps 源码本身，请改看[维护指引](maintenance-guide.md)，不要把源码仓库当作业务使用工位。

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bootstrap"))
 from workflow import authorization, jira_status, task, task_checks, task_store
-from station_fixture import save_task as save_station_task
+from station_fixture import product_cli, save_task as save_station_task
 from agent_registry import discover
 from render import check_checkpoint_migration
 from station_paths import StationDirectory
@@ -426,7 +426,7 @@ class CheckpointTests(unittest.TestCase):
     def test_cli_does_not_fill_missing_run_or_stage(self):
         for arguments in (["record", "--key", "x", "--value", "y"],
                           ["advance", "--note", "repeat", "--expected-run-id", self.state["run_id"]]):
-            result = subprocess.run([sys.executable, str(ROOT / "workflow/task.py"), *arguments,
+            result = subprocess.run([sys.executable, str(product_cli(self.base, "workflow/task.py")), *arguments,
                                      "--issue-key", "TAP-123", "--dir", str(self.base)],
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 2)
@@ -435,7 +435,7 @@ class CheckpointTests(unittest.TestCase):
     def test_waiting_old_run_writer_cannot_overwrite_replacement(self):
         with task_store.task_run_lock(self.base, "TAP-123"):
             process = subprocess.Popen(
-                [sys.executable, str(ROOT / "workflow/task.py"), "record", "--key", "old_fact",
+                [sys.executable, str(product_cli(self.base, "workflow/task.py")), "record", "--key", "old_fact",
                  "--value", "old", "--force", "--issue-key", "TAP-123", "--dir", str(self.base),
                  "--expected-run-id", self.state["run_id"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:

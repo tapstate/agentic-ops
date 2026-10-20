@@ -6,11 +6,17 @@
 
 ## 新任务前检查与更新目标设计
 
-本节定义目标行为，尚未实现；当前安装不会仅因接管请求自动检查或更新。多工位调用与切换的唯一互斥设计见[工程架构](../architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)，稳定场景验收见 [PROD-001](../user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)。既有 `update --check`、定点更新和恢复入口继续复用，不另建更新器。
+新客户端在 `station start` 和 `task.py takeover` 创建新任务前检查更新；原 run 和在途操作恢复跳过检查。旧安装必须先采用包含产品租约入口的版本，不能因远端已发布而自动获得本能力。多工位调用与切换的唯一互斥设计见[工程架构](../architecture/agenticops-v1-architecture.md#产品调用与版本切换互斥目标设计)，稳定场景验收见 [PROD-001](../user-stories/v1/prod-001-install-and-connect-agent.md#新任务前更新目标验收)。既有 `update --check`、定点更新和恢复入口继续复用，不另建更新器。
+
+安装探测使用 `agenticops update --check --probe`，分别返回 `up_to_date`、`update_available`、`check_unavailable`、`target_unknown`、`invalid_local_state`，并报告当前/目标完整 SHA、来源、检查时间、端点 epoch、登记工位及切换阻塞。普通 `update --check` 保留实际更新预检的拒绝语义。
+
+受管启动的监督进程持有产品共享租约直到 Agent 退出。启动前已核验全部产品调用及未受管会话停写时，可用 `station start <Agent ID> --station <工位> --writers-stopped`：发现同 epoch 新版后非阻塞尝试独占、绑定目标与登记范围执行更新，仅修正当前工位并 doctor，然后启动新会话。声明不能代替真实停写，也不能覆盖实际仍持有的租约。旧测试容器若仍挂载产品脚本，同样属于待停写调用；新部署挂载本次构建的脚本快照。
+
+没有停写证明、已处于受管会话或跨 epoch 时返回具体选择并保持未接管。选择继续旧版由 Agent 在原调用追加 `--update-current-ref <原完整SHA> --update-target-ref <目标完整SHA>`，只绑定本次选择，不保存偏好；目标变化须重新展示。独立安装仍沿本页既有 install/原版 purge/新版 init 流程，不新增清理入口。当前没有已验证的平台热重载接口，默认新会话路径；CLI 替身测试不能证明 Codex/Claude 已发现新版技能，真实平台证据另行验收。
 
 仅空闲工位接新任务、或从外部成果建立新 run 时进入检查；先回读 current 与 operation，已有 run 和在途 takeover 按原请求恢复，不插入自动升级。检查在创建 operation/run、档案占位或下载业务源码之前完成；无需等 Jira 分支选择齐备才发现产品更新。任务准入与 Jira 状态不因更新而放宽。
 
-新版定义为安装记录的 repository/tracking_branch 上可快进到达的新提交，不按版本字符串或其它通道 Tag 排序。Bootstrap 探测返回当前/目标完整 SHA、来源分支、检查时间、epoch 兼容结论及独立的切换阻塞原因；同 SHA 为无更新，缺少证明 Git 祖先关系的历史或两端兼容材料为未知；状态兼容只比较端点 epoch，遵循工位合同，不逐提交核验。兼容但正在使用与不兼容是不同结果。现有 --check 会因跨 epoch 登记非空直接拒绝，目标探测须能报告发现的新版本及阻塞详情，同时保持实际应用入口的拒绝条件。
+新版定义为安装记录的 repository/tracking_branch 上可快进到达的新提交，不按版本字符串或其它通道 Tag 排序。Bootstrap 探测返回当前/目标完整 SHA、来源分支、检查时间、epoch 兼容结论及独立的切换阻塞原因；同 SHA 为无更新，缺少证明 Git 祖先关系的历史或两端兼容材料为未知；状态兼容只比较端点 epoch，遵循工位合同，不逐提交核验。兼容但正在使用与不兼容是不同结果。普通 --check 会因跨 epoch 登记非空直接拒绝，--check --probe 报告发现的新版本及阻塞详情，同时保持实际应用入口的拒绝条件。
 
 | 结果 | 本次行为 |
 |---|---|

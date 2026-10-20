@@ -20,7 +20,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
-from station_fixture import save_task as save_station_task, initialize_station
+from station_fixture import product_cli, save_task as save_station_task, initialize_station
 from workflow import pr_body
 
 
@@ -498,6 +498,174 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(self.view()["publications"]["feature-plan"]["body"], body)
         with self.assertRaisesRegex(ValueError, "完整 publication_body"):
             self.apply("draft", {"id": "incomplete-plan", "checkpoint": "q2-plan", "body": body + "错误结论"})
+
+    def test_delivery_summary_distinguishes_valid_decisions_and_stale_confirmation(self):
+        from workflow.quality_write import jira_field_body
+        self.plan(); self.select(); self.execute(); self.decide()
+        for outcome, label in (("accept", "验收通过"), ("rework", "返工"),
+                               ("defer", "延期"), ("accept_risk", "接受风险"),
+                               ("not_applicable", "不适用")):
+            with self.subTest(outcome=outcome):
+                self.checkpoint("q4-acceptance", outcome=outcome,
+                                follow_up="补齐边界验证", owner="研发",
+                                deadline=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat())
+                before = quality.state_path(self.base, self.task).read_bytes()
+                body = jira_field_body(self.base, self.task, "fix_details")
+                self.assertIn("验收处置：" + label, body)
+                self.assertIn("当前处置依据", body)
+                self.assertIn("fixture:report/run-1", body)
+                self.assertIn("补齐边界验证", body)
+                if outcome != "accept":
+                    self.assertNotIn("验收处置：验收通过", body)
+                self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        self.task["source_prepared"] = True
+        self.save_task()
+        with mock.patch.object(quality, "git_revision", return_value="b" * 40):
+            body = jira_field_body(self.base, self.task, "fix_details")
+        self.assertIn("验收处置：待核验", body)
+        self.assertIn("历史或未确认依据", body)
+        self.assertNotIn("当前处置依据", body)
+
+    def test_delivery_summary_keeps_raw_failure_and_nonexecution(self):
+        from workflow.quality_write import jira_field_body
+        self.plan(); self.select()
+        self.execute(result="FAIL", execution_id="failed")
+        self.execute(result="NOT_RUN", execution_id="not-run")
+        body = jira_field_body(self.base, self.task, "fix_details")
+        self.assertIn("FAIL", body)
+        self.assertIn("NOT_RUN", body)
+        self.assertIn("未执行原因：夹具环境未就绪", body)
+        self.assertNotIn("验收处置：验收通过", body)
+        self.assertNotIn("根因已修复", body)
+
+    def test_delivery_summary_later_ci_is_scoped_and_does_not_require_future_materials(self):
+        from workflow import verification
+        from workflow.quality_write import jira_field_body, delivery_summary
+        self.task["source_prepared"] = True
+        self.save_task()
+        revision = mock.patch.object(quality, "git_revision", return_value="a" * 40)
+        revision.start(); self.addCleanup(revision.stop)
+        self.plan(); self.select(); self.execute(); self.decide(); self.checkpoint("q4-acceptance")
+        before = jira_field_body(self.base, self.task, "fix_details")
+        self.assertNotIn("缺少 ci", before)
+        repo = "tapdata/tapdata"
+        payload = {"kind": "ci", "repository": repo, "target_revision": "a" * 40,
+                   "source_ref": "fixture:ci", "head_revision": "a" * 40,
+                   "analysis_ref": "fixture:analysis", "case_review_ref": "fixture:cases",
+                   "case_version": "v1", "dependency_analysis_ref": "fixture:dependencies",
+                   "run_ref": "fixture:ci/run/1", "attempt": 1, "checkout_ref": "fixture:checkout",
+                   "required_scope": ["metadata"], "results": [
+                       {"scope": "metadata", "result": "PASS", "report_ref": "fixture:ci/report",
+                        "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+        self.apply("verification", payload)
+        body = jira_field_body(self.base, self.task, "fix_details")
+        self.assertIn("已有验证 ci：材料核对有效", body)
+        self.assertIn("fixture:ci/report", body)
+        self.assertNotIn("tapdata-manager 缺少 ci", body)
+        self.assertNotIn("fixture:ci/report", body.split("仓库：tapdata/tapdata-manager")[1])
+        rules, ctx = quality.config(self.base, self.task), quality.context(self.base, self.task)
+        model = quality.replay(quality.load(self.base, self.task))
+        changed = copy.deepcopy(ctx)
+        changed["repositories"][repo]["live_revision"] = "b" * 40
+        stale = delivery_summary(model, rules, changed)
+        self.assertIn("已有验证 ci：待核验或已失效", stale)
+        self.assertIn("原始结果：PASS", stale)
+        self.assertIn("验收处置：待核验", stale)
+        # 提取已有单份材料的检查不改变原阶段门禁：另一仓缺 CI 仍由原入口报告。
+        self.assertTrue(any("tapdata-manager 缺少 ci" in p
+                            for p in verification.problems(model, ctx, ["ci"], rules)))
+
+    def test_delivery_summary_project_checkpoint_and_missing_mapping(self):
+        from workflow.quality_write import delivery_summary, jira_field_body
+        self.plan(); self.select(); self.execute(); self.decide(); self.checkpoint("q4-acceptance")
+        rules, ctx = quality.config(self.base, self.task), quality.context(self.base, self.task)
+        model = quality.replay(quality.load(self.base, self.task))
+        rules["tests_passed"]["checkpoint"] = "project-acceptance"
+        next(p for p in rules["checkpoints"] if p["id"] == "q4-acceptance")["id"] = "project-acceptance"
+        model["items"]["case-a"]["plan"]["checkpoint"] = "project-acceptance"
+        body = delivery_summary(model, rules, ctx)
+        self.assertIn("检查点：project-acceptance", body)
+        self.assertNotIn("检查点：q4-acceptance", body)
+        rules.pop("tests_passed")
+        body = delivery_summary(model, rules, ctx)
+        self.assertIn("项目未明确适用验收检查点", body)
+        self.assertNotIn("验收处置：验收通过", body)
+        self.assertIsNone(jira_field_body(self.base, self.task, "unmapped_field"))
+
+    def test_delivery_summary_does_not_change_original_publication_recovery(self):
+        from workflow.quality_write import jira_field_body
+        for status in ("intent", "unknown", "created"):
+            with self.subTest(status=status):
+                key = "old-" + status
+                self.apply("draft", {"id": key, "body": "原版已确认正文 " + status})
+                record = self.view()["publications"][key]
+                self.apply("confirm", {"id": key, "digest": record["digest"], "proof": proof()})
+                self.apply("prepare_write", {"id": key, "digest": record["digest"]})
+                record = self.view()["publications"][key]
+                if status != "intent":
+                    receipt = {"id": key, "operation_id": record["operation_id"], "result": status}
+                    if status == "created":
+                        receipt["comment_id"] = "100"
+                    self.apply("receipt", receipt)
+                original = quality.state_path(self.base, self.task).read_bytes()
+                self.assertIn("尚无验证材料", jira_field_body(self.base, self.task, "fix_details"))
+                self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+                self.apply("readback", {"id": key, "operation_id": record["operation_id"],
+                           "site": record["site"], "issue_key": "TAP-123", "comment_id": "100",
+                           "body": record["body"], "source_ref": "fixture:jira/100"})
+                self.assertEqual("verified", self.view()["publications"][key]["status"])
+
+    def test_delivery_summary_field_confirmation_is_not_evidence_freshness(self):
+        from workflow import jira_collect
+        # 复用最小项目配置，字段 ID 不依赖 TapData；真实 collect/confirm 不被 mock。
+        path = self.product / "projects/tapdata/jira-transitions.json"
+        config = json.loads(path.read_text())
+        spec = config["task_classes"]["defect_fix"]
+        field = dict(spec["fields"]["fix_details"], jira_id="customfield_example",
+                     aliases=["Delivery Summary"])
+        spec["fields"] = {"fix_details": field}
+        spec["transitions"] = []
+        path.write_text(json.dumps(config))
+        snapshot = {"source_ref": "fixture:remote", "issue": {"key": "TAP-123", "fields": {
+            "status": {"name": "In Progress"}, "assignee": {"accountId": "fixture-user"}}},
+            "transitions": []}
+        proposals = {"customfield_example": "人工保留：待验证；当前尚无结果。"}
+        packet = jira_collect.collect(self.base, self.task, "acceptance", snapshot, proposals)
+        old_digest = packet["fields"]["customfield_example"]["digest"]
+        jira_collect.confirm(self.base, "TAP-123", self.task["run_id"], "acceptance", snapshot,
+                             proposals, {"customfield_example": old_digest}, proof())
+        original_suggestion = packet["fields"]["customfield_example"]["suggestions"]
+        self.plan(); self.select(); self.execute()
+        changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, proposals)
+        self.assertEqual(["customfield_example"], changed["confirmed"])
+        self.assertNotEqual(original_suggestion, changed["fields"]["customfield_example"]["suggestions"])
+        updated = {"customfield_example": "人工保留：当前首轮验证 PASS，仍待最终验收。"}
+        changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, updated)
+        self.assertNotEqual(old_digest, changed["fields"]["customfield_example"]["digest"])
+        with self.assertRaisesRegex(ValueError, "字段值"):
+            jira_collect.confirm(self.base, "TAP-123", self.task["run_id"], "acceptance", snapshot,
+                                 updated, {"customfield_example": old_digest}, proof())
+        spec["fields"] = {}
+        path.write_text(json.dumps(config))
+        self.assertEqual({}, jira_collect.collect(self.base, self.task, "acceptance", snapshot)["fields"])
+
+    def test_delivery_summary_status_acceptance_and_automatic_observation(self):
+        from workflow.quality_write import jira_field_body, delivery_summary
+        self.rename_acceptance_checkpoint()
+        self.taptest_plan(checkpoint="acceptance")
+        self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+        self.automatic_checkpoint()
+        body = jira_field_body(self.base, self.task, "fix_details")
+        self.assertIn("按关联 Test 状态接纳", body)
+        self.assertIn("尚无本地执行记录", body)
+        self.assertNotIn("验收处置：验收通过", body)
+        self.assertIn("fixture:TAP-T1", body)
+        # 自动检查点的 observed 保持事实记录；不捏造用户 accept。
+        rules, ctx = quality.config(self.base, self.task), quality.context(self.base, self.task)
+        model = quality.replay(quality.load(self.base, self.task))
+        rules["tests_passed"]["checkpoint"] = "q3-draft"
+        body = delivery_summary(model, rules, ctx)
+        self.assertNotIn("验收处置：验收通过", body)
 
     def test_stage_comment_retains_exact_continuation_binding_without_claiming_push(self):
         from workflow.quality_write import stage_summary
@@ -1432,7 +1600,7 @@ class QualityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "归档"):
                 action()
         for script in ("jira_status.py", "jira_watermark.py"):
-            result = subprocess.run([sys.executable, str(ROOT / "workflow" / script), "status",
+            result = subprocess.run([sys.executable, str(product_cli(self.base, "workflow/" + script)), "status",
                 "--dir", str(self.base), "--issue-key", "TAP-123"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(before, {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()})
@@ -1465,7 +1633,7 @@ class QualityTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "CI 状态"):
                         read()
                 self.assertEqual(raw, path.read_bytes())
-        result = subprocess.run([sys.executable, str(ROOT / "workflow/ci.py"), "status",
+        result = subprocess.run([sys.executable, str(product_cli(self.base, "workflow/ci.py")), "status",
             "--dir", str(self.base), "--issue-key", "TAP-123", "--repo", "tapdata/tapdata", "--pr", "1"],
             capture_output=True, text=True)
         self.assertEqual(4, result.returncode)
@@ -1640,7 +1808,7 @@ class QualityTests(unittest.TestCase):
                 path.write_text(raw)
                 with self.assertRaisesRegex(ValueError, "JSON 对象"):
                     evidence.load_events(path)
-                result = subprocess.run([sys.executable, str(ROOT / 'workflow/evidence.py'),
+                result = subprocess.run([sys.executable, str(product_cli(self.base, 'workflow/evidence.py')),
                     '--dir', str(self.base), '--issue-key', 'TAP-123'], capture_output=True, text=True)
                 self.assertEqual(4, result.returncode)
                 self.assertEqual('', result.stdout)
@@ -2181,7 +2349,7 @@ class QualityTests(unittest.TestCase):
         q4 = self.view()['checkpoints']['q4-acceptance']['publication_body']
         self.assertIn('Fix Details', q4); self.assertNotIn('repo-19', q4)
         details = jira_field_body(self.base, self.task, 'fix_details')
-        self.assertIn('已验收', details); self.assertIn('结果：PASS', details)
+        self.assertIn('验收处置：验收通过', details); self.assertIn('当前处置依据）：PASS', details)
         self.assertIn('fixture:report/run-1', details)
         self.assertNotIn('"executions":', details)
 
@@ -2229,7 +2397,7 @@ class FeatureFlowTests(unittest.TestCase):
         return task.load(self.ws, "TAP-123")
 
     def cli(self, tool, *args, expected=0, mutation=True):
-        command = [sys.executable, str(ROOT / "workflow" / tool), *args,
+        command = [sys.executable, str(product_cli(self.ws, "workflow/" + tool)), *args,
                    "--issue-key", "TAP-123", "--dir", str(self.ws)]
         if mutation and args[0] != "takeover":
             command += ["--expected-run-id", self.read()["run_id"]]

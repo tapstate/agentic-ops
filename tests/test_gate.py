@@ -20,7 +20,7 @@ GATE_RUNNER = ROOT / "gate" / "runner.py"
 sys.path.insert(0, str(ROOT))
 from gate import engine  # noqa: E402
 from workflow import jira_watermark, quality, task_store  # noqa: E402
-from station_fixture import save_task as save_station_task
+from station_fixture import product_cli, save_task as save_station_task
 
 PASS = 0
 FAIL = 0
@@ -174,7 +174,7 @@ def grant(ws, **overrides):
                            "decision": {"outcome": "accept", "reason": "夹具已确认方案及 Test 关联意图", "proof": proof}})
     subprocess.run(
         [
-            sys.executable, str(ROOT / "workflow" / "authorization.py"), "grant",
+            sys.executable, str(product_cli(ws, "workflow/authorization.py")), "grant",
             "--issue-key", issue,
             "--expected-run-id", run_id,
             "--agent-id", "dev-bot-1",

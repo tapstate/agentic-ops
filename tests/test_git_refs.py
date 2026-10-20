@@ -374,6 +374,48 @@ class SourceSyncTests(unittest.TestCase):
             self.verify()
         self.assertEqual("keep", (self.root / "untracked").read_text())
 
+    def test_target_advance_keeps_validated_round_until_next_sync(self):
+        self.git("merge", "--no-edit", "develop")
+        evidence = source_sync.impact(self.root, "feature", self.base, self.source, self.task)
+        candidate = evidence["task_revision"]
+        self.git("checkout", "develop")
+        advanced = self.commit("later", "target advanced during validation")
+        self.git("checkout", "feature")
+
+        # A fresh target does not rewrite the round's evidence or move the candidate.
+        self.assertEqual(evidence, source_sync.impact(
+            self.root, "feature", self.base, self.source, self.task))
+        self.assertEqual(candidate, self.git("rev-parse", "HEAD"))
+        with self.assertRaisesRegex(ValueError, "尚未包含"):
+            self.verify(source=advanced)
+
+        self.git("merge", "--no-edit", "develop")
+        next_round = source_sync.impact(self.root, "feature", self.base, advanced, candidate)
+        self.assertEqual(self.base, next_round["base_revision"])
+        self.assertNotEqual(candidate, next_round["task_revision"])
+        self.assertTrue(source_sync.ancestor(self.root, candidate, next_round["task_revision"]))
+        self.assertEqual(["task"], next_round["comparisons"]["final_task"]["paths"])
+
+    def test_conflict_return_resumes_same_branch_and_preserves_prior_candidate(self):
+        self.git("merge", "--no-edit", "develop")
+        candidate = self.git("rev-parse", "HEAD")
+        self.git("checkout", "develop")
+        target = self.commit("task", "upstream implementation")
+        self.git("checkout", "feature")
+        result = subprocess.run(["git", "-C", str(self.root), "merge", "--no-edit", "develop"],
+                                capture_output=True)
+        self.assertNotEqual(0, result.returncode)
+        with self.assertRaisesRegex(ValueError, "冲突"):
+            self.verify(source=target)
+        resolved = self.commit("task", "combined implementation")
+        evidence = source_sync.impact(self.root, "feature", self.base, target, candidate)
+        self.assertEqual("feature", self.git("branch", "--show-current"))
+        self.assertEqual(self.base, evidence["base_revision"])
+        self.assertEqual(resolved, evidence["task_revision"])
+        self.assertTrue(source_sync.ancestor(self.root, candidate, resolved))
+        self.assertTrue(evidence["analysis_required"])
+        self.assertEqual(["task"], evidence["comparisons"]["final_task"]["paths"])
+
     def test_conflict_keeps_scene_and_does_not_report_synced(self):
         self.commit("source", "different")
         result = subprocess.run(["git", "-C", str(self.root), "merge", "--no-edit", "develop"],

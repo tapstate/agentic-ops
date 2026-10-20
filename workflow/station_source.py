@@ -344,7 +344,7 @@ def require_readiness(station, task):
         raise ValueError("仓库就绪证据失效，请重新执行 source-readiness")
     if any(item["relation"] == "advanced" for item in snapshot["repositories"].values()):
         if record.get("accepted_digest") != snapshot["digest"] or not record.get("decision_ref"):
-            raise ValueError("目标分支已推进；请确认沿冻结基线开发并在 PR 前同步，或归档清理后重新接管")
+            raise ValueError("目标分支已推进；请确认沿冻结基线开发并在本轮正式验证前同步，或归档清理后重新接管")
     return snapshot["digest"]
 
 

@@ -6,7 +6,7 @@
   },
   "repositories": {
     "tapdata/tapdata": {"origin": "git@github.com:tapdata/tapdata.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
-    "tapdata/tapdata-common-lib": {"origin": "git@github.com:tapdata/tapdata-common-lib.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
+    "tapdata/tapdata-common-lib": {"origin": "git@github.com:tapdata/tapdata-common-lib.git", "baseline_branch": "main", "dev_branch": "main", "domains": ["product"]},
     "tapdata/tapdata-connectors": {"origin": "git@github.com:tapdata/tapdata-connectors.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/tapdata-connectors-enterprise": {"origin": "git@github.com:tapdata/tapdata-connectors-enterprise.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/tapdata-enterprise": {"origin": "git@github.com:tapdata/tapdata-enterprise.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},

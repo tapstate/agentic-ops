@@ -2,13 +2,13 @@
 
 > 项目适配：`tapdata`
 
-本文用于 `tapdata-common-lib` 公共 API 或版本变化时的影响分析、同步和验证。它不授权制品发布、release 分支创建或跨仓推送。
+本文用于所有 `tapdata-common-lib` 代码修改前的兼容性判断，以及公共 API 或版本变化时的影响分析、同步和验证。它不授权制品发布、release 分支创建或跨仓推送。
 
 来源：《TapData 产品研发指南（v3.5.4+）》，提取日期为 2026-07-27；移植自 tapstate/agentic-ops（2026-08-27）。
 
 ## 适用条件
 
-出现以下任一情况时使用本手册：
+修改 `tapdata-common-lib` 下任何工程的代码前，先判断是否影响 API、二进制或消费行为兼容性；无法确认时保留待核验结论，不按兼容变更继续。以下情况尤其需要分析消费方：
 
 - 修改 `tapdata-api` 或 `tapdata-pdk-api` 的公共接口。
 - 修改 `plugin-kit` 使用的 API 版本。
@@ -44,6 +44,12 @@ tapdata-enterprise、tapdata-connectors-enterprise 等实际消费新 API 的模
 
 列表用于提示搜索范围，不能替代目标分支搜索结果。属性名中已有的 `verison` 拼写属于现存协议字段，不得在无独立 Jira 范围时顺手更名。
 
+## 不兼容变更与分支
+
+不兼容变更前，先通知 jarad 或 sam，由其从当前 `main` 创建 `release-v*` 分支保留升级前代码；核验远端分支和对应的 main 提交后，再推进不兼容修改与依赖版本升级。release 名称及版本由负责人确认，不自行猜测或创建；等待期间可继续影响分析和测试准备。通知需明确仓库、main 提交、兼容性影响及待确认版本，不能把待通知写成已通知。
+
+TapData 主仓为 `develop` 时，公共库使用 `main`；完整分支关系以[分支矩阵](../version-branch-alignments.json)为准。
+
 ## 同步规则
 
 1. 根据 Jira 卡片和目标分支确认需要发布或引用的版本，不得由 AIAgent 自行决定版本号。
@@ -56,7 +62,9 @@ tapdata-enterprise、tapdata-connectors-enterprise 等实际消费新 API 的模
 
 先按[构建与本地运行](build-test-and-local-run.md#maven-配置与任务本地仓库)读取当前 run 的 `local_repository` 和绝对 Maven 可执行文件。保留用户 Maven settings 中的镜像、认证和代理，但所有命令必须显式使用该任务本地仓库。
 
-按依赖方向执行：
+以下命令用于本地验证。CI 中公共库各工程通过 `deploy` 发布到 Nexus，TapData 的 CI 打包从 Nexus 获取相应版本的依赖；本地 `install` 成功不能证明 CI 可获取制品。核验公共库部署结果、Nexus 中对应坐标和版本及消费 CI 的依赖解析和打包结果；制品未就绪时保留 CI 待验证，不以本地制品替代。
+
+本地按依赖方向执行：
 
 ```sh
 # tapdata-common-lib
@@ -83,7 +91,7 @@ tapdata-enterprise、tapdata-connectors-enterprise 等实际消费新 API 的模
 以下动作必须由研发工程师确认：
 
 - 向内部 Maven 仓库发布或部署制品。
-- 创建 release 分支或决定正式版本号。
+- release 分支通常通知 jarad 或 sam 创建，正式版本号由负责人决定。
 - 推送多个业务仓库。
 - 修改未包含在 Jira 范围内的消费仓库。
 
