@@ -36,6 +36,10 @@ completed 后可通过原 quality receipt/readback、jira_status complete、jira
 
 PR 与 Fix Details 共用[交付文案内容](#交付文案内容)的事实组织方式。PR 面向单仓审查，说明触发条件与修改前后行为、本仓实际变更及依据、当前验证结果、风险和跨仓依赖；其它仓成果只作为明确标注的依赖，不串用 SHA、报告或通过结论。按目标仓库已有模板组织内容，没有模板时可用“问题与变更、验证、风险与依赖”三个短段，不要求固定标题或空章节。Draft 如实保留未完成项，正式提审仍按现有 PR Ready 条件。
 
+本轮源码同步按[PR 前同步检出来源](task-authorization.md#pr-前同步检出来源)在正式验证前完成。Draft 总结注明候选完整 SHA、已完成结果和待验收事项；最终提审总结注明本轮已纳入的目标提交 T、当前 PR Head H，并分别引用本地验证、人工验收和 CI 的实际结果、报告与未覆盖项。Q4 通过不能写成 CI 通过，未执行、失败、未知或跳过不能写成 PASS；总结只是现有证据的摘要，不另建验收记录。
+
+推送新候选时更新正文的版本与待验证状态，保留旧报告的原执行版本，不能让旧候选的“全部通过”继续描述当前 Head。必要验收和 CI 结果齐备后再更新最终总结；符合现有具体缺口处置的，保留真实结果和处置依据。写前与写后均核对当前 PR Head 与总结中的候选一致，Head 漂移时重新整理，不把正文比对成功当成验收版本匹配。正文写入失败或结果未知时先核查原 PR，保持总结待同步，不能报告提审总结已完成。
+
 PR 正文使用 UTF-8 Markdown 文件和真实换行，通过文件编辑能力生成，不把完整正文拼入 Shell 命令。CLI 创建和更新使用 `gh pr create --repo <owner/repo> ... --body-file <正文文件>` 或 `gh pr edit <编号> --repo <owner/repo> --body-file <正文文件>`；API/MCP 直接传递真实多行字符串，由客户端序列化一次。不要用 `echo -e`、`eval` 或全局反转义转换正文；双引号中的美元符号、反引号及命令替换可能被 Shell 解释，字面 `\n` 也不等于真实换行。
 
 每仓独立准备正文，核对变更、验证结果和未执行项；文件放入当前任务已有证据位置，使用 `task.py interaction-path` 分配。不得将敏感日志或本机绝对路径写入对外正文。纯正文修正不改变源码，不触发来源分支 Merge、代码重验或重新创建 PR；原有代码交付和验收要求保持不变。
@@ -83,7 +87,7 @@ results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告�
 
 TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。local/ci/review 在任一任务仓代码或登记变化时失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
 
-新 source_sync 的 `binding_version=2` 由工具生成，禁止调用者指定。仅所属仓的源码版本、repository/base_branch/work_branch/base_sha/catalog_digest/approved_scope/verification_method 变化使它失效；无关仓变化不使该来源事实失效，新增仓仍需自己的材料。旧事件缺少版本时继续全仓绑定，未知版本拒绝，不复活历史确认或授权。记录只证明 observed_at 时核对的 source_revision 包含关系，PR 前仍需刷新来源事实，不保证远端以后不再变化。该语义改变须按[更新与回退](update-and-rollback.md)跨 epoch 退出重建，不在线迁移。
+新 source_sync 的 `binding_version=2` 由工具生成，禁止调用者指定。仅所属仓的源码版本、repository/base_branch/work_branch/base_sha/catalog_digest/approved_scope/verification_method 变化使它失效；无关仓变化不使该来源事实失效，新增仓仍需自己的材料。旧事件缺少版本时继续全仓绑定，未知版本拒绝，不复活历史确认或授权。记录只证明 observed_at 时核对的 source_revision 包含关系；来源刷新时机遵循[PR 前同步检出来源](task-authorization.md#pr-前同步检出来源)，不保证远端以后不再变化，也不因 PR 元数据更新强制刷新材料。该语义改变须按[更新与回退](update-and-rollback.md)跨 epoch 退出重建，不在线迁移。
 
 源码同步后已解决问题只需无修改重验时，`failures.py` 使用 revalidate，参数同 finish，不消耗修复轮数；失败则回到 unresolved，后续修改仍须 start 记账。每次重新验证都保留事件，不能改写历史。旧 `ci.py record-fix` 已移除，CI 观察不再维护另一套预算。
 
@@ -102,6 +106,8 @@ TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q
 清理的外部结果核验只读取既有意图和回读，并按原安全分类识别未知操作；不为该判断生成当前质量报告或新增待办正文。当前与旧 run 的未知写入仍须回读，损坏记录仍拒绝，明确未发送的同步待办按既有规则披露；实时质量报告及阶段准入的制品检查继续保留。两处解耦必须一起验证，不能通过忽略同步异常、返回空清单或复造 Jar 达到收尾效果。
 
 ## PR 审查返工
+
+合并冲突退回沿原 Jira 和已有 PR 进入下一轮：回读退回原因与代码 → 按[来源同步](task-authorization.md#pr-前同步检出来源)处理当前目标提交 → 分析影响并更新失效验收 → 推送候选、核对 CI → 更新并回读提交总结 → 再次提审。普通冲突处理在有效授权范围内继续当前 run；方案、范围或验收预期改变时使用[同周期方案返工](task-authorization.md#同周期方案返工)。工位已释放时按[从 Jira 任务接续](task-authorization.md#从-jira-任务接续)恢复已有分支和 PR，旧报告不自动变成新 run 验收。PR Ready 后仍按[完成预检与等待合并](task-authorization.md#完成预检与等待合并)核对实际合并与 Q5/Q6，不以总结更新或冲突解决代替结项。
 
 Agent 原生回读当前 PR Head、审查结论、普通评论和行内审查线程，读取完整分页；只读 PR 总体状态或只看最新一条评论不算意见收集完整。每条必要意见保留原始链接/ID、审查所针对提交、处理结论（已修复/说明不采纳/待研发决定）、理由、对应修改和验证。过时线程仍核对问题是否在当前代码存在，不能仅因 outdated 或线程已关闭就判为已解决。
 
