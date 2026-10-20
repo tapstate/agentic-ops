@@ -260,6 +260,38 @@ def record(model, p, ctx, rules=None):
     model.setdefault("verification", {}).setdefault(p["repository"], {})[p["kind"]] = value
 
 
+def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=True):
+    """核对一份已有材料，供阶段检查与人读建议共用；不要求其它仓的未来材料。"""
+    result = []
+    revisions, scope = binding(entry["data"], ctx)
+    if (entry["versions"] != revisions or entry.get("bindings") != scope
+            or (kind == "ci" and entry.get("ci_digest") != ctx["repositories"][repo].get("ci_digest"))):
+        result.append("%s 的 %s 材料已失效，重新核对当前版本" % (repo, kind))
+        return result
+    p = entry["data"]
+    contract = (rules or {}).get("verification_plan")
+    if contract and kind in contract["kinds"]:
+        from workflow import quality
+        if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
+            result.append("%s 的 %s 验证方案已变化，重新核对报告和缺口决定" % (repo, kind))
+        result.extend(coverage_problems(p, rules, ctx))
+    if kind == "local" and check_artifacts:
+        for jar in p.get("jars", []):
+            try:
+                valid = all(artifact_matches(jar[side + "_path"], jar[side + "_sha256"], ctx) for side in ("built", "consumed"))
+            except OSError:
+                valid = False
+            if not valid:
+                result.append("%s 的依赖 Jar 已变化或缺失，需重验" % repo)
+    for item in p.get("results", []):
+        if item["result"] != "PASS" and not item.get("decision"):
+            result.append("%s %s：%s 尚未解决或明确处置；请求研发确认具体缺口及后续动作，确认不等于 PASS" % (repo, item["scope"], item["result"]))
+    for item in p.get("items", []):
+        if item["status"] == "pending":
+            result.append("%s 审查意见 %s 尚未处理" % (repo, item["id"]))
+    return result
+
+
 def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
     if not kinds:
         return []
@@ -272,32 +304,7 @@ def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
             if not entry:
                 result.append("%s 缺少 %s 验证材料" % (repo, kind))
                 continue
-            revisions, scope = binding(entry["data"], ctx)
-            if (entry["versions"] != revisions or entry.get("bindings") != scope
-                    or (kind == "ci" and entry.get("ci_digest") != ctx["repositories"][repo].get("ci_digest"))):
-                result.append("%s 的 %s 材料已失效，重新核对当前版本" % (repo, kind))
-                continue
-            p = entry["data"]
-            contract = (rules or {}).get("verification_plan")
-            if contract and kind in contract["kinds"]:
-                from workflow import quality
-                if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
-                    result.append("%s 的 %s 验证方案已变化，重新核对报告和缺口决定" % (repo, kind))
-                result.extend(coverage_problems(p, rules, ctx))
-            if kind == "local" and check_artifacts:
-                for jar in p.get("jars", []):
-                    try:
-                        valid = all(artifact_matches(jar[side + "_path"], jar[side + "_sha256"], ctx) for side in ("built", "consumed"))
-                    except OSError:
-                        valid = False
-                    if not valid:
-                        result.append("%s 的依赖 Jar 已变化或缺失，需重验" % repo)
-            for item in p.get("results", []):
-                if item["result"] != "PASS" and not item.get("decision"):
-                    result.append("%s %s：%s 尚未解决或明确处置；请求研发确认具体缺口及后续动作，确认不等于 PASS" % (repo, item["scope"], item["result"]))
-            for item in p.get("items", []):
-                if item["status"] == "pending":
-                    result.append("%s 审查意见 %s 尚未处理" % (repo, item["id"]))
+            result.extend(material_problems(entry, repo, kind, ctx, rules, check_artifacts=check_artifacts))
     for key, p in ctx.get("failures", {}).items():
         if p["status"] not in ("resolved", "accepted_gap"):
             result.append("失败 %s 尚未解决或明确处置（累计 %s 轮）" % (key, p["attempts"]))

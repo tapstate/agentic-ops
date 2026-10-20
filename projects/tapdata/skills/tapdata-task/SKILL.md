@@ -75,6 +75,8 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 
 ## 实现、PR、CI 和完成
 
+整理 Fix Details 与 PR 时按[交付文案内容](../../../../docs/usage/quality-checkpoints.md#交付文案内容)核对真实 diff、当前证据与远端原文，补全技术说明并保留人工编辑；字段建议或 confirmed 不代替内容及新鲜度核验。
+
 修改 `tapdata-common-lib` 下代码前，先按[公共库升级](../../runbooks/common-lib-upgrade.md)判断兼容性，并落实不兼容变更的 release 分支前置条件；CI 验证同时核对 Nexus 发布及消费依赖结果。
 
 - 创建或编辑 PR 正文时，按[PR 正文发布与回读](../../../../docs/usage/quality-checkpoints.md#pr-正文发布与回读)每仓准备真实多行 UTF-8 文件，调用 `workflow/pr_body.py preflight`；CLI 用 `--body-file`，不把正文拼入 Shell。原生写入后回读 `number,url,body` 并用 `compare` 核对目标与全文，再报告描述已核验。提示不自动替换合法转义；已存在 PR 保留人工修改，未知结果先回读原 PR，不重建。纯正文修正不触发来源分支合并或代码重验，正文问题不阻塞无依赖工作，不改变 PR Ready 门禁。
