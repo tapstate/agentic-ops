@@ -119,11 +119,6 @@ class VerificationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'AGENTIC_OPS_STORY_GATE_STAGE': 'release'}):
             _, impact = self.service._calculate('staged', base=None, head=None)
             self.assertIsNotNone(self.service._read_matching_evidence(impact))
-        release = (Path(__file__).resolve().parents[1] / 'release/lib/release-common.sh').read_text()
-        function = release.split('release_run_full_verification() {', 1)[1].split('RELEASE_VERIFIED_AT=', 1)[0]
-        for check in FULL_ACCEPTANCE_CHECKS:
-            self.assertIn('run_verification_step ' + check, function)
-
 
     def test_document_candidate_uses_only_resource_checks(self):
         self.local_candidate()

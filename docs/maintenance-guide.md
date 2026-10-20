@@ -138,7 +138,7 @@ internal/acceptance.sh --list
 
 规则测试直接构造经现有契约校验的任务状态，在源码观察等外部边界使用固定输入，保留真实判定、摘要计算和本地状态读写；不得把被测的门禁、归档验证或恢复判定 mock 成成功。只验证规则的用例应断言不执行 Git，避免隐含依赖完整接管夹具。Git 命令与输出语义由边界测试覆盖；源码保存与重置、索引和引用变化、gitlink、归档前现场漂移及中断恢复继续使用独立真实临时仓库。固定 Runtime 同时运行规则测试和真实交互测试，保留代表性的正常、失败恢复和多仓完整流程，不以抽样正常路径代替安全回归。线上 Jira/GitHub 联调与业务验收单独记录，mock 通过不能证明真实服务交互已验收。
 
-证据 v6 的环境字段只包含实际工具版本、两个维护依赖文件的摘要和测试行为开关，不记录绝对路径或敏感环境变量。正式候选验收拒绝启用可选 Maven 集成开关；有需要时单独运行诊断并附上真实集成证据。OPA 缺失或可选 Maven 用例未启用必须明确披露，不声称真实集成已验收。Git 读取和检查子进程清除外部 `GIT_*` 上下文覆盖，候选不能使用 assume-unchanged 或 skip-worktree 隐藏工作树变化。原始日志目录和文件分别限制为 0700 和 0600。发布校验器核验历史开发记录后，仍在自身隔离环境重新完整验收。v3/v4/v5 记录仅保留查阅，不满足 v6 选择与绑定合同；首次升级走受保护 main 的独立人工 PR，不要求旧 release submit-review 接受 v6 格式，不双写旧证据。不要使用 `--no-verify`。
+证据 v6 的环境字段只包含实际工具版本、两个维护依赖文件的摘要和测试行为开关，不记录绝对路径或敏感环境变量。正式候选验收拒绝启用可选 Maven 集成开关；有需要时单独运行诊断并附上真实集成证据。OPA 缺失或可选 Maven 用例未启用必须明确披露，不声称真实集成已验收。Git 读取和检查子进程清除外部 `GIT_*` 上下文覆盖，候选不能使用 assume-unchanged 或 skip-worktree 隐藏工作树变化。原始日志目录和文件分别限制为 0700 和 0600。发布校验器核验历史开发记录后，仍须在自身隔离环境独立完整验收；同一发布的有效证据可跨准备、审查提交、发布和恢复复用，不重复运行四项。发布证据与开发证据分开，绑定仓库、版本或 Jira、目标基线、候选完整树、验证器和测试合同、工具依赖环境及四项结果；任一绑定变化或记录损坏不得复用。显式 `release.sh verify` 开始即撤销旧发布通过结果，失败或取消不能恢复旧通过；旧审计缺少这些字段时需补一次发布验证。v3/v4/v5 记录仅保留查阅，不满足 v6 选择与绑定合同；首次升级走受保护 main 的独立人工 PR，不要求旧 release submit-review 接受 v6 格式，不双写旧证据。不要使用 `--no-verify`。
 
 ## 6. 发布与 Hotfix
 
@@ -156,15 +156,27 @@ internal/release/release.sh prepare --version vX.Y
 internal/release/release.sh publish --version vX.Y --confirm-release
 ```
 
-软门禁模式显式增加 `--allow-soft-gate`。发布脚本回读合并事实、同步 `develop`，最后创建指向实际 Merge commit 的 annotated Tag；发布版本使用 `v1.x`。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。Hotfix 只能使用：
+软门禁模式显式增加 `--allow-soft-gate`。版本及候选在合并前固定，发布版本使用 `v1.x`；同 epoch 的正式版本准备还须提供 `--jira <编号> --same-epoch-reason <已在 Jira 记录的理由>`。发布从固定实现快照执行，测试只读取固定 Git 候选，不自动提交、stash 或清理用户工作区；发布实现自身有未提交修改时停止，先审查实现。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。Hotfix 只能使用：
 
 ```sh
 internal/release/hotfix.sh <JIRA-KEY>
 ```
 
-明确调用该 Hotfix 入口是快速修复授权；它原子更新 `main` 与 `develop`，冲突、分叉或回读不明时停止。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
+明确调用该 Hotfix 入口是快速修复授权。同 epoch 普通变更在固定验收后原子更新 `main` 与 `develop`；同 epoch 信任根变更仍由此入口编排独立人工 PR，禁止自动直推 `main`，合并后重新调用同一命令完成无标签收尾。跨 epoch 拒绝 Hotfix，必须使用正式版本流程。冲突、分叉或回读不明时停止受影响动作。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
 详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。
+
+### 发布验证复用与合并后收尾
+
+`prepare` 先核验候选已包含固定 `main` 基线、版本占用及历史故事审查材料，再在隔离环境独立执行四项；结果保存于 `.local/release/`，测试原始日志保留在其中的私有运行目录。`submit-for-review`、`publish` 和 `recover` 只消费同一有效发布证据。`inspect` 和不带确认参数的 `recover` 不执行测试；缺证据时明确要求补验，不因查询或生成确认参数重复测试。
+
+需要显式重验时使用 `internal/release/release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <PR编号>`。恢复使用 `inspect --version vX.Y --merged-pr <PR编号>` 核对事实，再按输出执行 `recover`；确认参数绑定版本、PR、候选及实际合并和 Tag 状态，有效授权不因分步命令重复索取。Hotfix 没有有效证据时在自身入口补一次独立验收，不使用正式版本 Tag。
+
+合并前核验固定 Head、目标基线及审查；实际 Merge commit 必须恰有两个父提交，分别对应已确认基线与候选，完整代码树必须与已测候选一致，且仍在 `main` 历史中。基线或合并结果漂移时停止 Tag 并重新评估范围、验收和授权，不用旧候选通过或仅祖先关系代替实际结果校验。版本号事先确定，annotated Tag 在合并后指向实际 Merge commit；已有正确 Tag 可幂等复用，错误 Tag 不移动、不覆盖。源分支删除不影响按 PR 和提交事实恢复。
+
+正常与恢复使用同一收尾逻辑：回读实际合并及 Tag，再尝试同步该发布 Merge commit 到 `develop`，不顺带同步后续 `main` 提交。响应分别给出 `delivery_status` 和 `develop_sync_status`；有并行开发提交时保留代码并报告 `pending_integration`，工作区脏或不能安全快进本地分支时报告 `local_pending`，外部结果不明报告 `unknown`。已交付但同步待办使用 `completed_with_pending_sync`，不能把待办隐去；同步问题不撤销正确 Tag，也不触发重新发布。任何推送结果不明确先回读，不盲目重写远端；Tag 成功后审计失败，重试只补未完成收尾。
+
+本地锁只约束同一记录目录内的操作，不是跨 clone 的服务端锁或防篡改机制。远端引用、PR 和检查仍是事实源；并发变化必须靠精确对象核验及写后回读处理。该优化本身修改发布信任根，首次交付仍需独立人工审查，不能用新候选放宽旧门禁。
 
 ### 提交信息构造
 
