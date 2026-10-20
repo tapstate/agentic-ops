@@ -112,6 +112,8 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 
 首次安装引导以 [Git SSH 安装](usage/git-ssh-install.md)为命令与默认参数的唯一使用说明；[首次使用指引](usage-guide.md)负责安装到首个任务的主路径，[Agent 引导安装](usage/agent-guided-install.md)负责委托边界，[gh 一键安装](usage/gh-one-click-install.md)只负责另一种安装脚本获取方式。安装步骤统一交给 Bootstrap，文档不再手工写安装状态。
 
+空闲工位连接外部 TM 的 FE 部署目标设计由[开发环境指引](../projects/tapdata/runbooks/test-environment.md#空闲工位连接外部-tm-的目标设计)统一维护，覆盖源码准备、Launcher 协议、完整装配、组件验收及退出后接管边界。环境入口支持外部模式和空闲源码准备，不改变下述现有工位合同；实现与真实环境验收分别记录在 Jira。
+
 ## 空闲工位源码生命周期
 
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。

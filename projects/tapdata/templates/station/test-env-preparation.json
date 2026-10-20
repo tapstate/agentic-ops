@@ -10,5 +10,14 @@
     "time_field": "systemInfo.time",
     "max_age_seconds": 60,
     "startup_timeout_seconds": 300
+  },
+  "fe_heartbeat": {
+    "collection": "Workers",
+    "uuid_field": "process_id",
+    "time_field": "ping_time",
+    "type_field": "worker_type",
+    "type_value": "connector",
+    "deleted_field": "isDeleted",
+    "stopped_field": "stopping"
   }
 }
