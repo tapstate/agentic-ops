@@ -32,11 +32,6 @@ grep -Fq "printf '%s\\n\\n%s\\n' \"\$merge_subject\" \"\$merge_body\"" \
 if grep -Fq '%b' "$repo_root/internal/release/hotfix.sh"; then
   fail "Hotfix 不得依赖 %b 解释提交正文"
 fi
-grep -Fq 'tag_object="$(' "$repo_root/internal/release/lib/release-common.sh" ||
-  fail "恢复 Tag 对象未用真实换行构造"
-if grep -Fq "printf 'object %s\\ntype commit" "$repo_root/internal/release/lib/release-common.sh"; then
-  fail "恢复 Tag 对象不得使用转义格式串拼接"
-fi
 
 fixture="$test_root/repo"
 mkdir -p \
@@ -113,5 +108,9 @@ fi
 if "$repo_root/internal/release/release.sh" prepare --version 1.0 >/dev/null 2>&1; then
   fail "release.sh 不得接受非 vX.Y 版本"
 fi
+
+release_python="${AGENTIC_OPS_INTERNAL_TEST_PYTHON:-$repo_root/.local/venv/internal/bin/python}"
+if [ ! -x "$release_python" ]; then release_python="$(command -v python3)"; fi
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" "$release_python" -m unittest internal.tests.test_release_verification -q
 
 printf 'AgenticOps 发布工作流验证通过\n'

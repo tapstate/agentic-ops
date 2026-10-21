@@ -64,6 +64,8 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 一个工位绑定一个 Project，当前任务存入 .agenticops/current-task.json；没有当前任务且无未完成 operation 才为空闲。source 中每个仓库均有独立 Git 元数据，不使用共享对象依赖。config 保存持久配置，runtime 保存唯一活动环境；不可变正式档案及追加回执集中保存在绑定 Product Root 的 `.archive/<run-id>`，因此不随工位 purge 或工位目录删除丢失。
 
+配置按“一个项目、多份环境配置、一个活动运行现场”组织，目录与生命周期统一见[工位合同](single-task-station.md#配置按环境聚合)。Project 维护具体文件映射与当前操作路径，Adapter 不承载环境配置，config/shared 不复制中央规则。
+
 完整工程基线保存 Profile、版本解析输入、每仓 origin/ref/SHA 与摘要；任务修改仓另存分支、目标、范围、验证和交付事实，引用冻结基线。上下文通过 task.py repository context 返回已核验路径，Agent 在同一工位会话使用原生工具操作，不另建会话状态或复制中央规则。
 
 ## 6. 四操作与恢复

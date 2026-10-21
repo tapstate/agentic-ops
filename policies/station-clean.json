@@ -38,24 +38,6 @@
       "action": "preserve"
     },
     {
-      "scope": "runtime",
-      "pattern": "logs",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
-      "scope": "runtime",
-      "pattern": "reports",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
-      "scope": "runtime",
-      "pattern": "tmp",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
       "scope": "configuration",
       "pattern": "*",
       "type": "file",
@@ -74,15 +56,21 @@
       "action": "generated"
     },
     {
-      "scope": "runtime",
+      "scope": "configuration",
       "pattern": ".DS_Store",
       "type": "file",
       "action": "generated"
     },
     {
-      "scope": "configuration",
-      "pattern": ".DS_Store",
+      "scope": "runtime",
+      "pattern": "*",
       "type": "file",
+      "action": "generated"
+    },
+    {
+      "scope": "runtime",
+      "pattern": "*",
+      "type": "directory",
       "action": "generated"
     }
   ]

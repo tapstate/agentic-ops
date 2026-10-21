@@ -8,6 +8,16 @@
 
 工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验实际路径、资源归属和写入者，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
+## 业务构建入口
+
+应用构建入口由 `tapdata-enterprise/build/build.sh` 维护，连接器入口由 `tapdata-connectors-enterprise/build/build.sh` 维护。源码根目录是入口所属仓库的父目录，由脚本自身路径定位，不依赖调用 cwd，不接受另一个源码根，不自动 fetch、checkout 或修改分支。应用入口编排应用与默认 mysql、dummy、postgresql、mongo 四个连接器；连接器入口只处理一个明确选择及其必要依赖，不反向调用应用入口。编译和注册分开，部署与发布不进入业务构建脚本。
+
+两个入口分别检查三个场景：当前分支已有入口时先核验其行为并适配；当前没有而 develop 有时，核验并记录所参考的 develop 完整 SHA，在当前业务仓库适配；两者都没有时，从当前 POM、原生命令及已验证装配步骤补齐入口。不得通过包装会操作 Git、全局工具链或发布的旧脚本来复用副作用。develop 只提供参考，是否提交由研发决定；未提交的入口、辅助文件和适配同样是源码成果，清理必须保留。完成适配后再计算源码指纹。
+
+本地 `build-settings.sh` 配置 JDK、Maven、Node、npm、pnpm、并发与内存；仓库只跟踪 `build-settings.example.sh` 并忽略本机文件。可用 `TAPDATA_BUILD_SETTINGS` 指定工位 config 中的本地文件，不把主机路径和秘密提交到仓库。外部统一传递 `--work-dir`、`--output-dir`、`--cache-dir`、`--platform`、`--mode`；现有 Maven 仓库可通过 `--local-repository` 指定。所有输出和缓存使用源码区域外的工位路径。连接器另传 `--connector`，基础别名之外使用 `repository:module-path` 消除歧义。
+
+构建入口记录源码指纹、工具链、参数、是否跳过测试及制品摘要，构建中源码变化则不签发成功候选。完整应用只装配本次所选连接器清单中的已核验 Jar，不复制旧 dist。相同完整候选只在源码、工具链、参数及制品摘要仍匹配时复用；失败候选保留日志，不视为成功。`--skip-tests` 必须在验收中披露，编译成功不等于测试通过。共享下载缓存不属于本期方案，继续隔离各工位本地构建成果。
+
 ## Maven 配置与任务本地仓库
 
 Maven 安装级与用户级 `settings.xml` 正常生效，保留镜像、认证、代理和 profile；不复制、修改或归档这些文件。仅本地仓库路径由当前任务覆盖为 `runtime/maven-local`，因此 AgenticOps 的 Maven 计划不会把本任务 Jar 写入共享 `~/.m2/repository`。
@@ -362,17 +372,19 @@ pnpm dev:daas
 
 ## 本地工位配置输入
 
-以下是用户与 Agent 协作准备环境的输入规范，不是现役自动启动命令。TM/FE 模板分别为 [tm.yml](../templates/station/tm.yml) 与 [fe.yml](../templates/station/fe.yml)，复制到工位 config 目录后按实际端口调整。实际启动前由 Agent 核对冻结分支，生成并登记 runtime/effective-config 中的生效副本，再使用原生工具执行；模板不能证明工具链、企业许可或应用已可用。
+组件与秘密的归属见[按环境聚合的项目映射](test-environment.md#按环境聚合的项目配置映射)：组件输入归环境 components，秘密归环境 secrets，仅明确共用的对象进入 shared。旧文件从备份按实际目标提取；新输入使用所属环境目录。
+
+以下是用户与 Agent 协作准备环境的输入规范，不是现役自动启动命令。TM/FE 模板分别为 [tm.yml](../templates/station/tm.yml) 与 [fe.yml](../templates/station/fe.yml)，复制到 config/environments/<name>/components 后按实际端口调整。实际启动前由 Agent 核对冻结分支，生成并登记 runtime/effective-config 中的生效副本，再使用原生工具执行；模板不能证明工具链、企业许可或应用已可用。
 
 用户本地准备以下信息，秘密不要发在聊天或写入任务归档：
 
 | 输入 | 本地约定与核验 |
 |---|---|
-| MongoDB 连接 | config/secrets/mongodb-uri，权限仅当前用户可读；内容为完整 URI，用户名和密码中的特殊字符须 URL 编码 |
+| MongoDB 连接 | config/environments/<name>/secrets/mongodb-uri，权限仅当前用户可读；内容为完整 URI，用户名和密码中的特殊字符须 URL 编码 |
 | 数据库与用户 | 使用研发授权的独立库与用户；authSource 是用户实际创建所在库，不由业务库名推断 |
 | MongoDB 拓扑 | 提供已初始化副本集的实际名称；本地参考脚本用 rs0，但不得把未知 standalone 当完整验证环境 |
 | TM 端口 | 模板显式 3030；如调整须同步 FE baseURLs，并核验实际绑定。仅绑定本机的需求还应在生效配置指定 server.address=127.0.0.1 |
-| FE Access Code | config/secrets/fe-access-code，在该工位 TM 初始化后实际获取；首次没有则留缺失，不复制源码示例凭据 |
+| FE Access Code | config/environments/<name>/secrets/fe-access-code，在该工位 TM 初始化后实际获取；首次没有则留缺失，不复制源码示例凭据 |
 | 企业许可 | 给出已授权许可文件的位置与适用版本；无需许可也须以目标模块实际行为确认，不从 OSS 单一检查推断 |
 | 工具链 | 提供可用 JDK、Maven、Node 和包管理器路径；不修改用户全局默认，不自动新增组件 |
 

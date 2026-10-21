@@ -2,12 +2,6 @@
   "version": 3,
   "rules": [
     {
-      "scope": "runtime",
-      "pattern": "tapdata-source-preparation-*",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
       "scope": "repository",
       "pattern": "**/target",
       "type": "directory",
@@ -28,24 +22,6 @@
     {
       "scope": "repository",
       "pattern": "**/.pytest_cache",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
-      "scope": "runtime",
-      "pattern": "tapdata-test-env",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
-      "scope": "runtime",
-      "pattern": "maven-local",
-      "type": "directory",
-      "action": "generated"
-    },
-    {
-      "scope": "runtime",
-      "pattern": "tapdata-test-env-diagnostics",
       "type": "directory",
       "action": "generated"
     }

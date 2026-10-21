@@ -32,6 +32,26 @@ def present(value):
     return value not in (None, "", [], {})
 
 
+def require_safe(spec, value, label):
+    """定位命中叶子，不把原文、未知键名或秘密放进异常。"""
+    def visit(node, path):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                safe_key = key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) else "<key>"
+                if project_rules.scan_sensitive(spec, str(key)):
+                    raise ValueError(label + "含敏感内容，位置：" + path + ".<key>；请提供脱敏来源引用")
+                visit(child, path + "." + safe_key)
+        elif isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, path + "[" + str(index) + "]")
+        elif isinstance(node, str) and project_rules.scan_sensitive(spec, node):
+            raise ValueError(label + "含敏感内容，位置：" + path + "；请提供脱敏来源引用")
+    visit(value, "$")
+    # 保留原整体规则检查，不以叶子诊断替代判定。
+    if project_rules.scan_sensitive(spec, json.dumps(value, ensure_ascii=False)):
+        raise ValueError(label + "含敏感内容，位置：$；请提供脱敏来源引用")
+
+
 def required(condition, fields, metadata=None):
     if type(condition) is bool:
         return condition
@@ -75,8 +95,8 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
     _, fields, status = jira_status.issue_from(snapshot, task["issue_key"])
     if not present(snapshot.get("source_ref")):
         raise ValueError("采集快照缺少来源")
-    if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(snapshot, ensure_ascii=False)):
-        raise ValueError("Jira 采集快照含敏感内容，请仅提供必要脱敏字段")
+    admission = project_rules.load_admission(station=base)
+    require_safe(admission, snapshot, "Jira 采集快照")
     configuration, spec = config(base, task)
     proposals = proposals or {}
     if not isinstance(proposals, dict):
@@ -162,8 +182,7 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
         if present(current):
             result["existing"].append(key)
     result["unknown"].append({"kind": "future_forms", "reason": "未来转换表单及服务端 Validator 在实际到达时重新核对；本清单不宣称完整管理员工作流导出。"})
-    if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(result, ensure_ascii=False)):
-        raise ValueError("采集结果含敏感内容，请使用脱敏来源引用")
+    require_safe(admission, result, "采集结果")
     result["digest"] = quality.digest(result)
     return result
 

@@ -162,6 +162,17 @@ def current_states(base, task):
     return states
 
 
+def confirmation_state(state):
+    """绑定当前检查事实，不让观察时间和历史追加改变质量确认。"""
+    latest = state["history"][-1] if state.get("history") else {}
+    result = {key: state.get(key) for key in ("repository", "pr", "run_id")}
+    result.update({key: latest.get(key) for key in ("head", "verdict", "source")})
+    for key in ("checks", "failing"):
+        # 检查返回顺序不是事实变化；保留检查的身份、执行时间及全部结果字段。
+        result[key] = sorted(latest.get(key) or [], key=lambda row: json.dumps(row, sort_keys=True))
+    return result
+
+
 def fetch_rollup(repo, pr):
     proc = subprocess.run(
         ["gh", "pr", "view", str(pr), "--repo", repo, "--json", "statusCheckRollup,headRefOid"],

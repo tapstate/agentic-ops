@@ -196,7 +196,7 @@ class StationBootstrapTests(unittest.TestCase):
             'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
         (self.station / 'config/service').write_text('reusable')
         (self.station / 'config/keep').write_text('keep')
-        (self.station / 'runtime/unknown').write_text('keep')
+        (self.station / 'runtime/unknown').write_text('disposable runtime output')
         (self.station / 'source/notes').write_text('source')
         args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=['config/service'])
         from workflow import station_archive, station_clean, station_operation
@@ -205,6 +205,7 @@ class StationBootstrapTests(unittest.TestCase):
                 registry.command_detach(args, ROOT, purge=True)
             self.assertTrue((self.station / '.agenticops/station.json').exists())
             self.assertTrue((self.station / 'config/service').exists())
+            self.assertTrue((self.station / 'runtime/unknown').exists())
             operation = station_operation.read(self.station)
             for checkpoint in ('before-cleanup', 'after-cleanup'):
                 self.assertEqual(checkpoint, operation['archive_result']['checkpoint'])
@@ -214,7 +215,8 @@ class StationBootstrapTests(unittest.TestCase):
             registry.command_detach(args, ROOT, purge=True)
         self.assertFalse((self.station / '.agenticops/station.json').exists())
         self.assertFalse((self.station / 'config/service').exists())
-        for name in ('config/keep', 'runtime/unknown', 'source/notes'):
+        self.assertFalse((self.station / 'runtime/unknown').exists())
+        for name in ('config/keep', 'source/notes'):
             self.assertTrue((self.station / name).exists())
 
     def test_generate_purge_generate(self):
@@ -266,8 +268,14 @@ class StationBootstrapTests(unittest.TestCase):
         registry.detach(ROOT, self.station, purge=True)
         self.init(success=False)
         self.init('--reuse-materials')
-        for name in ('config', 'source', 'archive'):
+        for name in ('source', 'archive'):
             self.assertEqual((self.station / name / 'sentinel').read_text(), name)
+        backups = list((self.station / 'config/backups').glob('*/sentinel'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), 'config')
+        self.assertTrue((backups[0].parent / '.complete.json').is_file())
+        self.assertFalse((self.station / 'config/sentinel').exists())
+        self.assertFalse((self.station / 'config/environments').exists())
 
     def make_cached_repository(self):
         repository = self.station / 'source/example/repository'

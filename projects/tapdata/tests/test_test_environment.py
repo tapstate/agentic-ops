@@ -75,6 +75,18 @@ class FakeEnvironment(mod.Environment):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_early_database_rejection_precedes_build(self):
+        with mock.patch.object(self.env, 'early_probe', return_value={'collection_count': 2}):
+            with self.assertRaisesRegex(mod.EnvironmentError, '尚未开始构建'):
+                self.env.deploy('dev')
+        self.assertNotIn('build', self.env.history)
+
+    def test_early_auth_failure_precedes_build(self):
+        with mock.patch.object(self.env, 'early_probe', side_effect=mod.EnvironmentError('构建前 MongoDB 认证失败')):
+            with self.assertRaisesRegex(mod.EnvironmentError, '认证失败'):
+                self.env.deploy('dev')
+        self.assertNotIn('build', self.env.history)
+
     def test_prepare_inputs_and_user_validation_without_build(self):
         result = self.env.prepare_inputs("review")
         draft = Path(result["config_file"])
@@ -134,26 +146,27 @@ class EnvironmentTests(unittest.TestCase):
             self.env.prepare_inputs("review")
         uri.chmod(0o600)
         uri.unlink()
-        uri.symlink_to(self.station / "config/secrets/mongodb-uri")
+        uri.symlink_to(self.station / "config/shared/secrets/mongodb-uri")
         with self.assertRaises(mod.EnvironmentError):
             self.env.check_inputs(draft)
         with self.assertRaises(mod.EnvironmentError):
             self.env.prepare_inputs("review")
 
     def test_single_license_is_mounted_by_all_nodes(self):
-        license_file = self.station / "config/secrets/tapdata-test-env/dev/license.txt"
+        license_file = self.station / "config/environments/dev/secrets/license.txt"
         license_file.parent.mkdir(parents=True)
         license_file.write_text("shared-license")
         license_file.chmod(0o600)
         self.config["nodes"]["node2"] = ["FE"]
-        license_ref = "secrets/tapdata-test-env/dev/license.txt"
+        license_ref = "environments/dev/secrets/license.txt"
         self.config["ports"]["node1"]["license"] = license_ref
         self.config["ports"]["node2"] = {"tm": None, "api": None, "license": license_ref}
         self.save("dev")
         self.env.deploy("dev")
         compose = mod.read_json(self.env.root / "compose.json")
         for service in compose["services"].values():
-            self.assertIn(str(license_file) + ":/license/license.txt:ro", service["volumes"])
+            self.assertFalse(any(str(license_file) in v for v in service["volumes"]))
+            self.assertTrue(any("/secrets/license.txt:/license/license.txt:ro" in v for v in service["volumes"]))
 
     def test_input_cli_reports_invalid_then_corrected_configuration(self):
         command = [sys.executable, str(SCRIPT), "prepare-inputs", "--station", str(self.station), "--env", "cli"]
@@ -177,13 +190,13 @@ class EnvironmentTests(unittest.TestCase):
         self.assertNotIn("never-echo-this", result.stdout + result.stderr)
 
     def test_prepare_preserves_saved_environment_and_rejects_linked_draft(self):
-        before = (self.env.config_dir / "dev.json").read_bytes()
-        with self.assertRaises(mod.EnvironmentError):
-            self.env.prepare_inputs("dev")
-        self.assertEqual((self.env.config_dir / "dev.json").read_bytes(), before)
+        before = (self.env.config_dir / "dev/config.json").read_bytes()
+        self.assertEqual(self.env.prepare_inputs("dev")["config_file"], str(self.env.config_dir / "dev/config.json"))
+        self.assertEqual((self.env.config_dir / "dev/config.json").read_bytes(), before)
         outside = self.station.parent / "outside"
         outside.mkdir()
-        (self.env.config_dir / "drafts").symlink_to(outside)
+        (self.env.config_dir / "review").mkdir()
+        (self.env.config_dir / "review/drafts").symlink_to(outside)
         with self.assertRaises(mod.EnvironmentError):
             self.env.prepare_inputs("review")
         self.assertEqual(list(outside.iterdir()), [])
@@ -199,14 +212,14 @@ class EnvironmentTests(unittest.TestCase):
         self.runtime_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env.json")
         self.preparation_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env-preparation.json")
         self.config = {**self.runtime_template, **self.preparation_template}
-        self.config["mongo_uri_file"] = "mongodb-uri"
+        self.config["mongo_uri_file"] = "shared/secrets/mongodb-uri"
         self.config["platform"] = "linux/arm64"
         self.config["nodes"]["node1"] = ["TM", "FE", "APIServer"]
         self.config["build"] = [{"cwd": "tapdata/tapdata", "argv": ["bash", "build.sh"]}]
         self.config["assets"] = [{"source": "tapdata/tapdata/output", "target": "."}]
         # 不占用本机固定测试端口。
         self.config["ports"]["node1"] = {"tm": 53131, "api": 53132, "license": ""}
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.parent.mkdir(parents=True)
         secret.write_text("mongodb://tester:do-not-print@host.docker.internal:27017/test?replicaSet=rs0")
         secret.chmod(0o600)
@@ -226,15 +239,21 @@ class EnvironmentTests(unittest.TestCase):
         return ""
 
     def save(self, name, config=None):
-        mod.write_json(self.env.config_dir / (name + ".json"), config or self.config)
+        value = config or self.config
+        runtime = {k: v for k, v in value.items() if k in mod.RUNTIME_FIELDS | {"external_tm_url"}}
+        runtime["schema_version"] = 2
+        preparation = {k: v for k, v in value.items() if k in mod.PREPARATION_FIELDS | {"fe_heartbeat"}}
+        preparation["schema_version"] = 1
+        mod.write_json(self.env.config_dir / name / "config.json", runtime)
+        mod.write_json(self.env.config_dir / name / "preparation.json", preparation)
 
-    def separate_inputs(self):
+    def separate_inputs(self, name="local"):
         runtime = {key: value for key, value in self.config.items() if key in mod.RUNTIME_FIELDS}
         runtime["schema_version"] = 2
         preparation = {key: value for key, value in self.config.items() if key in mod.PREPARATION_FIELDS | {"fe_heartbeat"}}
         preparation["schema_version"] = 1
-        runtime_path = self.station / "runtime-input.json"
-        preparation_path = self.station / "preparation-input.json"
+        runtime_path = self.env.config_dir / name / "drafts/config.json"
+        preparation_path = self.env.config_dir / name / "drafts/preparation.json"
         mod.write_json(runtime_path, runtime)
         mod.write_json(preparation_path, preparation)
         return runtime_path, preparation_path
@@ -243,19 +262,19 @@ class EnvironmentTests(unittest.TestCase):
         runtime, preparation = self.separate_inputs()
         self.env.configure("local", runtime, preparation)
         self.assertEqual(self.env.names(), ["dev", "local"])
-        saved = mod.read_json(self.env.config_dir / "local.json")
+        saved = mod.read_json(self.env.config_dir / "local/config.json")
         self.assertEqual(set(saved), mod.RUNTIME_FIELDS)
         self.assertEqual(self.env.config("local")[1], self.config)
         self.assertTrue(self.env.deploy("local")["ready"])
         self.env.remove()
-        self.assertTrue((self.env.config_dir / "preparation/local.json").is_file())
+        self.assertTrue((self.env.config_dir / "local/preparation.json").is_file())
         self.assertEqual(self.env.config("local")[1], self.config)
 
     def test_runtime_change_reuses_preparation_and_requires_update(self):
         runtime, preparation = self.separate_inputs()
         self.env.configure("local", runtime, preparation)
         self.env.deploy("local")
-        config = mod.read_json(runtime)
+        config = mod.read_json(self.env.config_dir / "local/config.json")
         config["java"]["tm"] = "-Xmx2G"
         mod.write_json(runtime, config)
         self.env.configure("local", runtime)
@@ -269,18 +288,19 @@ class EnvironmentTests(unittest.TestCase):
         self.env.configure("local", runtime, preparation)
         self.env.deploy("local")
         before = self.env.state()
-        saved = (self.env.config_dir / "preparation/local.json").read_bytes()
+        mod.write_json(runtime, mod.read_json(self.env.config_dir / "local/config.json"))
+        saved = (self.env.config_dir / "local/preparation.json").read_bytes()
         mod.write_json(preparation, {"schema_version": 1, "build": []})
         with self.assertRaises(mod.EnvironmentError):
             self.env.configure("local", runtime, preparation)
         self.assertEqual(self.env.state(), before)
-        self.assertEqual((self.env.config_dir / "preparation/local.json").read_bytes(), saved)
+        self.assertEqual((self.env.config_dir / "local/preparation.json").read_bytes(), saved)
 
     def test_missing_preparation_guides_agent_and_does_not_create_configuration(self):
         runtime, _ = self.separate_inputs()
         with self.assertRaisesRegex(mod.EnvironmentError, "Agent"):
             self.env.configure("local", runtime)
-        self.assertFalse((self.env.config_dir / "local.json").exists())
+        self.assertFalse((self.env.config_dir / "local/config.json").exists())
 
     def test_runtime_rejects_build_fields_and_preparation_rejects_runtime_fields(self):
         runtime, preparation = self.separate_inputs()
@@ -473,6 +493,28 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(record["commands"][0]["exit_code"], 0)
         self.assertTrue((candidate / "bundle/tapdata").is_file())
 
+    def test_native_bundle_is_verified_before_consumption(self):
+        output = self.build_fixture()
+        script = """import hashlib,json,shutil,sys
+from pathlib import Path
+source=Path(sys.argv[1]); destination=Path(sys.argv[2]); bundle=destination/'bundle'
+shutil.copytree(source,bundle)
+files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle.rglob('*') if p.is_file()}
+(destination/'build-manifest.json').write_text(json.dumps({'kind':'application','complete':True,'bundle':'bundle','files':files}))
+"""
+        self.config['build'] = [{'cwd':'tapdata/tapdata','argv':[sys.executable,'-c',script,str(output),'${TAPDATA_TEST_ENV_BUILD_DIR}/application']}]
+        self.config['assets'] = [{'source':'@build/application/bundle','target':'.'}]
+        real = mod.Environment(self.station)
+        with mock.patch.object(real,'snapshot',return_value={}), mock.patch.object(real,'probe',return_value={}), mock.patch.object(mod,'call',return_value=''):
+            candidate, record = real.build(self.config)
+        self.assertTrue(record['validated'])
+        self.assertTrue((candidate/'bundle/tapdata').is_file())
+        self.config['build'][0]['argv'][2] += "(bundle/'tapdata').write_text('tampered')\n"
+        with mock.patch.object(real,'snapshot',return_value={}), mock.patch.object(real,'probe',return_value={}), mock.patch.object(mod,'call') as calls:
+            with self.assertRaisesRegex(mod.EnvironmentError,'清单不一致'):
+                real.build(self.config)
+        calls.assert_not_called()
+
     def test_wrong_architecture_bundled_jdk_fails_before_docker(self):
         output = self.build_fixture()
         header = bytearray(20)
@@ -558,7 +600,7 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_changed_secret_requires_update(self):
         self.env.deploy("dev")
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.write_text("mongodb://tester:changed@host.docker.internal:27017/test")
         self.assertTrue(self.env.status()["configuration_changed"])
         with self.assertRaises(mod.EnvironmentError):
@@ -695,7 +737,7 @@ class EnvironmentTests(unittest.TestCase):
                 real.docker_resources()
 
     def test_secret_permission_and_localhost_validation(self):
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.chmod(0o644)
         with self.assertRaisesRegex(mod.EnvironmentError, "当前用户"):
             self.env.secret(self.config)
@@ -768,7 +810,7 @@ class EnvironmentTests(unittest.TestCase):
             render_spec.loader.exec_module(render)
             skills = render.project_skill_sources(ROOT, "tapdata")
         self.assertIn(ROOT / "projects/tapdata/skills/tapdata-test-env", skills)
-        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 31)
+        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 33)
 
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，容器健康脚本行为待核验")
@@ -842,7 +884,7 @@ class MonitorProbeTests(unittest.TestCase):
 const vm = require('vm'), fs = require('fs');
 const args = JSON.parse(process.argv[1]);
 const callbacks = {}, output=[];
-const localProcess = {exitCode:0,stdin:{setEncoding:()=>{},on:(event,cb)=>{callbacks[event]=cb;}}};
+const localProcess = {argv:[],exitCode:0,stdin:{setEncoding:()=>{},on:(event,cb)=>{callbacks[event]=cb;}}};
 class MongoClient {
   async connect() {} async close() {}
   db() {return {databaseName:'test',listCollections:()=>({toArray:async()=>[{name:'Settings'},{name:'Users'}]}),command:async()=>({hosts:['mongo.internal:27017']}),collection:()=>({findOne:async()=>args.registered ? {systemInfo:{time:args.timestamp}} : null})};}
@@ -880,6 +922,81 @@ callbacks.end().then(()=>console.log(JSON.stringify({exitCode:localProcess.exitC
         result = self.probe(mod.time.time() * 1000, reachable=False)
         self.assertEqual(result["exitCode"], 1)
         self.assertEqual(json.loads(result["output"][0]), {"probe_error": "mongo_topology"})
+
+
+
+class CandidateReuseTests(unittest.TestCase):
+    def test_another_valid_candidate_cannot_mask_selected_bundle_damage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = object.__new__(mod.Environment)
+            env.root = Path(directory)
+            env.identity = 'station-fixture'
+            env.snapshot = lambda: []
+            env.secret = lambda config: (None, 'mongodb://fixture')
+            env.state = lambda: None
+            env.source_path = lambda path: env.root
+            env.probe = mock.Mock(return_value={})
+            mod.write_json(env.root/'owner.json', {'station_id': env.identity})
+            config = {'build': [{'cwd': 'source', 'argv': ['bash', '/source/build/build.sh',
+                      '--output-dir', '${TAPDATA_TEST_ENV_BUILD_DIR}/application']}],
+                      'assets': [{'source': '@build/application/bundle', 'target': '.'}]}
+            record = {'validated': True, 'source': [], 'build_config': config,
+                      'files': {'artifact.jar': mod.hashlib.sha256(b'verified').hexdigest()}}
+            for name in ('a-older', 'z-selected'):
+                candidate = env.root/'builds'/name
+                (candidate/'bundle').mkdir(parents=True)
+                (candidate/'bundle/artifact.jar').write_bytes(b'verified')
+                mod.write_json(candidate/'build-record.json', record)
+            selected = env.root/'builds/z-selected'
+            def damage(*args, **kwargs):
+                (selected/'bundle/artifact.jar').write_bytes(b'damaged')
+                return subprocess.CompletedProcess(args[0], 0)
+            with mock.patch.object(mod.subprocess, 'run', side_effect=damage):
+                with self.assertRaisesRegex(mod.EnvironmentError, '未确认候选复用'):
+                    env.build(config)
+            env.probe.assert_not_called()
+
+    def test_host_route_failure_is_deferred_but_auth_failure_stops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = object.__new__(mod.Environment)
+            env.source = Path(directory)
+            driver = env.source/'launcher/node_modules/mongodb'
+            driver.mkdir(parents=True);(driver/'package.json').write_text('{}')
+            env.secret = lambda config: (None, 'mongodb://private')
+            config = {'mongo_driver':'launcher/node_modules','heartbeat':{}}
+            with mock.patch.object(mod.shutil,'which',return_value='/node'), mock.patch.object(mod,'call',side_effect=mod.EnvironmentError('构建前 MongoDB 连接失败')):
+                self.assertIn('deferred',env.early_probe(config))
+            with mock.patch.object(mod.shutil,'which',return_value='/node'), mock.patch.object(mod,'call',side_effect=mod.EnvironmentError('构建前 MongoDB 认证失败')):
+                with self.assertRaisesRegex(mod.EnvironmentError,'认证失败'):
+                    env.early_probe(config)
+
+    def test_only_complete_unchanged_native_candidate_is_selected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = object.__new__(mod.Environment)
+            env.root = Path(directory)
+            candidate = env.root/'builds/candidate'
+            bundle = candidate/'bundle';bundle.mkdir(parents=True)
+            file = bundle/'artifact.jar';file.write_bytes(b'verified')
+            config = {'build':[{'cwd':'tapdata/tapdata-enterprise','argv':['bash','/source/tapdata-enterprise/build/build.sh','--output-dir','${TAPDATA_TEST_ENV_BUILD_DIR}/application']}]}
+            source = [{'head':'candidate'}]
+            record = {'validated':True,'source':source,'build_config':config,'files':{'artifact.jar':mod.hashlib.sha256(b'verified').hexdigest()}}
+            mod.write_json(candidate/'build-record.json',record)
+            self.assertEqual(env.reusable_build(config,source)[0],candidate)
+            self.assertIsNone(env.reusable_build(config,[{'head':'different'}]))
+            file.write_bytes(b'changed')
+            self.assertIsNone(env.reusable_build(config,source))
+            file.write_bytes(b'verified')
+            (bundle/'extra').write_text('stale')
+            self.assertIsNone(env.reusable_build(config,source))
+            (bundle/'extra').unlink()
+            record['validated'] = False
+            mod.write_json(candidate/'build-record.json',record)
+            self.assertIsNone(env.reusable_build(config,source))
+
+    def test_legacy_recipe_does_not_claim_toolchain_reuse(self):
+        env = object.__new__(mod.Environment)
+        config = {'build':[{'cwd':'source','argv':['mvn','install']}]}
+        self.assertIsNone(env.reusable_build(config,[]))
 
 
 if __name__ == "__main__":

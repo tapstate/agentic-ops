@@ -27,7 +27,8 @@ from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
-from workflow import station_context, task_store, station_operation
+from workflow import station_context, task_store, station_operation, environment_config
+from projects.tapdata.scripts import environment_inputs
 
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LABEL = "io.agenticops.station"
@@ -198,7 +199,8 @@ class Environment:
         self.binding = binding
         self.identity = binding["station_id"]
         self.project = "ao-tapdata-" + self.identity
-        self.config_dir = self.station / "config/tapdata-test-env"
+        self.store = environment_config.Store(self.station)
+        self.config_dir = self.store.environments
         self.root = self.station / "runtime/tapdata-test-env"
         # 不允许目录链接将受管写入/清理引向其它材料。
         for path in (self.config_dir, self.root):
@@ -220,12 +222,18 @@ class Environment:
                 if not (read_only or cleanup):
                     raise EnvironmentError("工位存在未完成操作，请先恢复原操作")
             with self.configuration_lock():
+                if self.config_dir.exists():
+                    for item in list(self.config_dir.iterdir()):
+                        match = re.fullmatch(r"\.(.+)-(previous|ready)", item.name)
+                        if match:
+                            self.store.recover(match[1])
                 yield
 
     @contextlib.contextmanager
     def configuration_lock(self):
-        self.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with (self.config_dir / ".lock").open("a") as stream:
+        self.store.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        lock_path = environment_config.path(self.store.root, ".lock")
+        with lock_path.open("a") as stream:
             os.chmod(stream.name, 0o600)
             try:
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -234,7 +242,7 @@ class Environment:
             yield
 
     def names(self):
-        return sorted(p.stem for p in self.config_dir.glob("*.json") if NAME.fullmatch(p.stem))
+        return self.store.names()
 
     def config(self, name):
         if not name:
@@ -242,16 +250,18 @@ class Environment:
             if len(names) != 1:
                 raise EnvironmentError("请通过 --env 选择配置：" + ", ".join(names))
             name = names[0]
-        if not NAME.fullmatch(name):
-            raise EnvironmentError("环境名称必须为小写字母、数字和连字符")
-        path = contained(self.config_dir, name + ".json")
-        config = read_json(path)
-        if isinstance(config, dict) and config.get("schema_version") == 2:
-            preparation_path = contained(self.config_dir, "preparation/" + name + ".json")
-            if not preparation_path.is_file():
-                raise EnvironmentError("缺少项目准备文件，请由 Agent 按项目开发指引补齐")
-            config = combine_config(config, read_json(preparation_path))
-        return name, validate(config)
+        folder = self.store.environment(name)
+        config = read_json(environment_config.path(folder, 'config.json'))
+        validate(config, runtime_only=True)
+        self.input_secrets(config, name=name)
+        preparation = environment_config.path(folder, 'preparation.json')
+        if not preparation.is_file():
+            raise EnvironmentError("缺少项目准备文件，请由 Agent 按项目开发指引补齐")
+        return name, combine_config(config, read_json(preparation))
+
+    @staticmethod
+    def validate_runtime(config):
+        return validate(config, runtime_only=True)
 
     def input_path(self, path):
         """输入准备只接受工位 config 内的普通路径，不跟随链接。"""
@@ -263,88 +273,34 @@ class Environment:
             raise EnvironmentError("输入文件必须位于工位 config 内且不得经过符号链接")
         return path
 
-    def input_secrets(self, config):
+    def input_secrets(self, config, name=None, draft=False):
         licenses = {port["license"] for port in config["ports"].values() if port["license"]}
-        if len(licenses) > 1 or any(Path(value).name != "license.txt" for value in licenses):
-            raise EnvironmentError("新配置所有节点必须复用同一份 license.txt")
-        if licenses and any(not port["license"] for port in config["ports"].values()):
-            raise EnvironmentError("需要许可证时所有节点必须引用同一份 license.txt")
-        for value in [config["mongo_uri_file"], *licenses]:
-            if not re.fullmatch(r"[A-Za-z0-9_./-]+", value) or Path(value).is_absolute() or ".." in Path(value).parts:
-                raise EnvironmentError("秘密引用必须为安全的相对文件路径，不得填写秘密内容")
-        paths = [self.input_path(self.station / "config/secrets" / config["mongo_uri_file"])]
-        for port in config["ports"].values():
-            if port["license"]:
-                path = self.input_path(self.station / "config" / port["license"])
-                if self.station / "config/secrets" not in path.parents:
-                    raise EnvironmentError("许可证必须位于 config/secrets 内")
-                paths.append(path)
-        if self.station / "config/secrets" not in paths[0].parents:
-            raise EnvironmentError("Mongo URI 必须位于 config/secrets 内")
-        return list(dict.fromkeys(paths))
+        if len(licenses) > 1 or (licenses and any(not port["license"] for port in config["ports"].values())):
+            raise EnvironmentError("新配置所有节点必须复用同一份许可证")
+        values = [config["mongo_uri_file"], *licenses]
+        try:
+            return list(dict.fromkeys(self.store.reference(value, name, draft=draft, secret=True) for value in values))
+        except ValueError as error:
+            raise EnvironmentError(str(error)) from None
 
-    def prepare_inputs(self, name, external_tm_url=None):
-        if not name or not NAME.fullmatch(name):
-            raise EnvironmentError("prepare-inputs 需要有效的 --env 名称")
-        if (self.config_dir / (name + ".json")).exists():
-            raise EnvironmentError("配置已存在，请复用已有配置；不初始化覆盖")
-        draft = self.input_path(self.config_dir / "drafts" / (name + ".json"))
+    def prepare_inputs(self, name, external_tm_url=None, backup=None):
         if external_tm_url is not None:
             external_tm_url = external_url(external_tm_url)
-        if draft.exists():
-            config = read_json(draft)
-            if external_tm_url is not None and config.get("external_tm_url") != external_tm_url:
-                raise EnvironmentError("已有草稿目标不同，请核验并编辑原草稿；不覆盖")
-        else:
-            config = read_json(HERE.parent / "templates/station/test-env.json")
-            config["mongo_uri_file"] = "tapdata-test-env/" + name + "/mongodb-uri"
-            config["ports"]["node1"]["license"] = "secrets/tapdata-test-env/" + name + "/license.txt"
-            if external_tm_url is not None:
-                config["external_tm_url"] = external_tm_url
-                license_ref = config["ports"]["node1"]["license"]
-                config["nodes"] = {"node1": ["FE"], "node2": ["FE"]}
-                config["ports"] = {n: {"tm": None, "api": None, "license": license_ref} for n in config["nodes"]}
-        # 架构尚待用户选择；只为验证其余结构临时填值，不保存或推定目标架构。
-        candidate = dict(config)
-        if candidate.get("platform") == "":
-            candidate["platform"] = "linux/amd64"
-        validate(candidate, runtime_only=True)
-        paths = self.input_secrets(config)
-        for path in paths:
-            if path.exists() and (not path.is_file() or path.stat().st_mode & 0o077):
-                raise EnvironmentError("已有秘密文件必须为仅当前用户可读的普通文件；请先修正权限")
-        for path in paths:
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            try:
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                try:
-                    os.fchmod(fd, 0o600)
-                finally:
-                    os.close(fd)
-        if not draft.exists():
-            write_json(draft, config)
-        return {"environment": name, "config_file": str(draft), "applied": False,
-                "inputs": [
-                    {"field": "platform", "label": "目标架构", "value": config["platform"], "choices": ["linux/amd64", "linux/arm64"]},
-                    {"field": "product_mode", "label": "产品模式（复用会话已确认值）"},
-                    {"field": "nodes", "label": "节点组件", "value": config["nodes"]},
-                    {"field": "external_tm_url", "label": "外部 TM（缺省为本地模式）", "value": config.get("external_tm_url")},
-                    {"field": "ports", "label": "端口与许可证引用", "value": config["ports"]},
-                    {"field": "java", "label": "Java 资源参数", "value": config["java"]}],
-                "missing": (["platform"] if not config["platform"] else []) +
-                           [str(path) for path in paths if not path.read_bytes().strip()],
-                "secret_files": [str(path) for path in paths]}
+        try:
+            return environment_inputs.prepare(self, name, external_tm_url, backup)
+        except ValueError as error:
+            raise EnvironmentError(str(error)) from None
 
     def check_inputs(self, path):
         config = read_json(self.input_path(path))
         validate(config, runtime_only=True)
-        for secret in self.input_secrets(config):
+        relative = self.input_path(path).relative_to(self.store.root).parts
+        if len(relative) < 3 or relative[0] != "environments":
+            raise EnvironmentError("输入必须属于一个环境")
+        for secret in self.input_secrets(config, name=relative[1], draft="drafts" in relative):
             if not secret.is_file() or secret.stat().st_mode & 0o077 or not secret.read_bytes().strip():
                 raise EnvironmentError("秘密文件必须存在、非空且仅当前用户可读；请填写文件并检查权限")
-        _, uri = self.secret(config)
+        _, uri = self.secret(config, draft=True)
         parsed = urlsplit(uri)
         if not parsed.hostname or not parsed.path.strip("/") or any(c.isspace() for c in uri) or parsed.fragment:
             raise EnvironmentError("Mongo URI 必须提供有效主机和目标数据库，不得含空白或片段")
@@ -352,25 +308,50 @@ class Environment:
                 "license_validity_verified": False, "applied": False}
 
     def configure(self, name, path, preparation_path=None):
-        if not name or not NAME.fullmatch(name):
-            raise EnvironmentError("环境名称必须为小写字母、数字和连字符")
-        config = read_json(Path(path))
-        if isinstance(config, dict) and config.get("schema_version") == 2:
-            target = contained(self.config_dir, "preparation/" + name + ".json")
-            if preparation_path:
-                preparation = read_json(Path(preparation_path))
-            elif target.is_file():
-                preparation = read_json(target)
-            else:
-                raise EnvironmentError("新运行配置需要 Agent 提供 --preparation 项目准备文件")
-            effective = combine_config(config, preparation)
-            write_json(target, preparation)
-        else:
-            if preparation_path:
-                raise EnvironmentError("旧完整配置不接受 --preparation")
-            effective = validate(config)
-        write_json(contained(self.config_dir, name + ".json"), config)
-        return {"configured": name, "applied": False, "build_configured": bool(effective["build"] and effective["assets"])}
+        folder = self.store.environment(name)
+        source = self.input_path(path)
+        if folder not in source.parents:
+            raise EnvironmentError("配置输入必须属于目标环境")
+        config = read_json(source)
+        self.check_inputs(source)
+        prep = self.input_path(preparation_path) if preparation_path else folder / 'preparation.json'
+        if folder not in prep.parents or not prep.is_file():
+            raise EnvironmentError("新运行配置需要 Agent 提供已核验的 --preparation")
+        if prep.name == 'preparation-candidate.json':
+            raise EnvironmentError("旧配方候选须经 Agent 核验后保存为 preparation.json")
+        preparation = read_json(prep)
+        effective = combine_config(config, preparation)
+        config = json.loads(json.dumps(config))
+        def populate(candidate):
+            for value in self.input_secrets(config, name=name, draft=True):
+                rel = value.relative_to(folder) if folder in value.parents else None
+                if rel and rel.parts[0] == 'drafts':
+                    dest = environment_config.path(candidate, Path(*rel.parts[1:]))
+                    dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    shutil.copyfile(value, dest)
+            prefix = 'environments/' + name + '/drafts/'
+            def promote(value):
+                return value.replace(prefix, 'environments/' + name + '/', 1) if value.startswith(prefix) else value
+            config['mongo_uri_file'] = promote(config['mongo_uri_file'])
+            for port in config['ports'].values():
+                port['license'] = promote(port['license'])
+            # components/testing 均为显式输入，不在保存时合并 shared。
+            for category in ('components', 'testing', 'secrets'):
+                draft_dir = environment_config.path(folder, 'drafts/' + category)
+                if draft_dir.exists():
+                    environment_config.inventory(draft_dir)
+                    shutil.copytree(draft_dir, candidate / category, dirs_exist_ok=True)
+            write_json(candidate / 'config.json', config)
+            write_json(candidate / 'preparation.json', preparation)
+            drafts = candidate / 'drafts'
+            if drafts.exists():
+                for child in list(drafts.iterdir()):
+                    if child.name in ('config.json', 'preparation.json', 'components', 'testing', 'secrets'):
+                        shutil.rmtree(child) if child.is_dir() else child.unlink()
+                if not list(drafts.iterdir()):
+                    drafts.rmdir()
+        self.store.publish(name, populate)
+        return {"configured": name, "applied": False, "build_configured": bool(effective['build'] and effective['assets'])}
 
     def state(self):
         path = self.root / "active.json"
@@ -409,8 +390,8 @@ class Environment:
     def compose(self, *args, timeout=300):
         return call(["docker", "compose", "-p", self.project, "-f", str(self.root / "compose.json"), *args], timeout=timeout)
 
-    def secret(self, config):
-        path = contained(self.station / "config/secrets", config["mongo_uri_file"])
+    def secret(self, config, draft=False):
+        path = self.store.reference(config["mongo_uri_file"], draft=draft, secret=True)
         if not path.is_file() or path.stat().st_mode & 0o077:
             raise EnvironmentError("Mongo URI 文件必须存在且仅当前用户可读")
         value = path.read_text().strip()
@@ -421,6 +402,10 @@ class Environment:
         if re.search(r"(^|,)(localhost|127\.0\.0\.1|\[::1\])(?=:|,|$)", authority):
             raise EnvironmentError("容器内 localhost 不是宿主机；请配置 host.docker.internal 或容器可达地址")
         return path, value
+
+    def secret_digest(self, config):
+        return digest({str(p.relative_to(self.store.root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                       for p in self.input_secrets(config)})
 
     def source_path(self, value):
         path = contained(self.source, value)
@@ -446,6 +431,31 @@ class Environment:
             raise EnvironmentError("工位没有可核验的 Git 源码")
         return result
 
+    def reusable_build(self, config, source):
+        """只复用已完成真实验证且源码、参数、全部产物一致的完整候选。"""
+        # 通用旧配方没有工具链复用合同；只让业务入口核验自己的候选。
+        if len(config["build"]) != 1:
+            return None
+        argv = config["build"][0]["argv"]
+        if len(argv) < 2 or not argv[1].endswith("/build/build.sh") or "--output-dir" not in argv:
+            return None
+        for candidate in sorted((self.root / "builds").glob("*"), reverse=True):
+            path = candidate / "build-record.json"
+            if candidate.is_symlink() or not path.is_file():
+                continue
+            record = read_json(path)
+            if not record.get("validated") or record.get("build_config") != config or record.get("source") != source:
+                continue
+            bundle = candidate / "bundle"
+            files = list(bundle.rglob("*"))
+            if any(p.is_symlink() for p in files):
+                continue
+            hashes = {str(p.relative_to(bundle)): hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in files if p.is_file()}
+            if hashes and hashes == record.get("files"):
+                return candidate, record
+        return None
+
     def build(self, config):
         if not config["build"] or not config["assets"]:
             raise EnvironmentError("请先根据目标分支配置 build 步骤与完整 Launcher 装配 assets")
@@ -455,6 +465,22 @@ class Environment:
         if self.root.exists() and not self.state() and (not owner.is_file() or read_json(owner).get("station_id") != self.identity):
             raise EnvironmentError("构建现场归属不明，不覆盖已有目录")
         write_json(owner, {"station_id": self.identity})
+        previous = self.reusable_build(config, before)
+        if previous:
+            candidate, record = previous
+            step = config["build"][0]
+            argv = [value.replace("${TAPDATA_TEST_ENV_BUILD_DIR}", str(candidate)) for value in step["argv"]]
+            env = os.environ.copy()
+            env["TAPDATA_TEST_ENV_BUILD_DIR"] = str(candidate)
+            with (candidate / "reuse.log").open("wb") as log:
+                os.chmod(log.name, 0o600)
+                result = subprocess.run(argv, cwd=self.source_path(step["cwd"]), env=env, stdout=log, stderr=log)
+            verified = self.reusable_build(config, before)
+            if result.returncode or self.snapshot() != before or not verified or verified[0] != candidate:
+                raise EnvironmentError("业务入口未确认候选复用；保留现场，不部署")
+            record["mongo_preflight"] = self.probe(config, candidate / "bundle", [])
+            write_json(candidate / "build-record.json", record)
+            return candidate, record
         candidate = self.root / "builds" / uuid.uuid4().hex
         if candidate.resolve() != candidate:
             raise EnvironmentError("构建目录不得经过符号链接")
@@ -464,10 +490,11 @@ class Environment:
         commands = []
         for index, step in enumerate(config["build"]):
             cwd = self.source_path(step["cwd"])
+            argv = [value.replace("${TAPDATA_TEST_ENV_BUILD_DIR}", str(candidate)) for value in step["argv"]]
             with (candidate / ("build-%s.log" % index)).open("wb") as log:
                 os.chmod(log.name, 0o600)
-                result = subprocess.run(step["argv"], cwd=cwd, env=env, stdout=log, stderr=log)
-            commands.append({"cwd": step["cwd"], "argv": step["argv"], "exit_code": result.returncode})
+                result = subprocess.run(argv, cwd=cwd, env=env, stdout=log, stderr=log)
+            commands.append({"cwd": step["cwd"], "argv": argv, "exit_code": result.returncode})
             write_json(candidate / "build-record.json", {"source": before, "commands": commands})
             if result.returncode:
                 raise EnvironmentError("宿主机构建失败，原环境未变；私有日志已保留")
@@ -479,7 +506,20 @@ class Environment:
         bundle = candidate / "bundle"
         bundle.mkdir()
         for asset in config["assets"]:
-            source = self.source_path(asset["source"])
+            if asset["source"].startswith("@build/"):
+                source = contained(candidate, asset["source"][7:])
+                manifest = read_json(source.parent / "build-manifest.json")
+                if manifest.get("kind") != "application" or not manifest.get("complete") or manifest.get("bundle") != source.name:
+                    raise EnvironmentError("业务构建未提供完整应用产物")
+                expected = manifest.get("files")
+                if not isinstance(expected, dict) or not expected:
+                    raise EnvironmentError("业务构建产物清单为空")
+                actual = {str(p.relative_to(source.parent)): hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in source.rglob("*") if p.is_file() and not p.is_symlink()}
+                if actual != expected or any(p.is_symlink() for p in source.rglob("*")):
+                    raise EnvironmentError("业务构建产物与清单不一致")
+            else:
+                source = self.source_path(asset["source"])
             target = bundle if asset["target"] == "." else contained(bundle, asset["target"])
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
@@ -526,11 +566,39 @@ class Environment:
             call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", java_entry, config["image"], "-version"], timeout=180)
         call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "--version"], timeout=180)
         record["mongo_preflight"] = self.probe(config, bundle, [])
+        record["validated"] = True
+        record["build_config"] = config
         write_json(candidate / "build-record.json", record)
         return candidate, record
 
-    def probe(self, config, bundle, nodes):
+    def early_probe(self, config):
+        """已有宿主机工具可独立完成的只读检查，不能替代容器网络验收。"""
+        driver = contained(self.source, config["mongo_driver"]) / "mongodb"
+        node = shutil.which("node")
+        if not node or not (driver / "package.json").is_file():
+            return None
         _, uri = self.secret(config)
+        try:
+            output = call([node, str(HERE / "test-environment-probe.js"), str(driver)],
+                      input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": [],
+                                             "external_tm_url": config.get("external_tm_url"),
+                                             "fe_heartbeat": config.get("fe_heartbeat")}),
+                      timeout=60, failure_messages={
+                          "mongo_connect": "构建前 MongoDB 连接失败",
+                          "mongo_auth": "构建前 MongoDB 认证失败",
+                          "mongo_topology": "构建前 MongoDB 副本成员不可达",
+                          "tm_http": "构建前外部 TM HTTP 不可达",
+                          "monitoring": "构建前数据库核验失败"})
+        except (EnvironmentError, subprocess.TimeoutExpired, OSError) as error:
+            if str(error) == "构建前 MongoDB 认证失败":
+                raise
+            # 容器内域名、路由可与宿主机不同；宿主机网络失败不能否定容器路径。
+            return {"deferred": "宿主机探测未完成，仍需容器连接核验"}
+        return json.loads(output)
+
+    def probe(self, config, bundle, nodes):
+        snapshot = bundle.parent / "secrets/mongodb-uri"
+        uri = snapshot.read_text().strip() if nodes and snapshot.is_file() else self.secret(config)[1]
         driver = self.source_path(config["mongo_driver"])
         script = HERE / "test-environment-probe.js"
         output = call(["docker", "run", "--rm", "-i", "--platform", config["platform"], "--env", "NODE_PATH=/driver", "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--mount", "type=bind,src=%s,dst=/driver,readonly" % driver, "--mount", "type=bind,src=%s,dst=/probe.js,readonly" % script, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "/probe.js"], input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": nodes, "external_tm_url": config.get("external_tm_url"), "fe_heartbeat": config.get("fe_heartbeat")}), timeout=90, failure_messages={
@@ -548,6 +616,11 @@ class Environment:
             nodes.append({"name": node_name, "uuid": old_nodes.get(node_name, {}).get("uuid", str(uuid.uuid4())), "components": components})
         tm_names = [n["name"] for n in nodes if "TM" in n["components"]]
         secret, _ = self.secret(config)
+        effective_secrets = candidate / "secrets"
+        effective_secrets.mkdir(mode=0o700, exist_ok=True)
+        shutil.copyfile(secret, effective_secrets / "mongodb-uri")
+        secret = effective_secrets / "mongodb-uri"
+        secret.chmod(0o600)
         # 容器生命周期超过部署调用；挂载构建快照，避免产品更新混入运行中脚本。
         for filename in ('test-environment-entrypoint.sh', 'test-environment-node.js'):
             shutil.copyfile(HERE / filename, candidate / filename)
@@ -567,7 +640,10 @@ class Environment:
             write_json(directory / "settings.json", settings)
             volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(candidate / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(candidate / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
             if config["ports"][node["name"]]["license"]:
-                license_path = contained(self.station / "config", config["ports"][node["name"]]["license"])
+                license_source = self.store.reference(config["ports"][node["name"]]["license"], name=name, secret=True)
+                license_path = effective_secrets / "license.txt"
+                shutil.copyfile(license_source, license_path)
+                license_path.chmod(0o600)
                 if not license_path.is_file():
                     raise EnvironmentError("许可证文件缺失")
                 volumes.append(str(license_path) + ":/license/license.txt:ro")
@@ -576,7 +652,7 @@ class Environment:
             if "TM" not in node["components"] and tm_names:
                 services[node["name"]]["depends_on"] = {n: {"condition": "service_healthy"} for n in tm_names}
         write_json(candidate / "compose.json", {"services": services, "networks": {"default": {"labels": {LABEL: self.identity}}}})
-        state = {"station_id": self.identity, "environment": name, "config_digest": digest(config), "secret_digest": digest(self.secret(config)[1]), "config": config, "build": candidate.name, "artifact_digest": record["artifact_digest"], "nodes": nodes, "phase": "prepared"}
+        state = {"station_id": self.identity, "environment": name, "config_digest": digest(config), "secret_digest": self.secret_digest(config), "config": config, "build": candidate.name, "artifact_digest": record["artifact_digest"], "nodes": nodes, "phase": "prepared"}
         return state
 
     def status(self):
@@ -616,7 +692,7 @@ class Environment:
         result = {"active": state["environment"], "phase": state["phase"], "ready": ready, "containers": reports, "monitoring": monitoring, "artifact_digest": state["artifact_digest"]}
         try:
             _, config = self.config(state["environment"])
-            result["configuration_changed"] = (digest(config) != state["config_digest"] or digest(self.secret(config)[1]) != state["secret_digest"])
+            result["configuration_changed"] = (digest(config) != state["config_digest"] or self.secret_digest(config) != state["secret_digest"])
         except (ValueError, OSError):
             result["configuration_changed"] = True
         return result
@@ -710,7 +786,7 @@ class Environment:
             raise EnvironmentError("update 只更新当前环境；换配置请 deploy --switch")
         if state and state["environment"] == name and not update:
             result = self.status()
-            if (digest(config) != state["config_digest"] or digest(self.secret(config)[1]) != state["secret_digest"]):
+            if (digest(config) != state["config_digest"] or self.secret_digest(config) != state["secret_digest"]):
                 raise EnvironmentError("配置已变化，请使用 update")
             if not result["ready"]:
                 raise EnvironmentError("已有环境未就绪；请检查现场或 update，不自动重建")
@@ -721,7 +797,12 @@ class Environment:
                 raise EnvironmentError("许可证文件缺失")
         if "external_tm_url" in config and reuse_mongo:
             raise EnvironmentError("外部 TM 模式始终保留已有数据库，不使用 --reuse-mongo")
+        early = self.early_probe(config)
+        if early and "external_tm_url" not in config and not update and early.get("collection_count", 0) and not reuse_mongo:
+            raise EnvironmentError("目标 MongoDB 已有集合；先决定保留或独立清理，尚未开始构建")
         candidate, record = self.build(config)
+        record["host_preflight"] = early or {"deferred": "宿主机 Node 或 Mongo 驱动尚未准备"}
+        write_json(candidate / "build-record.json", record)
         if "external_tm_url" not in config and not update and record.get("mongo_preflight", {}).get("collection_count", 0) and not reuse_mongo:
             raise EnvironmentError("目标 MongoDB 已有集合；请用户选择保留，或自行执行已审核的清理命令后重新检查；保留需显式 --reuse-mongo。未停止原环境")
         generated = self.generate(name, config, candidate, record, previous=state if update else None)
@@ -764,6 +845,7 @@ def main(argv=None):
     parser.add_argument("operation", choices=["prepare-source", "prepare-inputs", "check-inputs", "configure", "list", "inspect-mongo", "deploy", "update", "status", "uninstall"])
     parser.add_argument("--station", required=True)
     parser.add_argument("--env")
+    parser.add_argument("--backup", help="prepare-inputs 在多个匹配备份中选择返回的候选相对路径")
     parser.add_argument("--external-tm-url", help="prepare-inputs 生成双 FE 外部 TM 草稿")
     parser.add_argument("--config", help="configure 或 check-inputs 使用的 JSON 文件")
     parser.add_argument("--preparation", help="configure 使用的 Agent 项目准备文件；用户不填写")
@@ -772,6 +854,8 @@ def main(argv=None):
     parser.add_argument("--switch", action="store_true", help="明确切换并清理旧节点现场")
     args = parser.parse_args(argv)
     try:
+        if args.backup and args.operation != "prepare-inputs":
+            raise EnvironmentError("--backup 只适用于 prepare-inputs")
         if args.switch and args.operation != "deploy":
             raise EnvironmentError("--switch 只适用于 deploy")
         if args.config and args.operation not in ("configure", "check-inputs"):
@@ -793,7 +877,7 @@ def main(argv=None):
                 except PreparationError as error:
                     raise EnvironmentError(str(error)) from None
             elif args.operation == "prepare-inputs":
-                result = env.prepare_inputs(args.env, args.external_tm_url)
+                result = env.prepare_inputs(args.env, args.external_tm_url, args.backup)
             elif args.operation == "check-inputs":
                 if not args.config:
                     raise EnvironmentError("check-inputs 需要 --config 文件")

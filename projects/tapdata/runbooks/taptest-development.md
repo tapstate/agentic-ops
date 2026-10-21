@@ -39,13 +39,15 @@
 <station>/runtime/taptest-venv/bin/python -m pip install -r <test-source>/requirements.txt
 ```
 
-持久配置放 `config/taptest`。参考仓库 `auto_test/config/taptest.example.yaml` 和 `datasources/ds.example.yaml` 的结构，填写本环境地址、凭据及实际数据源，不复制共享 token。配置示例中的占位符须替换，含秘密文件仅本地当前用户可读：
+测试配置和数据源定义归所测环境的 testing，秘密归该环境 secrets；只有明确共用的输入进入 shared，详见[项目配置映射](test-environment.md#按环境聚合的项目配置映射)。原生 TapTest 不支持秘密引用时，由消费者生成 runtime 内权限受限的有效输入；不向业务配置虚构引用字段。下述原生格式只在 runtime 中生成有效副本，含凭据时使用 0600 权限；持久输入只保存受管秘密引用。
+
+持久输入放 `config/environments/<name>/testing/`。参考仓库 `auto_test/config/taptest.example.yaml` 和 `datasources/ds.example.yaml` 的结构，填写本环境地址、凭据及实际数据源，不复制共享 token。配置示例中的占位符须替换，含秘密文件仅本地当前用户可读：
 
 ```yaml
 env:
   server: "<已授权的-TM-host:port>"
   access_token: "<该实例实际签发的凭据>"
-datasources: "<absolute-station-config>/taptest/datasources.yaml"
+datasources: "<absolute-station-runtime>/effective-config/taptest/datasources.yaml"
 runner:
   python: "<absolute-station-runtime>/taptest-venv/bin/python"
   threads: 1
