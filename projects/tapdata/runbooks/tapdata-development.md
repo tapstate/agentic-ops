@@ -31,7 +31,9 @@
 
 ### Docker 开发环境的构建准备
 
-这是 Agent 内部准备入口，部署用户只确认[运行输入](test-environment.md#首次部署输入与配置命名)。生命周期脚本不提供假定分支的编译命令；根据实际 repository context 和源码脚本生成 [preparation 模板](../templates/station/test-env-preparation.json)，保存在 `config/tapdata-test-env/preparation/<name>.json`，不让用户填写 build/assets、驱动或心跳字段。不把 td2、某个任务编号、绝对临时文件或一次成功的分支配方写成默认值。
+配置归属见[按环境聚合设计](test-environment.md#按环境聚合的项目配置映射)：preparation 属于对应环境，组件输入属于该环境 components，活动有效配置仍在 runtime。本节使用 epoch 33 路径；旧工位先按升级合同退出并重建。
+
+这是 Agent 内部准备入口，部署用户只确认[运行输入](test-environment.md#首次部署输入与配置命名)。生命周期脚本不提供假定分支的编译命令；根据实际 repository context 和源码脚本生成 [preparation 模板](../templates/station/test-env-preparation.json)，保存在 `config/environments/<name>/preparation.json`，不让用户填写 build/assets、驱动或心跳字段。不把 td2、某个任务编号、绝对临时文件或一次成功的分支配方写成默认值。
 
 1. 核对 Docker、JDK、Maven、Node 与分支支持的包管理器。私有仓凭证和工具缺失在昂贵构建前定位，普通准备在部署授权内完成；需要额外第三方 Python 组件时遵循仓库决策规则。缺少 target/dist/node_modules 是准备工作，不代表源码没有部署能力。先定位真实 source 路径，不假定 application 仓的目录拼写。
 2. 通过现役 runtime-path 取得当前任务 Maven 仓库；无活动任务时用 `runtime/tapdata-test-env-maven/<name>`。将核验后的 Maven、JAVA_HOME、隔离仓库路径传给 [Maven 辅助脚本](../scripts/test-environment-maven.py)，每个子调用都使用该脚本或原生等价参数，不依赖顶层参数向下自动传递，不改用户 settings 或任务状态。
@@ -111,7 +113,9 @@ python3 <product-root>/projects/tapdata/scripts/connectors.py register --station
 
 将操作改为 `build-register` 并提供两组参数即可编译后注册，构建失败不上传。编译使用 `clean package -pl <所选模块逗号列表> -am`，避免旧 target 的时间戳 Jar 冒充本轮制品。记录源码 HEAD/工作树、所选模块及拷贝制品的 SHA-256；注册时核验当前源码与记录、全部待传文件校验值，发现变化先重新编译。`--skip-tests` 只用于明确的临时打包，不代表业务测试通过，后续按项目质量指引验证。
 
-注册必须明确目标：`--env` 使用当前活动命名开发环境的一个 TM，未活动时不自动切换；其它研发环境用 `--tm-url <服务根地址>`，禁止地址中带账号、密码或 token。命名环境默认读取 `config/secrets/tapdata-test-env/<name>/admin-password`，由用户填写纯文本管理员密码，权限 0600，末尾换行不计入密码；不自动获取或生成密码。显式 `--credentials` 可指定 `config/secrets/` 内其它秘密文件；JSON 三选一：`{"password":"…"}`（当前原生 CLI 只支持 admin@admin.com）、`{"access_code":"…"}`（旧版 Access Code）或 `{"access_key":"…","secret_key":"…"}`。access_token 不能当作 access_code。使用权限 0600 的临时 Picocli @file，不在 argv、公开输出或回执保存凭据，结束删除参数文件，原生输出仅留私有日志。
+管理员凭据归属见[项目配置映射](test-environment.md#按环境聚合的项目配置映射)；默认路径和 --credentials 均以 config 为引用根，支持本环境和 shared/secrets。
+
+注册必须明确目标：`--env` 使用当前活动命名开发环境的一个 TM，未活动时不自动切换；其它研发环境用 `--tm-url <服务根地址>`，禁止地址中带账号、密码或 token。命名环境默认读取 `config/environments/<name>/secrets/admin-password`，由用户填写纯文本管理员密码，权限 0600，末尾换行不计入密码；不自动获取或生成密码。显式 `--credentials` 可指定本环境或 `config/shared/secrets/` 内其它秘密文件，参数相对 config 根；JSON 三选一：`{"password":"…"}`（当前原生 CLI 只支持 admin@admin.com）、`{"access_code":"…"}`（旧版 Access Code）或 `{"access_key":"…","secret_key":"…"}`。access_token 不能当作 access_code。使用权限 0600 的临时 Picocli @file，不在 argv、公开输出或回执保存凭据，结束删除参数文件，原生输出仅留私有日志。
 
 原生 RegisterCli 默认 latest=true；辅助脚本明确传 false，只有用户意图需要更新默认版本时才加 `--latest`。同 group/pdkId/version/build 的 SNAPSHOT 注册仍可能覆盖旧制品，即使 latest=false 也不是“绝不替换”；正式非 SNAPSHOT 覆盖由 TM 原生拒绝。当前企业版管理员注册会暂停关联任务/校验、等待停止并尝试恢复；先核对实际影响，未授权的业务影响待决定，不通过换认证方式绕过。批量按连接器顺序执行，一个失败即停，保留已提交项；未知结果先回读，不自动重复整个批次。
 

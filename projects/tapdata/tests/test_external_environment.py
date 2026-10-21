@@ -36,7 +36,7 @@ class ExternalEnvironmentTests(unittest.TestCase):
         with self.assertRaisesRegex(mod.EnvironmentError, "不覆盖"):
             self.env.prepare_inputs("external", "http://192.0.2.11")
         self.external()
-        runtime, preparation = self.separate_inputs()
+        runtime, preparation = self.separate_inputs("external")
         value = mod.read_json(runtime)
         value["external_tm_url"] = self.config["external_tm_url"]
         mod.write_json(runtime, value)
@@ -84,7 +84,7 @@ class ExternalEnvironmentTests(unittest.TestCase):
         self.env.deploy(update=True)
         self.assertEqual([n["uuid"] for n in self.env.state()["nodes"]], ids)
         self.assertEqual(self.env.state()["artifact_digest"], "new")
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         content = secret.read_bytes()
         self.env.remove()
         self.assertEqual(secret.read_bytes(), content)
@@ -107,7 +107,7 @@ class ExternalEnvironmentTests(unittest.TestCase):
     def test_legacy_preparation_still_accepted(self):
         self.config.pop("fe_heartbeat")
         mod.validate(self.config)
-        runtime, preparation = self.separate_inputs()
+        runtime, preparation = self.separate_inputs("legacy")
         self.env.configure("legacy", runtime, preparation)
         self.assertNotIn("fe_heartbeat", self.env.config("legacy")[1])
 

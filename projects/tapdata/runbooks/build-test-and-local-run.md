@@ -372,17 +372,19 @@ pnpm dev:daas
 
 ## 本地工位配置输入
 
-以下是用户与 Agent 协作准备环境的输入规范，不是现役自动启动命令。TM/FE 模板分别为 [tm.yml](../templates/station/tm.yml) 与 [fe.yml](../templates/station/fe.yml)，复制到工位 config 目录后按实际端口调整。实际启动前由 Agent 核对冻结分支，生成并登记 runtime/effective-config 中的生效副本，再使用原生工具执行；模板不能证明工具链、企业许可或应用已可用。
+组件与秘密的归属见[按环境聚合的项目映射](test-environment.md#按环境聚合的项目配置映射)：组件输入归环境 components，秘密归环境 secrets，仅明确共用的对象进入 shared。旧文件从备份按实际目标提取；新输入使用所属环境目录。
+
+以下是用户与 Agent 协作准备环境的输入规范，不是现役自动启动命令。TM/FE 模板分别为 [tm.yml](../templates/station/tm.yml) 与 [fe.yml](../templates/station/fe.yml)，复制到 config/environments/<name>/components 后按实际端口调整。实际启动前由 Agent 核对冻结分支，生成并登记 runtime/effective-config 中的生效副本，再使用原生工具执行；模板不能证明工具链、企业许可或应用已可用。
 
 用户本地准备以下信息，秘密不要发在聊天或写入任务归档：
 
 | 输入 | 本地约定与核验 |
 |---|---|
-| MongoDB 连接 | config/secrets/mongodb-uri，权限仅当前用户可读；内容为完整 URI，用户名和密码中的特殊字符须 URL 编码 |
+| MongoDB 连接 | config/environments/<name>/secrets/mongodb-uri，权限仅当前用户可读；内容为完整 URI，用户名和密码中的特殊字符须 URL 编码 |
 | 数据库与用户 | 使用研发授权的独立库与用户；authSource 是用户实际创建所在库，不由业务库名推断 |
 | MongoDB 拓扑 | 提供已初始化副本集的实际名称；本地参考脚本用 rs0，但不得把未知 standalone 当完整验证环境 |
 | TM 端口 | 模板显式 3030；如调整须同步 FE baseURLs，并核验实际绑定。仅绑定本机的需求还应在生效配置指定 server.address=127.0.0.1 |
-| FE Access Code | config/secrets/fe-access-code，在该工位 TM 初始化后实际获取；首次没有则留缺失，不复制源码示例凭据 |
+| FE Access Code | config/environments/<name>/secrets/fe-access-code，在该工位 TM 初始化后实际获取；首次没有则留缺失，不复制源码示例凭据 |
 | 企业许可 | 给出已授权许可文件的位置与适用版本；无需许可也须以目标模块实际行为确认，不从 OSS 单一检查推断 |
 | 工具链 | 提供可用 JDK、Maven、Node 和包管理器路径；不修改用户全局默认，不自动新增组件 |
 

@@ -138,6 +138,8 @@ def plan(base, task=None, options=None):
         raise ValueError('clear_config 必须为配置相对路径数组')
     if any(p.startswith('/') or any(part in ('', '.', '..', '.git', '.agenticops') for part in p.split('/')) for p in selected):
         raise ValueError('配置选择必须为工位内受限相对路径')
+    from workflow.environment_config import check_clear
+    check_clear(base, selected, [item['path'] for layer in config['layers'] for item in layer.get('resources', [])])
     candidates, residuals, retained = [], [], []
     catalog = project_rules.load_repository_catalog(station=base)['repositories']
     owned = {r['path'] for r in config['owned']}
@@ -236,6 +238,8 @@ def plan(base, task=None, options=None):
         except (ValueError, OSError) as error:
             residuals.append({'path': str(path.relative_to(base)) if 'path' in locals() else name, 'reason': str(error)})
     for requested in selected:
+        if requested.startswith('config/') and (base / requested).exists() and not any(c['path'] == requested for c in candidates):
+            add(base / requested, 'configuration', Path(requested).name)
         if (base / requested).exists() and not any(c['path'] == requested for c in candidates):
             residuals.append({'path': requested, 'reason': '未匹配可清理配置，保留'})
     value = {'schema_version': 7, 'run_id': task['run_id'] if task else None,

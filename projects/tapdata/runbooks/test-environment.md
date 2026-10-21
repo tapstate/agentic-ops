@@ -2,7 +2,7 @@
 
 本环境用于研发本地测试和联调。现有 `tapdata-test-env` Skill、脚本、配置及运行目录标识继续兼容，用户界面与指引统一称为“开发环境”。
 
-本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不修改 `.agenticops/` 或引入环境池；配置和运行目录都是可选增量，兼容 epoch 26 的原有工位。
+本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不引入环境池；配置布局与兼容性以工位合同的 epoch 33 为准，旧工位须按原版本退出并重建。
 
 ## 空闲工位连接外部 TM 的目标设计
 
@@ -27,7 +27,7 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 
 ### 外部 TM 配置与协议
 
-运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；旧 schema 1/2 配置原样读取，不自动重写。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
+运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；旧 epoch 的 schema 1/2 配置仅从备份转换为草稿，不直接加载。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
 
 继续使用原生 `tapdata start backend --workDir <节点工作目录>`。有效配置中的 tapdata.conf.backendUrl 经 Launcher 的 backend_url 环境变量传入 FE；配置中的 cloud.baseURLs 保持同一目标，避免两个入口指向不同 TM。不使用无参数交互初始化，不改用 Cloud token 流程。Launcher 非 Cloud 路径会访问配置的 Mongo 获取 Access Code，故必须提供目标 TM 对应的 Mongo 连接及适用认证；不能仅凭 TM URL 推导数据库地址，也不能用另一空库替代。复用受控秘密文件与目标分支原生认证，不把凭据写入普通配置、argv 或公开回执。
 
@@ -47,7 +47,7 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 
 沿环境卸载保全必要诊断及构建依据，停止并回读本工位容器和网络，再沿现有无任务 work-clean 处理已核验生成物。诊断仍在 runtime 时，先按现有材料保全规则保存需要保留的证据，再清理；未知对象保留。不能仅执行 uninstall 后忽略诊断残留，也不能用 release 在无任务时的空闲回执冒充清理完成。源码、Git 成果和持久配置默认保留，后续任务重新核验其来源与基线，不继承旧验收。停止、保全或清理失败时保留原现场，不创建新任务；完成后重新核验全部原接管条件。
 
-本适配不增加 `.agenticops/` 字段、任务类型、环境池或第二套运行目录，目标保持当前工位 epoch；同 epoch 和旧配置回归是实现验收条件。若实现实际改变现有持久状态或读写语义，须回到工位兼容合同评估，不能为了保留 epoch 偷换语义。
+外部 TM 模式不增加任务类型、环境池或第二套运行目录。当前配置路径与引用语义采用 epoch 33；旧配置先备份隔离，再按需转换，不承诺跨 epoch 直接读取。
 
 ### 可执行验收合同
 
@@ -60,7 +60,7 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 | TM/Mongo/副本成员不可达、认证或版本/许可不适用 | 明确失败层，保留原环境与私有诊断，不清库、不关闭认证或许可，不将未知结果标为成功 |
 | 错误架构、构建期间源码变化、部分启动失败 | 前两者在停止旧环境前拒绝；启动失败保留可核查现场、源码/制品依据和恢复入口，不重复生成节点 |
 | 更新、卸载、再次接管 | 更新保持节点身份并加载新制品；卸载仅清本工位资源，远端记录心跳停止。保全并清理 runtime 后按原合同接管，停止失败不产生新 run |
-| 兼容回归 | 旧 schema 1/2、本地 TM、多节点、配置切换与现有清理均保持原含义；同 epoch 状态可恢复 |
+| 兼容回归 | 旧 schema 1/2 经备份转换为草稿；本地 TM、多节点、配置切换与现有清理保持运行含义；同 epoch 状态可恢复 |
 
 自动化使用受控夹具验证配置、生成、错误路径和生命周期互斥；真实双 FE 接入使用实际源码、完整 Linux 制品、授权目标 TM/Mongo，单独记录版本、节点身份、制品摘要和连续心跳证据。正式候选按仓库既有影响选择器验收，模拟通过不替代真实部署结果。
 
@@ -80,7 +80,9 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 
 通过 `prepare-inputs --env <name>` 从 [运行配置模板](../templates/station/test-env.json) 生成用户可编辑草稿及秘密文件，不依赖 Docker、构建或 preparation。返回输入项、已有默认值、缺项与绝对文件路径；产品模式从会话复用，脚本不新增模式台账。Agent 填入名称、架构和已知值，只让用户补缺项，可用自然语言反馈而不要求手工编辑 JSON。产品模式与登录验收目标在会话/Jira 记录，不另设执行清单。每工位可以保存多份配置，但只有一个活动环境；新增配置不会启动第二套环境，也不代表切换源码分支。
 
-新配置采用以下统一布局；`<name>` 是用户配置名，不是 station_id：
+### 旧配置备份来源
+
+下表仅用于识别备份中的旧材料，不是新版运行输入路径；`<name>` 是用户配置名，不是 station_id。新版目录见下一节。
 
 | 对象 | 统一位置或名称 |
 |---|---|
@@ -92,17 +94,37 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 | 节点 | 新配置统一 `node1`、`node2`、`node3`；nodes 与 ports 的键一致 |
 | 单一运行现场 | `runtime/tapdata-test-env/`，全部节点使用 `ao-tapdata-<station_id>` Compose 项目 |
 
-新配置所有节点的 license 引用均指向同一份 `license.txt`；确认产品模式无需许可证时统一为空字符串，不要求用户逐节点提供。旧配置继续原样读取，不自动重写既有许可证引用。运行配置不含 build/assets、制品路径或监控实现字段；schema 1 的旧完整配置继续原样读取，旧名称/秘密路径/节点身份保留，不自动迁移。新配置和项目准备通过 configure 保存，不改 `.agenticops/`，不提升工位 epoch。只修改已有运行配置时可复用对应 preparation；切换源码或架构需 Agent 重新核验它，不要求用户同步技术字段。
+新配置所有节点的 license 引用均指向同一份 `license.txt`；确认产品模式无需许可证时统一为空字符串，不要求用户逐节点提供。运行配置不含 build/assets、制品路径或监控实现字段；旧 schema 1/2 仅从备份中提取输入，不直接用于部署。新配置和项目准备通过 configure 保存，普通配置保存不改 `.agenticops/`。只修改已有运行配置时可复用对应 preparation；切换源码或架构需 Agent 重新核验它，不要求用户同步技术字段。
 
 TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`、`start apiserver`，每次附带独立 `--workDir`。本地模式中无 TM 节点等待 TM 容器健康；节点用 Compose DNS 地址通信，内部 TM 3030/API 3080，宿主映射只绑定 127.0.0.1。每个节点角色、端口及资源必须与运行配置一致。
 
+### 按环境聚合的项目配置映射
+
+通用目录、草稿保存、共享引用、秘密与清理合同以[工位合同](../../../docs/architecture/single-task-station.md#配置按环境聚合)为唯一来源。本节定义 TapData 文件映射；prepare-inputs 在配置缺项时查找备份，configure 在工位锁内发布完整配置组合。临时发布目录中断后由下次受管调用恢复，不生成长期版本库。
+
+| 对象 | 目标位置（相对工位） | 项目职责 |
+|---|---|---|
+| 运行输入 | `config/environments/<name>/config.json` | 节点角色、端口、镜像、平台、Java 参数及秘密引用 |
+| 项目准备 | `config/environments/<name>/preparation.json` | Agent 从实际源码核验 build/assets、驱动与 TM/FE 心跳字段 |
+| 输入草稿 | `config/environments/<name>/drafts/` | 保持本环境对应文件结构；未采纳秘密放其 secrets 子目录 |
+| 组件输入 | `config/environments/<name>/components/tm.yml`、`fe.yml` | 归并原根层组件配置；按部署方式需要使用，不强制 Docker 环境额外生成 |
+| 测试输入 | `config/environments/<name>/testing/` | 原 config/taptest 的环境配置与数据源定义按实际目标环境归属 |
+| 环境秘密 | `config/environments/<name>/secrets/` | mongodb-uri、license.txt、admin-password、fe-access-code 及实际测试凭据按需保存 |
+| 共享输入与秘密 | `config/shared/components/`、`testing/`、`secrets/` | 只收纳明确跨环境共用的对象，环境显式引用 |
+| 旧配置备份 | `config/backups/<backup-id>/` | 保留不兼容旧输入及秘密的原相对结构，不作为运行输入 |
+| 活动现场 | `runtime/tapdata-test-env/` | 沿用单 Compose 项目与当前现场，不按环境复制运行目录 |
+
+同一环境的节点按实际许可要求引用同一份许可证；确实跨环境共用时可显式引用 shared/secrets 下的文件，不强制每个环境复制一份。Mongo URI、许可证和管理员凭据的文件引用都遵循 config 根基准，消除当前 mongo_uri_file 与 ports 中 license 的不同基准；例如环境 Mongo 引用为 environments/dev/secrets/mongodb-uri。运行输入仍为 schema 2、preparation 为 schema 1，由 epoch 33 明确新的引用基准；旧 epoch 文件只进入备份转换。外部 TM 环境仍需核验对应 Mongo 与权限，环境名不推导源码分支、产品模式或凭据。
+
+旧路径覆盖当前命名环境布局、config/tm.yml、config/fe.yml、config/secrets 下的散放文件及 config/taptest。不兼容材料先按工位合同备份隔离，新环境不自动加载旧路径。转换的[触发时机与处理顺序](../../../docs/architecture/single-task-station.md#转换触发时机与处理顺序)统一由工位合同维护。TapData 匹配备份时核对名称、TM 地址、Mongo 目标库、组件和秘密引用，不自动把散放文件归到默认环境或判为共享。旧 schema 1 的 build/assets 与探测字段分离为 preparation 候选，并由 Agent 对当前源码重新核验；schema 2 及独立 preparation 同样不能直接冒充当前有效配方。旧 TapTest 内嵌凭据转为草稿秘密和新引用，实际原生输入仍按消费者支持生成。无法确认或转换的材料保留在备份。备份、同名冲突、兼容判断及验收沿工位合同，不在项目指引另建迁移器或计划。
+
 ## 配置准备与预检
 
-`prepare-inputs` 只初始化不存在的草稿与秘密文件，秘密文件权限为 0600；重复调用保留已填内容，已有正式同名配置拒绝初始化。用户可修改草稿或用自然语言反馈普通输入，由 Agent 写入；秘密只在本地文件填写，不进入聊天、命令参数或日志。草稿中断后继续复用；不增加状态字段或工位 epoch。
+`prepare-inputs` 先复用完整的新配置或草稿，缺项时才查找备份并填补可确定的输入；秘密文件权限为 0600，重复调用保留已填内容。用户可修改草稿或用自然语言反馈普通输入，由 Agent 写入；秘密只在本地文件填写，不进入聊天、命令参数或日志。草稿中断后继续复用，配置操作本身不修改工位状态或 epoch。
 
 用户填写完成后必须运行 `check-inputs --config <草稿绝对路径>`：复用运行配置校验，检查字段、架构、1～3 个节点、本地模式至少一个 TM（外部模式仅 FE）、组件与端口对应、端口范围和重复、Java 参数结构、单份许可证引用、秘密文件受控路径/普通文件/权限/非空，以及 Mongo URI 基本格式、目标数据库和容器地址。失败只纠正返回的缺项或错误，再检查；不覆盖用户秘密文件。产品模式与是否需要许可证由 Agent 对照实际源码核实；不要求用户填写内部 Profile。通过仅表示静态配置合规，Mongo 认证、网络、副本集、宿主端口实际占用和许可证有效性仍由后续预检与启动验证，不能称为环境可用。
 
-用户配置的 schema_version 为 2；节点、镜像、平台、Mongo 秘密路径、ports 和 java 是运行输入。Agent 依据[项目开发指引](tapdata-development.md#docker-开发环境的构建准备)生成独立 preparation，生命周期脚本合并后复用已有执行合同；旧 schema 1 继续兼容。`configure --env <name> --config <已检查的草稿.json> --preparation <preparation.json>` 先验证两份输入，普通配置错误不覆盖已保存配置或停止当前环境。只改运行配置时可省略 --preparation，复用已保存准备文件。
+用户配置的 schema_version 为 2；节点、镜像、平台、Mongo 秘密路径、ports 和 java 是运行输入。Agent 依据[项目开发指引](tapdata-development.md#docker-开发环境的构建准备)生成独立 preparation，生命周期脚本合并后复用已有执行合同；旧完整 schema 1 不能直接保存或部署。`configure --env <name> --config <已检查的草稿.json> --preparation <preparation.json>` 先验证两份输入，普通配置错误不覆盖已保存配置或停止当前环境。只改运行配置时可省略 --preparation，复用已保存准备文件。
 
 部署前核对 Docker CLI、Compose 与 daemon、秘密文件权限及端口。Mongo URI 的 localhost/127.0.0.1 不能代表宿主机，使用用户提供的容器可达地址；不猜测替换 URI。Mongo 的权限、TLS 与副本集必须由目标应用支持，不自动创建外部数据库或生成 TLS 材料。源码与目标 Linux 制品、模块加载、Java/Node 执行和副本成员可达性由项目准备及只读容器预检验证；准备失败继续不依赖缺项的工作并保留原环境。
 
@@ -123,7 +145,7 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 | Launcher 健康、注册与心跳 | 将当前节点 UUID 与实际监控记录对应；按源码更新周期至少取两次样本，确认时间戳前进且满足既有新鲜度要求。 | Launcher 存活不代表 FE 已向 TM 注册，更不代表业务同步成功。 |
 | FE 注册与持续心跳 | 核对当前运行中每个 FE 的 TM Worker 记录、身份、停止/删除状态及心跳；结合实际进程和配置检查数量，排除旧环境遗留记录。集合及字段以本分支源码为准。 | 不能把 TM-only 节点的 Launcher 算作一个 FE，也不能只按全库 Worker 数量验收。 |
 | 许可证文件存在或日志出现 valid | 核验共享文件实际加载、正常许可校验、期限与 FE 数量限制，以及当前 FE 的许可绑定。区分正常 valid、数据库不可用时的 fallback 和关闭 checkLicense；对时间敏感的状态连续回读。 | 非空、HTTP 首页成功、降级通过或禁用校验均不能证明正常许可验收通过。 |
-| 许可证接口返回 401 | 先核实是否需要登录；可用当前源码对应的启动日志与必要持久化字段补充许可证据，单独标注接口未验收。后续确需管理接口时，先创建或复用权限 0600 的 `config/secrets/tapdata-test-env/<name>/admin-password`，给出绝对路径让用户填写；已有文件不覆盖，不在聊天索取密码。 | 管理员密码不是 Mongo 密码；401 本身不证明许可证失效，也不能据此关闭认证。 |
+| 许可证接口返回 401 | 先核实是否需要登录；可用当前源码对应的启动日志与必要持久化字段补充许可证据，单独标注接口未验收。后续确需管理接口时，先创建或复用权限 0600 的 `config/environments/<name>/secrets/admin-password`，给出绝对路径让用户填写；已有文件不覆盖，不在聊天索取密码。 | 管理员密码不是 Mongo 密码；401 本身不证明许可证失效，也不能据此关闭认证。 |
 | 初始化迁移告警 | 绑定实际脚本、错误码、查询条件和所影响功能，做最小只读影响核验。例如某些分支的 `init/idaas/4.24-2.json` 删除旧 APIServer Worker 命令缺少 `deletes[].limit`，可出现 Mongo 40414；需核对当前分支及是否存在匹配记录。 | 某次匹配数为零只说明该次未发现目标记录，不代表缺陷消失；不能补写迁移成功状态、自动删记录或宣称所有业务验收通过。 |
 
 旧 APIServer 告警存在匹配记录、阻断后续初始化或影响当前场景时，保留对应验收缺口，在现有任务中记录影响与后续修复需求；无匹配记录且请求的检查通过时可以报告这些具体结果，同时披露告警，不扩大成完整应用通过。真实缺陷修复另按任务范围处理，不为完成部署临时改业务源码。

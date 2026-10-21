@@ -676,6 +676,9 @@ def main():
                     tree.write_text_atomic(target, artifact["content"])
                 if target == "agenticops":
                     tree.chmod(target, 0o700)
+            if not config and arguments.reuse_materials:
+                from workflow.environment_config import Store
+                Store(station).backup_legacy()
             tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
             for row in station_layout.load(install_root)["roots"]:
