@@ -1,5 +1,5 @@
 /* 复用工位 Launcher 已有 mongodb 模块，只读检查副本集与监控事实。 */
-const {MongoClient} = require('/driver/mongodb');
+const {MongoClient} = require(process.argv[2] || '/driver/mongodb');
 const net = require('net');
 const http = require('http');
 const https = require('https');

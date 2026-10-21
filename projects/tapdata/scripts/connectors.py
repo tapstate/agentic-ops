@@ -113,29 +113,45 @@ def build(environment, repo, chosen, args):
     before = environment.snapshot()
     directory = contained(environment.station / 'runtime', 'tapdata-connectors/' + uuid.uuid4().hex)
     directory.mkdir(parents=True, mode=0o700)
-    helper = Path(__file__).with_name('test-environment-maven.py')
-    argv = [os.sys.executable, str(helper), '--maven', args.maven, '--java-home', args.java_home,
-            '--local-repository', args.local_repository, '--', 'clean', 'package', '-pl', ','.join(chosen), '-am']
-    if args.profile:
-        argv.append('-P' + ','.join(args.profile))
+    entry = repo.parent / 'tapdata-connectors-enterprise/build/build.sh'
+    if not entry.is_file():
+        raise EnvironmentError('当前分支缺少连接器构建入口；先参考 develop 固定提交适配，或在业务仓库补齐，不自动切换源码')
     protoc = getattr(args, 'protoc_command', None)
-    if protoc:
-        if not Path(protoc).is_absolute() or not Path(protoc).is_file() or not os.access(protoc, os.X_OK):
-            raise EnvironmentError('protocCommand 需要已核验可执行的绝对路径')
-        argv.append('-DprotocCommand=' + protoc)
-    if args.skip_tests:
-        argv.append('-DskipTests')
+    if protoc and (not Path(protoc).is_absolute() or not Path(protoc).is_file() or not os.access(protoc, os.X_OK)):
+        raise EnvironmentError('protocCommand 需要已核验可执行的绝对路径')
+    env = os.environ.copy()
+    env.update({'TAPDATA_MAVEN': args.maven, 'JAVA_HOME': args.java_home})
     record = {'schema_version': 1, 'station_id': environment.identity,
               'repository': str(repo.relative_to(environment.source)), 'source': before,
               'modules': chosen, 'artifacts': [], 'tests_skipped': args.skip_tests}
     record_path = directory / 'build.json'
     write_json(record_path, record)
-    if execute(argv, repo, directory / 'build.log'):
-        raise EnvironmentError('连接器构建失败；未注册，私有现场已保留')
-    if before != environment.snapshot():
-        raise EnvironmentError('构建期间源码变化；不注册候选')
-    for module in chosen:
-        jar = jar_for(contained(repo, module))
+    for index, module in enumerate(chosen):
+        output = directory / ('artifact-' + str(index))
+        argv = ['bash', str(entry), '--connector', repo.name + ':' + module,
+                '--work-dir', str(directory / ('work-' + str(index))), '--output-dir', str(output),
+                '--cache-dir', str(directory / 'cache'), '--local-repository', args.local_repository,
+                '--platform', getattr(args, 'platform', 'linux/amd64')]
+        for profile in args.profile:
+            argv += ['--profile', profile]
+        if protoc:
+            argv += ['--protoc-command', protoc]
+        if args.skip_tests:
+            argv.append('--skip-tests')
+        if execute(argv, repo, directory / ('build-' + str(index) + '.log'), env):
+            raise EnvironmentError('连接器构建失败；未注册，私有现场已保留')
+        if before != environment.snapshot():
+            raise EnvironmentError('构建期间源码变化；不注册候选')
+        manifest = read_json(output / 'build-manifest.json')
+        artifacts = manifest.get('artifacts', [])
+        if not manifest.get('complete') or manifest.get('kind') != 'connector' or len(artifacts) != 1:
+            raise EnvironmentError('业务构建未提供唯一连接器制品')
+        item = artifacts[0]
+        if item.get('module') != module or item.get('repository') != repo.name:
+            raise EnvironmentError('业务构建制品不属于所选连接器')
+        jar = contained(output, item['file'])
+        if sha(jar) != manifest.get('files', {}).get(item['file']):
+            raise EnvironmentError('业务构建制品校验失败')
         target = directory / jar.name
         if target.exists():
             raise EnvironmentError('多个连接器制品同名；不覆盖')

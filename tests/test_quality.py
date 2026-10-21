@@ -58,6 +58,28 @@ def concurrent_apply(base, run, revision, command, queue):
 
 
 class QualityTests(unittest.TestCase):
+    def test_ci_confirmation_ignores_observation_history_but_binds_actual_run(self):
+        latest = {"head": "a" * 40, "verdict": "success", "source": "fixture",
+                  "ts": "first", "failing": [],
+                  "checks": [{"name": "unit", "detailsUrl": "fixture:run/1", "conclusion": "SUCCESS"},
+                             {"name": "integration", "conclusion": "SUCCESS"}]}
+        state = {"repository": "tapdata/tapdata", "pr": "1", "run_id": "run-one",
+                 "revision": 1, "history": [latest]}
+        with mock.patch.object(ci, "current_states", return_value=[state]):
+            original = quality.context(self.base, self.task)["repositories"]["tapdata/tapdata"]["ci_digest"]
+            refreshed = copy.deepcopy(latest)
+            refreshed["ts"] = "later"
+            refreshed["checks"].reverse()
+            state["history"].append(refreshed)
+            state["revision"] = 2
+            self.assertEqual(original, quality.context(self.base, self.task)["repositories"]["tapdata/tapdata"]["ci_digest"])
+            for key, value in (("head", "b" * 40), ("verdict", "failure")):
+                state["history"][-1] = dict(refreshed, **{key: value})
+                self.assertNotEqual(original, quality.context(self.base, self.task)["repositories"]["tapdata/tapdata"]["ci_digest"])
+            state["history"][-1] = copy.deepcopy(refreshed)
+            state["history"][-1]["checks"][1]["detailsUrl"] = "fixture:run/2"
+            self.assertNotEqual(original, quality.context(self.base, self.task)["repositories"]["tapdata/tapdata"]["ci_digest"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="ao-quality-")
         self.addCleanup(self.temp.cleanup)

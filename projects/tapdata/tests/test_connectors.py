@@ -19,8 +19,11 @@ class ConnectorsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        self.repo = self.root / 'source/tapdata/connectors'
+        self.repo = self.root / 'source/tapdata/tapdata-connectors'
         self.repo.mkdir(parents=True)
+        entry = self.repo.parent/'tapdata-connectors-enterprise/build/build.sh'
+        entry.parent.mkdir(parents=True)
+        entry.write_text('#!/bin/bash\n')
         self.environment = types.SimpleNamespace(station=self.root, source=self.root/'source',
                                                  identity='a'*32, snapshot=lambda: [{'head':'current'}])
         self.specification = {'properties': {'id':'dummy','name':'Dummy'}}
@@ -71,13 +74,20 @@ class ConnectorsTests(unittest.TestCase):
         self.jar(module,'dummy-connector-1.0.jar');full=self.jar(module,'dummy-connector-v1.0-123.jar')
         self.assertEqual(c.jar_for(module),full)
 
+    def native_result(self, argv, cwd, log, env=None):
+        self.assertEqual(env['JAVA_HOME'], '/java')
+        self.assertIn('--local-repository', argv)
+        output = Path(argv[argv.index('--output-dir')+1]);output.mkdir(parents=True)
+        module = argv[argv.index('--connector')+1].split(':',1)[1]
+        jar = output/'dummy.jar';jar.write_bytes(b'connector')
+        c.write_json(output/'build-manifest.json', {'complete':True, 'kind':'connector',
+            'artifacts':[{'repository':self.repo.name,'module':module,'file':jar.name}],
+            'files':{jar.name:c.sha(jar)}})
+        return 0
+
     def test_build_records_only_selected_artifacts_and_does_not_register(self):
-        module=self.module()
         args=types.SimpleNamespace(maven='/mvn',java_home='/java',local_repository='/repo',profile=[],skip_tests=False)
-        def run(argv,cwd,log,env=None):
-            self.assertEqual(argv[-3:],['-pl','connectors/dummy-connector','-am'])
-            self.jar(module);return 0
-        with patch.object(c,'execute',side_effect=run) as execute:
+        with patch.object(c,'execute',side_effect=self.native_result) as execute:
             record=c.build(self.environment,self.repo,['connectors/dummy-connector'],args)
         self.assertEqual(execute.call_count,1)
         self.assertTrue(c.read_json(record)['built'])
@@ -91,16 +101,34 @@ class ConnectorsTests(unittest.TestCase):
         self.assertFalse(c.read_json(record).get('built',False))
 
     def test_passes_verified_native_protoc_parameter(self):
-        module=self.module();protoc=self.root/'protoc';protoc.write_text('tool');protoc.chmod(0o700)
+        protoc=self.root/'protoc';protoc.write_text('tool');protoc.chmod(0o700)
         args=types.SimpleNamespace(maven='/mvn',java_home='/java',local_repository='/repo',profile=[],skip_tests=False,protoc_command=str(protoc))
         def run(argv,cwd,log,env=None):
-            self.assertIn('-DprotocCommand='+str(protoc),argv)
-            self.jar(module);return 0
+            self.assertEqual(argv[argv.index('--protoc-command')+1], str(protoc))
+            return self.native_result(argv,cwd,log,env)
         with patch.object(c,'execute',side_effect=run):c.build(self.environment,self.repo,['connectors/dummy-connector'],args)
         args.protoc_command='relative/protoc'
         with patch.object(c,'execute') as execute:
             with self.assertRaises(c.EnvironmentError):c.build(self.environment,self.repo,['connectors/dummy-connector'],args)
             execute.assert_not_called()
+
+    def test_missing_business_entry_does_not_run_old_build_logic(self):
+        (self.repo.parent/'tapdata-connectors-enterprise/build/build.sh').unlink()
+        args=types.SimpleNamespace(maven='/mvn',java_home='/java',local_repository='/repo',profile=[],skip_tests=False)
+        with patch.object(c,'execute') as execute:
+            with self.assertRaisesRegex(c.EnvironmentError, 'develop'):
+                c.build(self.environment,self.repo,['connectors/dummy-connector'],args)
+            execute.assert_not_called()
+
+    def test_modified_native_artifact_is_rejected(self):
+        args=types.SimpleNamespace(maven='/mvn',java_home='/java',local_repository='/repo',profile=[],skip_tests=False)
+        def run(argv,cwd,log,env=None):
+            self.native_result(argv,cwd,log,env)
+            (Path(argv[argv.index('--output-dir')+1])/'dummy.jar').write_bytes(b'changed')
+            return 0
+        with patch.object(c,'execute',side_effect=run):
+            with self.assertRaisesRegex(c.EnvironmentError, '校验失败'):
+                c.build(self.environment,self.repo,['connectors/dummy-connector'],args)
 
     def test_safe_target_address(self):
         self.assertEqual(c.url('https://tm.example/'),'https://tm.example')
@@ -124,7 +152,7 @@ class ConnectorsTests(unittest.TestCase):
             file=directory/('artifact%s.jar'%i);file.write_bytes(b'original')
             artifacts.append({'module':module,'file':file.name,'sha256':c.sha(file)})
         record=directory/'build.json'
-        c.write_json(record,{'built':True,'station_id':self.environment.identity,'repository':'tapdata/connectors',
+        c.write_json(record,{'built':True,'station_id':self.environment.identity,'repository':'tapdata/tapdata-connectors',
                              'source':self.environment.snapshot(),'artifacts':artifacts})
         secrets=self.root/'config/secrets';secrets.mkdir(parents=True)
         credentials=secrets/'credentials.json';credentials.write_text('{"password":"private-value"}');credentials.chmod(0o600)

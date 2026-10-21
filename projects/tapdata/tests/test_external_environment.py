@@ -150,7 +150,7 @@ console.log(JSON.stringify(writes));
 const fs=require('fs'),vm=require('vm'),events=require('events');
 const mode=process.argv[1];let output='',waits=0,queries=[];
 const input=new events.EventEmitter();input.setEncoding=()=>{};
-const proc={stdin:input,exitCode:0};
+const proc={argv:[],stdin:input,exitCode:0};
 const projectionChecks=[];
 const MongoClient=class {
  async connect(){if(mode==='auth')throw Error('private-uri');}

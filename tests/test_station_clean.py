@@ -24,6 +24,34 @@ class CleanupTests(unittest.TestCase):
     git = fixture.StationTests.git
     takeover = fixture.StationTests.takeover
 
+    def test_runtime_ownership_covers_arbitrary_outputs_without_task(self):
+        cache = self.ws / 'runtime/new-build-cache'
+        cache.mkdir()
+        (cache / 'artifact').write_text('generated')
+        (self.ws / 'runtime/one-off.log').write_text('log')
+        result = clean.execute(self.ws, 'work-clean', None, None, 0, 'op-idle-cache', {})
+        self.assertFalse(cache.exists())
+        self.assertFalse((self.ws / 'runtime/one-off.log').exists())
+        self.assertTrue((self.ws / 'runtime').is_dir())
+        self.assertFalse([row for row in result['cleanup_result']['residuals']
+                          if row['path'].startswith('runtime/')])
+
+    def test_runtime_ownership_preserves_nested_git_and_external_link_target(self):
+        task = self.ready()
+        nested = self.ws / 'runtime/source-copy'
+        nested.mkdir()
+        (nested / '.git').mkdir()
+        (nested / 'build.sh').write_text('source')
+        external = self.ws / 'config/persistent'
+        external.write_text('keep')
+        (self.ws / 'runtime/external-link').symlink_to(external)
+        (self.ws / 'runtime/generated.log').write_text('remove')
+        result = self.run_exit(task)
+        self.assertEqual('keep', external.read_text())
+        self.assertTrue((nested / 'build.sh').exists())
+        self.assertFalse((self.ws / 'runtime/generated.log').exists())
+        self.assertFalse(result['cleanup_result']['complete'])
+
     def ready(self):
         task = self.takeover()
         self.repo = self.ws / 'source/tapdata/tapdata'
