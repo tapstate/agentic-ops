@@ -58,7 +58,7 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 `.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
-安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
+安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 负责准备、快进更新和本地核验；Workflow 在新接管预检通过后、创建 run 之前按 Project Profile 的 `wiki_update_before_takeover` 配置复用该能力。TapData 启用新接管前自动准备并更新 Wiki，原 run 和在途操作恢复跳过；初始化和查询不自动刷新。更新失败明确提示，仅暂停依赖 Wiki 的工作，不增加任务门禁。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
 ## 5. 单任务工位
 

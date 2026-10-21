@@ -19,7 +19,7 @@ metadata:
 
 需要配置、部署、更新、检查、切换或卸载工位 Docker 开发环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，正常退出先由脚本处理已支持的运行资源，返回未完成容器时再由该 Skill 接力。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
 
-一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
+一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。新接管入口按[中央共享 Wiki 合同](../../../../docs/usage/station-materials.md#中央共享-wiki)自动准备并更新 Wiki；读取更新结果，不额外重复刷新。原 run 和在途操作恢复跳过；更新失败或不可用时说明缺口，继续有充分源码依据的工作。
 
 1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先由脚本 release/clean 退出，保留源码与未选择配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。

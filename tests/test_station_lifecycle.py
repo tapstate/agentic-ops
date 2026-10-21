@@ -78,6 +78,29 @@ class StationTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         return task
 
+    def test_reference_refresh_precedes_run_and_skips_operation_replay(self):
+        self.prepare_engineering()
+        def refresh(base):
+            self.assertIsNone(station_operation.read(base))
+            self.assertIsNone(task_store.read_current(base)['current'])
+            self.assertFalse((self.product / '.archive').exists())
+        with mock.patch.object(station.source, 'refresh_shared_references', side_effect=refresh) as update:
+            self.takeover()
+            station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            self.assertEqual(update.call_count, 1)
+
+    def test_reference_refresh_skips_invalid_revision_and_resumed_failure(self):
+        self.prepare_engineering()
+        with mock.patch.object(station.source, 'refresh_shared_references') as update:
+            with self.assertRaisesRegex(ValueError, 'revision'):
+                station.takeover(self.ws, self.request, 'op-takeover-one', 99)
+            update.assert_not_called()
+            with mock.patch.object(station.source, 'prepare_repositories', side_effect=ValueError('offline')):
+                with self.assertRaisesRegex(ValueError, 'offline'):
+                    station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            self.assertEqual(update.call_count, 1)
+
     def test_takeover_does_not_require_obsolete_reset_branch(self):
         self.prepare_engineering()
         catalog_path = self.product / 'projects/tapdata/repositories.json'

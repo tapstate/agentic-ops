@@ -69,7 +69,7 @@ def _verify_superseded(operation, name, step):
     raise ValueError("旧清理修订记录必须由原版本退出")
 
 
-def begin(base, kind, operation_id, expected_revision, request, run_id=None):
+def begin(base, kind, operation_id, expected_revision, request, run_id=None, before_create=None):
     if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
@@ -93,6 +93,8 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
+        if before_create is not None:
+            before_create()
         from workflow import archive_store
         for attempt in range(2):
             run_id = task_store.new_run_id(issue_key)

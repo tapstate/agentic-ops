@@ -144,7 +144,7 @@ def inspect(path, name, entry):
     if git(path, "merge-base", "--is-ancestor", head, target, check=False).returncode:
         raise ValueError("共享仓库超前或分叉，拒绝覆盖")
     return {"status": "ready", "repository": name, "path": str(path),
-            "branch": entry["branch"], "relation": "equal" if head == target else "behind"}
+            "branch": entry["branch"], "head": head, "relation": "equal" if head == target else "behind"}
 
 
 def run(root, name, action, pool_root):

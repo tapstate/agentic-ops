@@ -60,7 +60,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 [维护指引](maintenance-guide.md#5-验证)负责诊断检查、提交候选按影响验收、发布隔离四项验收、耗时报告与证据 v6 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
-TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
+TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、TapData 新接管前自动更新、显式更新和故障处理，不引入任务知识快照。
 
 TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapdata-ci-test/SKILL.md) 负责用例分析、编写、执行与报告修复；[tapdata-task](../projects/tapdata/skills/tapdata-task/SKILL.md) 负责在研发节点调用、授权、质量记录与外部跟进。集成测试技能按需使用 tapdata-wiki；[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md) 保留具体操作与报告工具说明。技能能力缺失不增加流程门禁，已有验收条件仍由原质量合同处理，不建立第二套测试状态。
 

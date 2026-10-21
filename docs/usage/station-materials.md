@@ -29,12 +29,12 @@ agenticops station repair --station <工位目录> --ensure-wiki
 底层共享仓库也可由维护者直接操作（脚本默认使用自身所在 Product Root，也可通过 `--product-root` 指定）：
 
 ```sh
-python3 <product-root>/bootstrap/shared_repositories.py ensure --repository tapstate/wiki
-python3 <product-root>/bootstrap/shared_repositories.py update --repository tapstate/wiki
-python3 <product-root>/bootstrap/shared_repositories.py status --repository tapstate/wiki
+python3 <product-root>/bootstrap/shared_repositories.py ensure --repository tapstate/wiki --source-pool <station.source_pool>
+python3 <product-root>/bootstrap/shared_repositories.py update --repository tapstate/wiki --source-pool <station.source_pool>
+python3 <product-root>/bootstrap/shared_repositories.py status --repository tapstate/wiki --source-pool <station.source_pool>
 ```
 
-ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验；update 才联网刷新并仅快进 main；status 只检查本地状态。初始化、接管、任务开始和技能查询均不自动准备或更新。已有未知目录不会自动采用；本地修改、身份错误、分叉或未完成 Git 操作需要研发处理，不自动 reset、stash 或强制覆盖。管理并发时拒绝忙碌仓库；查询一次固定一个临时提交读取，避免混读更新前后内容，不保存任务 Wiki SHA。
+ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验；update 才联网刷新并仅快进 main；status 只检查本地状态。TapData 的 Profile 启用 `wiki_update_before_takeover`：每次新接管在既有 AgenticOps 版本检查及接管预检通过后、创建 operation/run 和下载业务源码前，自动 ensure 后 update，缺失时准备、已有时快进到本次获取的远端 main。原 run、在途操作恢复及已完成请求重放跳过；其它项目未启用时保持原行为。初始化、会话启动和技能查询不单独触发 Wiki 更新。更新成功显示本次核验提交，失败明确报告未更新到最新并保留现场，继续不依赖 Wiki 的工作；使用 Wiki 前仍须通过 status 核验，不将失败解释为旧副本可用。已有未知目录不会自动采用；本地修改、身份错误、分叉或未完成 Git 操作需要研发处理，不自动 reset、stash 或强制覆盖。管理并发时拒绝忙碌仓库；查询一次固定一个临时提交读取，避免混读更新前后内容，不保存任务 Wiki SHA。
 
 准备使用临时目录核验后发布。更新失败不等于工作树仍可用：fetch 失败通常保留原 HEAD，checkout 中断必须先经 status 核验并由研发修复。管理器不自动清理共享材料、不运行 Wiki init、脚本或 Hook；不提供操作系统级只读隔离。
 
