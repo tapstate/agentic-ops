@@ -1,6 +1,6 @@
 # 更新与回退
 
-当前清单、归档和退出语义使用 epoch 31。epoch 30 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
+当前 runtime 回收与质量确认语义使用 epoch 32。epoch 31 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
 

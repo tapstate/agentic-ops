@@ -446,6 +446,31 @@ class Environment:
             raise EnvironmentError("工位没有可核验的 Git 源码")
         return result
 
+    def reusable_build(self, config, source):
+        """只复用已完成真实验证且源码、参数、全部产物一致的完整候选。"""
+        # 通用旧配方没有工具链复用合同；只让业务入口核验自己的候选。
+        if len(config["build"]) != 1:
+            return None
+        argv = config["build"][0]["argv"]
+        if len(argv) < 2 or not argv[1].endswith("/build/build.sh") or "--output-dir" not in argv:
+            return None
+        for candidate in sorted((self.root / "builds").glob("*"), reverse=True):
+            path = candidate / "build-record.json"
+            if candidate.is_symlink() or not path.is_file():
+                continue
+            record = read_json(path)
+            if not record.get("validated") or record.get("build_config") != config or record.get("source") != source:
+                continue
+            bundle = candidate / "bundle"
+            files = list(bundle.rglob("*"))
+            if any(p.is_symlink() for p in files):
+                continue
+            hashes = {str(p.relative_to(bundle)): hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in files if p.is_file()}
+            if hashes and hashes == record.get("files"):
+                return candidate, record
+        return None
+
     def build(self, config):
         if not config["build"] or not config["assets"]:
             raise EnvironmentError("请先根据目标分支配置 build 步骤与完整 Launcher 装配 assets")
@@ -455,6 +480,22 @@ class Environment:
         if self.root.exists() and not self.state() and (not owner.is_file() or read_json(owner).get("station_id") != self.identity):
             raise EnvironmentError("构建现场归属不明，不覆盖已有目录")
         write_json(owner, {"station_id": self.identity})
+        previous = self.reusable_build(config, before)
+        if previous:
+            candidate, record = previous
+            step = config["build"][0]
+            argv = [value.replace("${TAPDATA_TEST_ENV_BUILD_DIR}", str(candidate)) for value in step["argv"]]
+            env = os.environ.copy()
+            env["TAPDATA_TEST_ENV_BUILD_DIR"] = str(candidate)
+            with (candidate / "reuse.log").open("wb") as log:
+                os.chmod(log.name, 0o600)
+                result = subprocess.run(argv, cwd=self.source_path(step["cwd"]), env=env, stdout=log, stderr=log)
+            verified = self.reusable_build(config, before)
+            if result.returncode or self.snapshot() != before or not verified or verified[0] != candidate:
+                raise EnvironmentError("业务入口未确认候选复用；保留现场，不部署")
+            record["mongo_preflight"] = self.probe(config, candidate / "bundle", [])
+            write_json(candidate / "build-record.json", record)
+            return candidate, record
         candidate = self.root / "builds" / uuid.uuid4().hex
         if candidate.resolve() != candidate:
             raise EnvironmentError("构建目录不得经过符号链接")
@@ -464,10 +505,11 @@ class Environment:
         commands = []
         for index, step in enumerate(config["build"]):
             cwd = self.source_path(step["cwd"])
+            argv = [value.replace("${TAPDATA_TEST_ENV_BUILD_DIR}", str(candidate)) for value in step["argv"]]
             with (candidate / ("build-%s.log" % index)).open("wb") as log:
                 os.chmod(log.name, 0o600)
-                result = subprocess.run(step["argv"], cwd=cwd, env=env, stdout=log, stderr=log)
-            commands.append({"cwd": step["cwd"], "argv": step["argv"], "exit_code": result.returncode})
+                result = subprocess.run(argv, cwd=cwd, env=env, stdout=log, stderr=log)
+            commands.append({"cwd": step["cwd"], "argv": argv, "exit_code": result.returncode})
             write_json(candidate / "build-record.json", {"source": before, "commands": commands})
             if result.returncode:
                 raise EnvironmentError("宿主机构建失败，原环境未变；私有日志已保留")
@@ -479,7 +521,20 @@ class Environment:
         bundle = candidate / "bundle"
         bundle.mkdir()
         for asset in config["assets"]:
-            source = self.source_path(asset["source"])
+            if asset["source"].startswith("@build/"):
+                source = contained(candidate, asset["source"][7:])
+                manifest = read_json(source.parent / "build-manifest.json")
+                if manifest.get("kind") != "application" or not manifest.get("complete") or manifest.get("bundle") != source.name:
+                    raise EnvironmentError("业务构建未提供完整应用产物")
+                expected = manifest.get("files")
+                if not isinstance(expected, dict) or not expected:
+                    raise EnvironmentError("业务构建产物清单为空")
+                actual = {str(p.relative_to(source.parent)): hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in source.rglob("*") if p.is_file() and not p.is_symlink()}
+                if actual != expected or any(p.is_symlink() for p in source.rglob("*")):
+                    raise EnvironmentError("业务构建产物与清单不一致")
+            else:
+                source = self.source_path(asset["source"])
             target = bundle if asset["target"] == "." else contained(bundle, asset["target"])
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
@@ -526,8 +581,35 @@ class Environment:
             call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", java_entry, config["image"], "-version"], timeout=180)
         call(["docker", "run", "--rm", "--platform", config["platform"], "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "--version"], timeout=180)
         record["mongo_preflight"] = self.probe(config, bundle, [])
+        record["validated"] = True
+        record["build_config"] = config
         write_json(candidate / "build-record.json", record)
         return candidate, record
+
+    def early_probe(self, config):
+        """已有宿主机工具可独立完成的只读检查，不能替代容器网络验收。"""
+        driver = contained(self.source, config["mongo_driver"]) / "mongodb"
+        node = shutil.which("node")
+        if not node or not (driver / "package.json").is_file():
+            return None
+        _, uri = self.secret(config)
+        try:
+            output = call([node, str(HERE / "test-environment-probe.js"), str(driver)],
+                      input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": [],
+                                             "external_tm_url": config.get("external_tm_url"),
+                                             "fe_heartbeat": config.get("fe_heartbeat")}),
+                      timeout=60, failure_messages={
+                          "mongo_connect": "构建前 MongoDB 连接失败",
+                          "mongo_auth": "构建前 MongoDB 认证失败",
+                          "mongo_topology": "构建前 MongoDB 副本成员不可达",
+                          "tm_http": "构建前外部 TM HTTP 不可达",
+                          "monitoring": "构建前数据库核验失败"})
+        except (EnvironmentError, subprocess.TimeoutExpired, OSError) as error:
+            if str(error) == "构建前 MongoDB 认证失败":
+                raise
+            # 容器内域名、路由可与宿主机不同；宿主机网络失败不能否定容器路径。
+            return {"deferred": "宿主机探测未完成，仍需容器连接核验"}
+        return json.loads(output)
 
     def probe(self, config, bundle, nodes):
         _, uri = self.secret(config)
@@ -721,7 +803,12 @@ class Environment:
                 raise EnvironmentError("许可证文件缺失")
         if "external_tm_url" in config and reuse_mongo:
             raise EnvironmentError("外部 TM 模式始终保留已有数据库，不使用 --reuse-mongo")
+        early = self.early_probe(config)
+        if early and "external_tm_url" not in config and not update and early.get("collection_count", 0) and not reuse_mongo:
+            raise EnvironmentError("目标 MongoDB 已有集合；先决定保留或独立清理，尚未开始构建")
         candidate, record = self.build(config)
+        record["host_preflight"] = early or {"deferred": "宿主机 Node 或 Mongo 驱动尚未准备"}
+        write_json(candidate / "build-record.json", record)
         if "external_tm_url" not in config and not update and record.get("mongo_preflight", {}).get("collection_count", 0) and not reuse_mongo:
             raise EnvironmentError("目标 MongoDB 已有集合；请用户选择保留，或自行执行已审核的清理命令后重新检查；保留需显式 --reuse-mongo。未停止原环境")
         generated = self.generate(name, config, candidate, record, previous=state if update else None)

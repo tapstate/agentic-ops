@@ -251,7 +251,9 @@ def context(base, task):
             entry["live_revision"] = wt["final_revision"]
             cleanup_artifacts.update(wt.get("verified_artifacts", {}))
         repos[repo["repository"]] = entry
-        entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
+        entry["ci_digest"] = digest(sorted(
+            [ci.confirmation_state(s) for s in ci_states if s["repository"] == repo["repository"]],
+            key=lambda value: json.dumps(value, sort_keys=True)))
     result = {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
             "replan_items": task.get("replan", {}).get("item_revisions", {}),
             "failures": failures.load(base, task)[1],

@@ -8,6 +8,16 @@
 
 工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验实际路径、资源归属和写入者，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
+## 业务构建入口
+
+应用构建入口由 `tapdata-enterprise/build/build.sh` 维护，连接器入口由 `tapdata-connectors-enterprise/build/build.sh` 维护。源码根目录是入口所属仓库的父目录，由脚本自身路径定位，不依赖调用 cwd，不接受另一个源码根，不自动 fetch、checkout 或修改分支。应用入口编排应用与默认 mysql、dummy、postgresql、mongo 四个连接器；连接器入口只处理一个明确选择及其必要依赖，不反向调用应用入口。编译和注册分开，部署与发布不进入业务构建脚本。
+
+两个入口分别检查三个场景：当前分支已有入口时先核验其行为并适配；当前没有而 develop 有时，核验并记录所参考的 develop 完整 SHA，在当前业务仓库适配；两者都没有时，从当前 POM、原生命令及已验证装配步骤补齐入口。不得通过包装会操作 Git、全局工具链或发布的旧脚本来复用副作用。develop 只提供参考，是否提交由研发决定；未提交的入口、辅助文件和适配同样是源码成果，清理必须保留。完成适配后再计算源码指纹。
+
+本地 `build-settings.sh` 配置 JDK、Maven、Node、npm、pnpm、并发与内存；仓库只跟踪 `build-settings.example.sh` 并忽略本机文件。可用 `TAPDATA_BUILD_SETTINGS` 指定工位 config 中的本地文件，不把主机路径和秘密提交到仓库。外部统一传递 `--work-dir`、`--output-dir`、`--cache-dir`、`--platform`、`--mode`；现有 Maven 仓库可通过 `--local-repository` 指定。所有输出和缓存使用源码区域外的工位路径。连接器另传 `--connector`，基础别名之外使用 `repository:module-path` 消除歧义。
+
+构建入口记录源码指纹、工具链、参数、是否跳过测试及制品摘要，构建中源码变化则不签发成功候选。完整应用只装配本次所选连接器清单中的已核验 Jar，不复制旧 dist。相同完整候选只在源码、工具链、参数及制品摘要仍匹配时复用；失败候选保留日志，不视为成功。`--skip-tests` 必须在验收中披露，编译成功不等于测试通过。共享下载缓存不属于本期方案，继续隔离各工位本地构建成果。
+
 ## Maven 配置与任务本地仓库
 
 Maven 安装级与用户级 `settings.xml` 正常生效，保留镜像、认证、代理和 profile；不复制、修改或归档这些文件。仅本地仓库路径由当前任务覆盖为 `runtime/maven-local`，因此 AgenticOps 的 Maven 计划不会把本任务 Jar 写入共享 `~/.m2/repository`。

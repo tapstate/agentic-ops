@@ -16,6 +16,19 @@ from station_fixture import save_task as save_station_task
 
 
 class JiraStatusTests(unittest.TestCase):
+    def test_sensitive_packet_reports_location_without_disclosing_value(self):
+        from workflow import jira_collect
+        spec = json.loads((ROOT / "projects/tapdata/admission.json").read_text())
+        for text in ("password=fixture-secret", "/Users/fixture/private/report.json",
+                     "Bearer fixture-token-123456"):
+            with self.subTest(value=text):
+                with self.assertRaises(ValueError) as error:
+                    jira_collect.require_safe(spec, {"fields": {"customfield_a": {
+                        "suggestions": [{"value": text}]}}}, "采集结果")
+                self.assertIn("$.fields.customfield_a.suggestions[0].value", str(error.exception))
+                self.assertNotIn(text, str(error.exception))
+        jira_collect.require_safe(spec, {"value": "runtime/reports/check.json"}, "采集结果")
+
     def test_tapdata_profiles_recognize_real_jira_test_link_direction(self):
         link_type = {"id": "10009", "name": "Test", "inward": "is tested by", "outward": "tests"}
         target = {"key": "TAP-12921", "fields": {"issuetype": {"name": "Test"}}}
