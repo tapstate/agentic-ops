@@ -268,8 +268,14 @@ class StationBootstrapTests(unittest.TestCase):
         registry.detach(ROOT, self.station, purge=True)
         self.init(success=False)
         self.init('--reuse-materials')
-        for name in ('config', 'source', 'archive'):
+        for name in ('source', 'archive'):
             self.assertEqual((self.station / name / 'sentinel').read_text(), name)
+        backups = list((self.station / 'config/backups').glob('*/sentinel'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), 'config')
+        self.assertTrue((backups[0].parent / '.complete.json').is_file())
+        self.assertFalse((self.station / 'config/sentinel').exists())
+        self.assertFalse((self.station / 'config/environments').exists())
 
     def make_cached_repository(self):
         repository = self.station / 'source/example/repository'

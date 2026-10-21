@@ -8,12 +8,12 @@
   },
   "image": "eclipse-temurin:17-jre-jammy",
   "platform": "",
-  "mongo_uri_file": "tapdata-test-env/local/mongodb-uri",
+  "mongo_uri_file": "environments/local/drafts/secrets/mongodb-uri",
   "ports": {
     "node1": {
       "tm": 13030,
       "api": null,
-      "license": "secrets/tapdata-test-env/local/license.txt"
+      "license": "environments/local/drafts/secrets/license.txt"
     }
   },
   "java": {

@@ -13,6 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location('connectors', SCRIPTS / 'connectors.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
+from workflow.environment_config import Store
 
 
 class ConnectorsTests(unittest.TestCase):
@@ -25,7 +26,7 @@ class ConnectorsTests(unittest.TestCase):
         entry.parent.mkdir(parents=True)
         entry.write_text('#!/bin/bash\n')
         self.environment = types.SimpleNamespace(station=self.root, source=self.root/'source',
-                                                 identity='a'*32, snapshot=lambda: [{'head':'current'}])
+                                                 store=Store(self.root), identity='a'*32, snapshot=lambda: [{'head':'current'}])
         self.specification = {'properties': {'id':'dummy','name':'Dummy'}}
 
     def tearDown(self):
@@ -154,11 +155,11 @@ class ConnectorsTests(unittest.TestCase):
         record=directory/'build.json'
         c.write_json(record,{'built':True,'station_id':self.environment.identity,'repository':'tapdata/tapdata-connectors',
                              'source':self.environment.snapshot(),'artifacts':artifacts})
-        secrets=self.root/'config/secrets';secrets.mkdir(parents=True)
+        secrets=self.root/'config/shared/secrets';secrets.mkdir(parents=True)
         credentials=secrets/'credentials.json';credentials.write_text('{"password":"private-value"}');credentials.chmod(0o600)
         java_home=self.root/'java';(java_home/'bin').mkdir(parents=True);(java_home/'bin/java').write_text('')
         cli=self.root/'pdk.jar';cli.write_bytes(b'cli')
-        args=types.SimpleNamespace(env=None,tm_url='http://127.0.0.1:13030',credentials='credentials.json',pdk_cli=str(cli),java_home=str(java_home),latest=True)
+        args=types.SimpleNamespace(env=None,tm_url='http://127.0.0.1:13030',credentials='shared/secrets/credentials.json',pdk_cli=str(cli),java_home=str(java_home),latest=True)
         return chosen,record,args
 
     def test_register_uses_private_arguments_and_preserves_original_jar(self):
@@ -185,7 +186,7 @@ class ConnectorsTests(unittest.TestCase):
     def test_named_environment_reads_user_admin_password(self):
         chosen,record,args=self.registration()
         args.env='local-amd64';args.credentials=None
-        path=self.root/'config/secrets/tapdata-test-env/local-amd64/admin-password'
+        path=self.root/'config/environments/local-amd64/secrets/admin-password'
         path.parent.mkdir(parents=True);path.write_text('user password\n');path.chmod(0o600)
         def run(argv,cwd,log,env=None):
             arguments=Path(argv[-1][1:]).read_text()
@@ -207,7 +208,7 @@ class ConnectorsTests(unittest.TestCase):
             execute.assert_not_called()
 
     def test_credentials_permissions_fail_before_upload(self):
-        chosen,record,args=self.registration();(self.root/'config/secrets/credentials.json').chmod(0o644)
+        chosen,record,args=self.registration();(self.root/'config/shared/secrets/credentials.json').chmod(0o644)
         with patch.object(c,'execute') as execute:
             with self.assertRaises(c.EnvironmentError):c.register(self.environment,self.repo,chosen,record,args)
             execute.assert_not_called()

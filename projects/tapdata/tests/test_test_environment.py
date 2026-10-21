@@ -146,26 +146,27 @@ class EnvironmentTests(unittest.TestCase):
             self.env.prepare_inputs("review")
         uri.chmod(0o600)
         uri.unlink()
-        uri.symlink_to(self.station / "config/secrets/mongodb-uri")
+        uri.symlink_to(self.station / "config/shared/secrets/mongodb-uri")
         with self.assertRaises(mod.EnvironmentError):
             self.env.check_inputs(draft)
         with self.assertRaises(mod.EnvironmentError):
             self.env.prepare_inputs("review")
 
     def test_single_license_is_mounted_by_all_nodes(self):
-        license_file = self.station / "config/secrets/tapdata-test-env/dev/license.txt"
+        license_file = self.station / "config/environments/dev/secrets/license.txt"
         license_file.parent.mkdir(parents=True)
         license_file.write_text("shared-license")
         license_file.chmod(0o600)
         self.config["nodes"]["node2"] = ["FE"]
-        license_ref = "secrets/tapdata-test-env/dev/license.txt"
+        license_ref = "environments/dev/secrets/license.txt"
         self.config["ports"]["node1"]["license"] = license_ref
         self.config["ports"]["node2"] = {"tm": None, "api": None, "license": license_ref}
         self.save("dev")
         self.env.deploy("dev")
         compose = mod.read_json(self.env.root / "compose.json")
         for service in compose["services"].values():
-            self.assertIn(str(license_file) + ":/license/license.txt:ro", service["volumes"])
+            self.assertFalse(any(str(license_file) in v for v in service["volumes"]))
+            self.assertTrue(any("/secrets/license.txt:/license/license.txt:ro" in v for v in service["volumes"]))
 
     def test_input_cli_reports_invalid_then_corrected_configuration(self):
         command = [sys.executable, str(SCRIPT), "prepare-inputs", "--station", str(self.station), "--env", "cli"]
@@ -189,13 +190,13 @@ class EnvironmentTests(unittest.TestCase):
         self.assertNotIn("never-echo-this", result.stdout + result.stderr)
 
     def test_prepare_preserves_saved_environment_and_rejects_linked_draft(self):
-        before = (self.env.config_dir / "dev.json").read_bytes()
-        with self.assertRaises(mod.EnvironmentError):
-            self.env.prepare_inputs("dev")
-        self.assertEqual((self.env.config_dir / "dev.json").read_bytes(), before)
+        before = (self.env.config_dir / "dev/config.json").read_bytes()
+        self.assertEqual(self.env.prepare_inputs("dev")["config_file"], str(self.env.config_dir / "dev/config.json"))
+        self.assertEqual((self.env.config_dir / "dev/config.json").read_bytes(), before)
         outside = self.station.parent / "outside"
         outside.mkdir()
-        (self.env.config_dir / "drafts").symlink_to(outside)
+        (self.env.config_dir / "review").mkdir()
+        (self.env.config_dir / "review/drafts").symlink_to(outside)
         with self.assertRaises(mod.EnvironmentError):
             self.env.prepare_inputs("review")
         self.assertEqual(list(outside.iterdir()), [])
@@ -211,14 +212,14 @@ class EnvironmentTests(unittest.TestCase):
         self.runtime_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env.json")
         self.preparation_template = mod.read_json(ROOT / "projects/tapdata/templates/station/test-env-preparation.json")
         self.config = {**self.runtime_template, **self.preparation_template}
-        self.config["mongo_uri_file"] = "mongodb-uri"
+        self.config["mongo_uri_file"] = "shared/secrets/mongodb-uri"
         self.config["platform"] = "linux/arm64"
         self.config["nodes"]["node1"] = ["TM", "FE", "APIServer"]
         self.config["build"] = [{"cwd": "tapdata/tapdata", "argv": ["bash", "build.sh"]}]
         self.config["assets"] = [{"source": "tapdata/tapdata/output", "target": "."}]
         # 不占用本机固定测试端口。
         self.config["ports"]["node1"] = {"tm": 53131, "api": 53132, "license": ""}
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.parent.mkdir(parents=True)
         secret.write_text("mongodb://tester:do-not-print@host.docker.internal:27017/test?replicaSet=rs0")
         secret.chmod(0o600)
@@ -238,15 +239,21 @@ class EnvironmentTests(unittest.TestCase):
         return ""
 
     def save(self, name, config=None):
-        mod.write_json(self.env.config_dir / (name + ".json"), config or self.config)
+        value = config or self.config
+        runtime = {k: v for k, v in value.items() if k in mod.RUNTIME_FIELDS | {"external_tm_url"}}
+        runtime["schema_version"] = 2
+        preparation = {k: v for k, v in value.items() if k in mod.PREPARATION_FIELDS | {"fe_heartbeat"}}
+        preparation["schema_version"] = 1
+        mod.write_json(self.env.config_dir / name / "config.json", runtime)
+        mod.write_json(self.env.config_dir / name / "preparation.json", preparation)
 
-    def separate_inputs(self):
+    def separate_inputs(self, name="local"):
         runtime = {key: value for key, value in self.config.items() if key in mod.RUNTIME_FIELDS}
         runtime["schema_version"] = 2
         preparation = {key: value for key, value in self.config.items() if key in mod.PREPARATION_FIELDS | {"fe_heartbeat"}}
         preparation["schema_version"] = 1
-        runtime_path = self.station / "runtime-input.json"
-        preparation_path = self.station / "preparation-input.json"
+        runtime_path = self.env.config_dir / name / "drafts/config.json"
+        preparation_path = self.env.config_dir / name / "drafts/preparation.json"
         mod.write_json(runtime_path, runtime)
         mod.write_json(preparation_path, preparation)
         return runtime_path, preparation_path
@@ -255,19 +262,19 @@ class EnvironmentTests(unittest.TestCase):
         runtime, preparation = self.separate_inputs()
         self.env.configure("local", runtime, preparation)
         self.assertEqual(self.env.names(), ["dev", "local"])
-        saved = mod.read_json(self.env.config_dir / "local.json")
+        saved = mod.read_json(self.env.config_dir / "local/config.json")
         self.assertEqual(set(saved), mod.RUNTIME_FIELDS)
         self.assertEqual(self.env.config("local")[1], self.config)
         self.assertTrue(self.env.deploy("local")["ready"])
         self.env.remove()
-        self.assertTrue((self.env.config_dir / "preparation/local.json").is_file())
+        self.assertTrue((self.env.config_dir / "local/preparation.json").is_file())
         self.assertEqual(self.env.config("local")[1], self.config)
 
     def test_runtime_change_reuses_preparation_and_requires_update(self):
         runtime, preparation = self.separate_inputs()
         self.env.configure("local", runtime, preparation)
         self.env.deploy("local")
-        config = mod.read_json(runtime)
+        config = mod.read_json(self.env.config_dir / "local/config.json")
         config["java"]["tm"] = "-Xmx2G"
         mod.write_json(runtime, config)
         self.env.configure("local", runtime)
@@ -281,18 +288,19 @@ class EnvironmentTests(unittest.TestCase):
         self.env.configure("local", runtime, preparation)
         self.env.deploy("local")
         before = self.env.state()
-        saved = (self.env.config_dir / "preparation/local.json").read_bytes()
+        mod.write_json(runtime, mod.read_json(self.env.config_dir / "local/config.json"))
+        saved = (self.env.config_dir / "local/preparation.json").read_bytes()
         mod.write_json(preparation, {"schema_version": 1, "build": []})
         with self.assertRaises(mod.EnvironmentError):
             self.env.configure("local", runtime, preparation)
         self.assertEqual(self.env.state(), before)
-        self.assertEqual((self.env.config_dir / "preparation/local.json").read_bytes(), saved)
+        self.assertEqual((self.env.config_dir / "local/preparation.json").read_bytes(), saved)
 
     def test_missing_preparation_guides_agent_and_does_not_create_configuration(self):
         runtime, _ = self.separate_inputs()
         with self.assertRaisesRegex(mod.EnvironmentError, "Agent"):
             self.env.configure("local", runtime)
-        self.assertFalse((self.env.config_dir / "local.json").exists())
+        self.assertFalse((self.env.config_dir / "local/config.json").exists())
 
     def test_runtime_rejects_build_fields_and_preparation_rejects_runtime_fields(self):
         runtime, preparation = self.separate_inputs()
@@ -592,7 +600,7 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
 
     def test_changed_secret_requires_update(self):
         self.env.deploy("dev")
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.write_text("mongodb://tester:changed@host.docker.internal:27017/test")
         self.assertTrue(self.env.status()["configuration_changed"])
         with self.assertRaises(mod.EnvironmentError):
@@ -729,7 +737,7 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
                 real.docker_resources()
 
     def test_secret_permission_and_localhost_validation(self):
-        secret = self.station / "config/secrets/mongodb-uri"
+        secret = self.station / "config/shared/secrets/mongodb-uri"
         secret.chmod(0o644)
         with self.assertRaisesRegex(mod.EnvironmentError, "当前用户"):
             self.env.secret(self.config)
@@ -802,7 +810,7 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
             render_spec.loader.exec_module(render)
             skills = render.project_skill_sources(ROOT, "tapdata")
         self.assertIn(ROOT / "projects/tapdata/skills/tapdata-test-env", skills)
-        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 32)
+        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 33)
 
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，容器健康脚本行为待核验")

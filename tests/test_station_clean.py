@@ -24,6 +24,17 @@ class CleanupTests(unittest.TestCase):
     git = fixture.StationTests.git
     takeover = fixture.StationTests.takeover
 
+    def test_nested_environment_configuration_clear_preserves_other_environments_and_backups(self):
+        for name in ('environments/dev', 'environments/other', 'backups/original'):
+            folder = self.ws / 'config' / name
+            folder.mkdir(parents=True)
+            (folder / 'config.json').write_text('{}')
+        result = clean.execute(self.ws, 'work-clean', None, None, 0, 'op-clear-environment',
+                               {'clear_config': ['config/environments/dev']})
+        self.assertFalse((self.ws / 'config/environments/dev').exists())
+        self.assertTrue((self.ws / 'config/environments/other/config.json').exists())
+        self.assertTrue((self.ws / 'config/backups/original/config.json').exists())
+
     def test_runtime_ownership_covers_arbitrary_outputs_without_task(self):
         cache = self.ws / 'runtime/new-build-cache'
         cache.mkdir()

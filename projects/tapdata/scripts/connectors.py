@@ -215,10 +215,10 @@ def register(environment, repo, chosen, record_path, args):
     target = target_url(environment, args)
     credential_name = args.credentials
     if not credential_name and args.env:
-        credential_name = 'tapdata-test-env/' + args.env + '/admin-password'
+        credential_name = 'environments/' + args.env + '/secrets/admin-password'
     if not credential_name or not args.pdk_cli or not args.java_home:
         raise EnvironmentError('注册需原生 PDK CLI、Java Home 和秘密凭据文件')
-    credentials_path = contained(environment.station / 'config/secrets', credential_name)
+    credentials_path = environment.store.reference(credential_name, name=args.env, secret=True)
     if credentials_path.stat().st_mode & 0o077:
         raise EnvironmentError('凭据文件必须仅当前用户可读')
     if credentials_path.name == 'admin-password':
@@ -284,7 +284,7 @@ def main(argv=None):
     target.add_argument('--env')
     target.add_argument('--tm-url')
     parser.add_argument('--pdk-cli')
-    parser.add_argument('--credentials', help='config/secrets 内相对路径')
+    parser.add_argument('--credentials', help='config 根下本环境或 shared/secrets 的相对路径')
     parser.add_argument('--latest', action='store_true', help='明确更新目标最新版本；缺省仅上传')
     args = parser.parse_args(argv)
     try:
