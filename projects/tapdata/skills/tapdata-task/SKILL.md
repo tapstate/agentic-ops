@@ -21,7 +21,7 @@ metadata:
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。新接管入口按[中央共享 Wiki 合同](../../../../docs/usage/station-materials.md#中央共享-wiki)自动准备并更新 Wiki；读取更新结果，不额外重复刷新。原 run 和在途操作恢复跳过；更新失败或不可用时说明缺口，继续有充分源码依据的工作。
 
-1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先由脚本 release/clean 退出，保留源码与未选择配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
+1. 先按[执行接管](../../../../docs/architecture/single-task-station.md#执行接管当前源码)核对当前会话和已有占用，再只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先由脚本 release/clean 退出，保留源码与未选择配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
 3. 新接管先按[更新选择合同](../../../../docs/usage/update-and-rollback.md#新任务前检查与更新目标设计)处理入口返回的更新选择；复用本次有效 SHA 决定，不从 Agent 内嵌套启动新 Agent。空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。用户已选择当前会话处理 TapTest 且需要测试仓时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。

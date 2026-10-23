@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 独立测试进程共享一个明确的测试会话；并发用例自行更换或清除。
+export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
 test_root="$(mktemp -d)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT

@@ -8,6 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "revision": {"type": "integer", "minimum": 0},
+    "execution_control": {"type": "object", "description": "工位执行会话占用；结构由 workflow.execution.validate 核验，与任务 revision 独立。"},
     "current": {
       "type": ["object", "null"],
       "additionalProperties": false,

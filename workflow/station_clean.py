@@ -385,7 +385,7 @@ def main(argv=None):
             from workflow import task_handoff
             if task is None or not args.handoff_input:
                 raise ValueError('归档预检需要当前任务和 --handoff-input')
-            with task_store.task_state_lock(args.dir):
+            with task_store.task_state_lock(args.dir, execution=False):
                 task = task_store.read_task(args.dir)
                 preview = task_handoff.prepare(args.dir, task, json.loads(Path(args.handoff_input).read_text()))
             emit({'status': 'preview', 'handoff': preview, 'boundary': 'Git 远端只读核验；尚未写入 Jira'}, args.details, args.output, args.dir)

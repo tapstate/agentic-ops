@@ -126,7 +126,7 @@ def cmd_lifecycle(args):
 
 def cmd_cleanup_plan(args):
     from workflow import station_resources, station_source, station_operation, engineering_baseline
-    with task_store.task_state_lock(args.dir):
+    with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         result = station_resources.plan(args.dir, task)
         operation = station_operation.read(args.dir)
@@ -139,7 +139,7 @@ def cmd_cleanup_plan(args):
 
 def cmd_cleanup_preflight(args):
     from workflow import station_resources
-    with task_store.task_state_lock(args.dir):
+    with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         from workflow import station_clean, station_clean_view, station_operation
         station_clean_view.emit(station_clean.check(args.dir, task, operation=station_operation.read(args.dir)),
@@ -448,12 +448,16 @@ def _check_advance(task, target, base, spec):
 
 def cmd_advance(args):
     issue = task_store.resolve_issue(args.dir, args.issue_key)
-    with task_store.task_run_lock(args.dir, issue):
+    with task_store.task_run_lock(args.dir, issue, refresh_activity=False):
         task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
         if not (task.get("stage") == "completed" and task.get("terminal_proof")
                 and args.expected_stage in ("ci_validation", "completed")):
             task_store.require_development(args.dir, task)
-        return _cmd_advance_locked(args)
+        result = _cmd_advance_locked(args)
+        if result == 0:
+            from workflow import execution
+            execution.touch(args.dir, execution.session_id())
+        return result
 
 
 def _cmd_advance_locked(args):
@@ -526,7 +530,7 @@ def _cmd_development_interaction(args):
 
 def cmd_runtime_path(args):
     from workflow import station_directories
-    with task_store.task_state_lock(args.dir):
+    with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         if task.get("archive_ref") or task.get("outcome") != "in_progress":
             raise ValueError("任务已归档或非进行中，不能继续取得 runtime 路径")
@@ -725,7 +729,7 @@ def cmd_status(args):
 def cmd_replan(args):
     from workflow import station_replan
     if args.replan_action == "prepare":
-        with task_store.task_state_lock(args.dir):
+        with task_store.task_state_lock(args.dir, execution=False):
             result = station_replan.prepare(args.dir, args.issue_key, args.expected_run_id,
                                             json.loads(Path(args.input).read_text(encoding="utf-8")))
     elif args.replan_action == "apply":
@@ -959,6 +963,16 @@ def main():
         sub.choices[command].add_argument("--expected-run-id", required=True)
     for command in ("add", "amend", "record-result"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
+    from workflow import execution
+    p = sub.add_parser("execution", help="同工位会话占用；8 小时闲置不等于授权或原生进程已停")
+    p.add_argument("execution_action", choices=("status", "claim", "heartbeat"))
+    p.add_argument("--dir", default=".")
+    p.add_argument("--executor")
+    p.add_argument("--expected-control-digest", help="status 回读的占用摘要；绑定接管者及最后活动时间")
+    p.add_argument("--conflict-check-ref", help="原执行者已停写、在途操作已核实的依据")
+    p.add_argument("--decision-ref", help="8 小时内交接的用户决定来源")
+    p.set_defaults(func=execution.command)
+
     args = parser.parse_args()
     try:
         task_store.station_project(args.dir)

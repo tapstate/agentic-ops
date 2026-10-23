@@ -1,6 +1,6 @@
 # 任务接管与授权
 
-本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)另定义多次归档接续点、两个清理操作和闲置接管；均不能当作已发布能力。源码保留与闲置接管仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义完整目标；持久归档与[执行接管](../architecture/single-task-station.md#执行接管当前源码)已进入当前源码，两个清理操作仍待实现，不能当作旧安装已有能力。源码保留仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
 
 生命周期边界以[工位合同](../architecture/single-task-station.md)为准。清理脚本自动消费工位及项目清单，归档只记录结果，不要求完整会话或源码导出。
 

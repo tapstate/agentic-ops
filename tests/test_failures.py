@@ -132,11 +132,11 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(before, failures.path(self.base, self.task).read_bytes())
 
     def test_addition_does_not_change_existing_task_or_ci_state(self):
-        old_task = task_store.task_path(self.base, "DEMO-1").read_bytes()
+        old_task = task_store.read_task(self.base, "DEMO-1")
         ci_path = task_store.task_directory(self.base, "DEMO-1") / "ci-existing.json"
         ci_path.write_text('{"existing":true}')
         self.observe()
-        self.assertEqual(old_task, task_store.task_path(self.base, "DEMO-1").read_bytes())
+        self.assertEqual(old_task, task_store.read_task(self.base, "DEMO-1"))
         self.assertEqual('{"existing":true}', ci_path.read_text())
         new_run = dict(self.task, run_id="run-two")
         self.assertEqual({}, failures.load(self.base, new_run)[1])

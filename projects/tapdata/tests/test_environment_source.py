@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 import test_station_lifecycle as fixture
+from station_fixture import task_state_snapshot
 from projects.tapdata.scripts import environment_source as subject
 from workflow import station, station_clean, task_store
 
@@ -25,11 +26,11 @@ class SourcePreparationTests(unittest.TestCase):
 
     def test_empty_station_prepare_repeat_and_fast_forward_without_task(self):
         self.prepare_engineering(count=2)
-        original = (self.ws / ".agenticops/current-task.json").read_bytes()
+        original = task_state_snapshot(self.ws)
         result = subject.prepare(self.ws)
         self.assertEqual(result["status"], "prepared")
         self.assertEqual(result["repositories"]["tapdata/tapdata-common-lib"]["branch"], "main")
-        self.assertEqual((self.ws / ".agenticops/current-task.json").read_bytes(), original)
+        self.assertEqual(task_state_snapshot(self.ws), original)
         self.assertFalse((self.ws / ".agenticops/operation.json").exists())
         self.assertFalse(list((self.ws / "runtime").iterdir()))
         repo = self.ws / "source/tapdata/tapdata"
@@ -113,7 +114,7 @@ class SourcePreparationTests(unittest.TestCase):
 
     def test_process_exit_leaves_recoverable_runtime_not_unknown_source(self):
         self.prepare_engineering(count=2)
-        current = (self.ws / ".agenticops/current-task.json").read_bytes()
+        current = task_state_snapshot(self.ws)
         code = """
 import os, sys
 from unittest import mock
@@ -144,7 +145,7 @@ with mock.patch.object(subject.source, 'git', side_effect=interrupted):
         self.assertEqual(len(prepared["preparation_residuals"]), len(residuals))
         self.assertIn("保全", prepared["recovery_hint"])
         self.assertTrue(all(path.is_dir() for path in residuals))
-        self.assertEqual((self.ws / ".agenticops/current-task.json").read_bytes(), current)
+        self.assertEqual(task_state_snapshot(self.ws), current)
         self.assertFalse((self.ws / ".agenticops/operation.json").exists())
         # 使用真实清理入口核验：含 Git 的残留保留，不能绕过嵌套仓库保护。
         result = station_clean.execute(self.ws, "work-clean", None, "run-" + "a" * 32,

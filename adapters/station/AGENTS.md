@@ -11,6 +11,8 @@
 - 活动授权与证据：`.agenticops/authorization.json`、`.agenticops/evidence/`
 - 持久配置：`config/`；独立源码：`source/<owner>/<repo>/`；唯一运行现场：`runtime/`；正式归档：Product Root 的 `.archive/<run-id>/`
 
+受管写入前先按 `__AGENTIC_OPS_HOME__/docs/architecture/single-task-station.md` 的“执行接管（当前源码）”使用本会话标识；只读查看原占用，有冲突先协调交接。正常启动已提供标识，手动平台为当前会话生成一次并复用，禁止借用其它会话标识。
+
 当前 Project Profile、准入及 Skill 位于：
 
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/profile.json`
@@ -41,7 +43,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JI
 - 所有任务写请求携带当前 `--expected-run-id`；阶段推进另带 `--expected-stage`；生命周期和范围操作携带 operation ID 与 expected revision。参数从当前上下文读出并固定，拒绝后先核对变化。不得用新 run 补齐迟到请求。
 - Agent 从工位根 `./agenticops station start <id>` 启动并在同一会话继续；Git 使用 `git -C <source 中已核验仓库路径>`。不启动嵌套 Agent，不复制会话级当前状态，不修改 Product Root 或其它工位源码。
 - 构建、测试和应用运行遵循 Project 的资源配方；配置默认保留，显式选择后才清除，任务有效配置、Maven local、插件、日志和报告进入唯一 runtime。配套仓源码变更也必须先登记。
-- 工作清理保留当前任务和授权；任务清理撤销授权并解绑；archive 尽力记录已有结果，不冻结开发或阻塞退出。release 组合归档与任务清理，支持未完成和完成任务，业务完成验收独立。
+- 工作清理保留当前任务和授权；任务清理撤销授权并解绑；公开 archive 按任务存档指引形成 Jira 持久接续点，完成回读后可继续开发；结果未知先核对原操作，不以清理绕过。release 内部仍为本地快照与任务清理组合，不代表 Jira 已保全，业务完成验收独立。
 - 清理直接调用现役脚本，按工位和项目两份清单处理。源码、Git 索引/分支和未选择的配置保留；不执行通用 git clean/reset。未知、身份漂移或写入者未停的对象保留并提示，独立步骤继续；AI 只接手脚本残留和异常，扩大删除范围由用户决定。
 - 交互输入、草稿和回读先用 `task.py interaction-path --issue-key <JIRA-KEY> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <项目工位>` 获取路径，不散落状态根；允许 json、jsonl、log、md、txt。活动记录仅属于当前 run，正式归档不转成新任务授权。
 - 工位级 purge 先编排同版本任务退出，再按生成归属移除接线与绑定；保留 source、未选择的 config 和用户修改/未知对象。原路径重建使用 init --reuse-materials，runtime 残留先由用户处置，不继承旧证据或授权。

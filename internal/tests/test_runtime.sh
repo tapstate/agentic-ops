@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 独立测试进程共享一个明确的测试会话；并发用例自行更换或清除。
+export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
 product_python="${AGENTIC_OPS_TEST_PYTHON:-$(command -v python3)}"
 internal_python="${AGENTIC_OPS_INTERNAL_TEST_PYTHON:-$repo_root/.local/venv/internal/bin/python}"
@@ -59,6 +62,7 @@ run_product tests/test_station_resources.py
 run_product tests/test_station_archive_selection.py
 run_product tests/test_station_records.py
 run_product tests/test_task_handoff.py
+run_product tests/test_execution.py
 run_product tests/test_station_clean.py
 run_product tests/test_station_development_reset.py
 run_product tests/test_station_terminal_redaction.py

@@ -212,7 +212,8 @@ class Environment:
     @contextlib.contextmanager
     def lock(self, operation_name=None):
         # 与接管、源码刷新和退出共用锁；不创建任务或更改 current。
-        with task_store.task_state_lock(self.station):
+        read_only = operation_name in ("status", "list", "check-inputs")
+        with task_store.task_state_lock(self.station, execution=not read_only):
             if station_context.read_binding(self.station) != self.binding:
                 raise EnvironmentError("工位绑定已变化，请重新读取现场")
             operation = station_operation.read(self.station)
@@ -221,6 +222,9 @@ class Environment:
                 cleanup = operation_name == "uninstall" and operation["kind"] in ("clean", "release", "work-clean")
                 if not (read_only or cleanup):
                     raise EnvironmentError("工位存在未完成操作，请先恢复原操作")
+            if read_only:
+                yield
+                return
             with self.configuration_lock():
                 if self.config_dir.exists():
                     for item in list(self.config_dir.iterdir()):

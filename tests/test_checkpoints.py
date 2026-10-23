@@ -209,9 +209,9 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(self.read()["outcome"], "completed")
                 with mock.patch.object(task, "_check_advance", side_effect=AssertionError("must not recheck")):
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    before = self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()
+                    before = self.auth_path.read_bytes(), self.read(), task_store.read_task(self.base, "TAP-123")
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()))
+                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.read_task(self.base, "TAP-123")))
                 self.assertEqual(task_store.task_status(self.base, "TAP-123"), "completed")
                 self.assertEqual(len(self.read()["history"]), 1)
                 with self.assertRaises(ValueError):
@@ -221,9 +221,9 @@ class CheckpointTests(unittest.TestCase):
         for stage in ("implementation", "pr_review", "ci_validation"):
             with self.subTest(stage=stage):
                 record = self.confirmation(stage, expired=True)
-                before = task_store.task_path(self.base, "TAP-123").read_bytes()
+                before = task_store.read_task(self.base, "TAP-123")
                 self.assertEqual(authorization.cmd_renew(self.renewal(record)), 0)
-                self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+                self.assertEqual(task_store.read_task(self.base, "TAP-123"), before)
                 renewed = json.loads(self.auth_path.read_text())
                 self.assertGreater(renewed["expires_at_epoch"], time.time())
                 self.assertEqual({k: renewed[k] for k in record if k != "expires_at_epoch"},
@@ -429,9 +429,13 @@ class CheckpointTests(unittest.TestCase):
     def test_missing_evidence_keeps_state_and_confirmation_unchanged(self):
         self.state["stage"] = "implementation"
         self.save()
-        before = task_store.task_path(self.base, "TAP-123").read_bytes()
+        with task_store.task_state_lock(self.base):
+            pass
+        envelope = task_store.current_path(self.base).read_bytes()
+        before = task_store.read_task(self.base, "TAP-123")
         self.assertEqual(task.cmd_advance(self.args()), 3)
-        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        self.assertEqual(envelope, task_store.current_path(self.base).read_bytes())
+        self.assertEqual(task_store.read_task(self.base, "TAP-123"), before)
         self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
 
     def test_missing_watermark_does_not_block_local_intake(self):

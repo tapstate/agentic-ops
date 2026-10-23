@@ -90,3 +90,10 @@ def initialize_station(base):
     epoch = json.loads(manifest.read_text())["station_state_epoch"]
     task_store._write_json_atomic(state / "init.json", {"station_state_epoch": epoch,
         "cleanup": json.loads((Path(__file__).resolve().parents[1] / "policies/station-clean.json").read_text())})
+
+
+def task_state_snapshot(station):
+    """比较任务信封；活动时间另由执行接管测试核验。"""
+    value = task_store.read_current(station)
+    value.pop("execution_control", None)
+    return value

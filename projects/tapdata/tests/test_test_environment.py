@@ -75,6 +75,20 @@ class FakeEnvironment(mod.Environment):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_read_only_query_does_not_claim_or_repair_configuration(self):
+        from workflow import execution
+        before = mod.task_store.current_path(self.station).read_bytes()
+        old = self.env.config_dir / '.dev-previous'
+        old.mkdir()
+        (old / 'recoverable').write_text('keep')
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: ''}):
+            with self.env.lock('list'):
+                self.env.names()
+        self.assertEqual(before, mod.task_store.current_path(self.station).read_bytes())
+        self.assertTrue((old / 'recoverable').exists())
+        self.assertFalse((self.env.store.root / '.lock').exists())
+
+
     def test_early_database_rejection_precedes_build(self):
         with mock.patch.object(self.env, 'early_probe', return_value={'collection_count': 2}):
             with self.assertRaisesRegex(mod.EnvironmentError, '尚未开始构建'):

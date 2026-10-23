@@ -520,7 +520,12 @@ def configured_git_name():
 def command_identity(args, product_root):
     station = Path(args.station).resolve()
     require_tracked(product_root, station)
-    with task_store.task_state_lock(station):
+    with task_store.task_state_lock(station, execution=False):
+        identity = None
+        envelope = task_store.read_current(station)
+        if envelope["current"] is not None or envelope.get("execution_control") is not None:
+            from workflow import execution
+            identity = execution.enter(station)
         current = task_store.read_task(station)
         if current and current.get("task_repositories"):
             raise ValueError("当前任务已登记修改仓库，不能变更 git_name")
@@ -538,6 +543,8 @@ def command_identity(args, product_root):
             "source": source,
         }
         task_store._write_json_atomic(path, document)
+        if identity is not None:
+            execution.touch(station, identity)
     print("[AgenticOps][身份配置][完成] 工位 git_name 已配置：%s" % name)
 
 

@@ -43,7 +43,7 @@
 
 | 当前行为 | 目标变化与尚待验证事项 |
 |---|---|
-| 当前源码 grant 默认不固定到期；显式期限、旧有限授权和撤销继续有效，同范围 reconfirm 保持期限语义 | 8 小时闲置接管仍待实现；普通授权不承担并发接管或 Token 预算控制，实际安装须包含当前代码 |
+| 当前源码 grant 默认不固定到期；显式期限、旧有限授权和撤销继续有效，同范围 reconfirm 保持期限语义 | 已实现本节下述同工位执行接管检查点；普通授权不承担并发接管或 Token 预算控制，实际安装须包含当前代码 |
 | work-clean、clean、archive、release 与 purge 分立；清理保护源码 | 对外收敛两个清理操作，源码保全后删除；purge 仍属注销，不当作清理工位 |
 | 已提供 handoff 材料、远端代码检查、稳定正文及原生 Jira 回读入口；release 内部仍使用本地快照 | 持久点操作见任务存档指引；查重、最新有效点选择由 Agent 核实，真实双工位验收与源码回归分开，不把本地快照当持久保全 |
 | Docker 清理处理容器/网络，不删除卷，部分发现依赖 runtime 路径 | 补齐独占环境数据及目录丢失后的资源发现，统一创建与收尾责任；不删除共享卷/镜像 |
@@ -53,6 +53,23 @@
 
 
 第 10 节分别说明当前兼容边界和待实现的“修补后继续现有任务”目标。该目标不授权现役客户端直接采用旧状态；其它能力以各节说明及实际安装核验为准，不能因本文含有设计就视为已实现。
+
+## 执行接管（当前源码）
+
+工位状态信封的 `execution_control` 保存会话标识、执行者说明、最后活动时间与最近交接依据，不另建台账，不改变任务 revision。首次受管写入原子取得空占用；后续受管写入核对当前会话，并在成功后刷新活动时间。失败不刷新已有占用。取得占用后操作失败仍保留接管者，避免另一会话误以为现场无人处理。只读状态、清理预检和环境查询不报活；环境配置修复由有执行权的写入入口处理。
+
+`agenticops start` 为新 Agent 进程提供独立的 `AGENTICOPS_EXECUTION_ID`。手动平台或独立终端调用时，Agent 为本会话生成一次 32 位 UUID hex，并在后续命令环境中复用；不得借用原会话标识。该值是协调标识，不是身份认证或秘密。操作入口如下（`product` 和 `station` 分别指实际绑定产品目录与工位目录）：
+
+```sh
+export AGENTICOPS_EXECUTION_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+python3 "$product/workflow/task.py" execution status --dir "$station"
+python3 "$product/workflow/task.py" execution heartbeat --dir "$station"
+python3 "$product/workflow/task.py" execution claim --dir "$station" --executor "当前 Agent 会话" --expected-control-digest "<status 返回的 control_digest>" --conflict-check-ref "<已核实原执行者停写及在途操作的依据>" --decision-ref "<8 小时内交接的用户决定来源>"
+```
+
+只读查询不需要会话标识。长时间分析可明确报活，不运行后台心跳。转移必须绑定观察到的占用摘要，旧接管者或最后活动时间变化即拒绝旧决定；超过 8 小时可省略 `decision-ref`，不能省略无冲突核实。8 小时内取得用户交接决定后无需等待。转移不创建新 run、不撤销或扩大方案授权，也不取消在途 operation；接续者先核实授权范围与原操作结果，旧会话再次写入会被拒绝。只读可继续，原生工具停写仍须实际协调，程序不提供跨工位同 Jira 任务排他保证。
+
+此持久状态自 epoch 36 起由现役写入入口核对，旧客户端不可采用；跨 epoch 仍遵守第 10 节的当前退出路径。初始化时无任务且无占用的 Git 身份配置可完成，任务或占用存在后需要当前执行会话。工位注销删除状态后不由报活重建。
 
 ## 1. 目标与范围
 

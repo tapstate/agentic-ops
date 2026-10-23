@@ -67,6 +67,8 @@ def concurrent_apply(base, run, revision, command, queue):
         queue.put("stale")
 
 
+from station_fixture import task_state_snapshot
+
 class QualityTests(unittest.TestCase):
     def test_ci_confirmation_ignores_observation_history_but_binds_actual_run(self):
         latest = {"head": "a" * 40, "verdict": "success", "source": "fixture",
@@ -1620,6 +1622,8 @@ class QualityTests(unittest.TestCase):
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
         self.task["archive_ref"] = {"scope": "product", "run_id": self.task["run_id"], "digest": "a" * 64}
         self.save_task()
+        with task_store.task_state_lock(self.base):
+            pass
         before = {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         actions = [
             lambda: self.apply("draft", {"id": "late", "body": "归档后草稿"}),
@@ -3200,12 +3204,12 @@ class SyncRecoveryTests(unittest.TestCase):
     def test_completed_receipt_only_preserves_task_and_authorization(self):
         record = self.publication()
         self.terminal()
-        before = (self.base / ".agenticops/current-task.json").read_bytes()
+        before = task_state_snapshot(self.base)
         with self.assertRaisesRegex(ValueError, "终止"):
             self.apply("draft", {"id": "another", "body": "不得发送"})
         done = self.readback(record)
         self.assertEqual(done["publications"]["summary"]["status"], "verified")
-        self.assertEqual(before, (self.base / ".agenticops/current-task.json").read_bytes())
+        self.assertEqual(before, task_state_snapshot(self.base))
         self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
         with self.assertRaises(ValueError):
             self.readback(record)
@@ -3229,9 +3233,9 @@ class SyncRecoveryTests(unittest.TestCase):
         from workflow import archive_store
         target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
         record = self.publication()
-        before = task_store.current_path(self.base).read_bytes()
+        before = task_state_snapshot(self.base)
         self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
-        self.assertEqual(before, task_store.current_path(self.base).read_bytes())
+        self.assertEqual(before, task_state_snapshot(self.base))
         self.assertEqual([], list(target.iterdir()))
 
     def test_terminal_archive_content_or_unsafe_target_rejects_comment_readback(self):
@@ -3269,10 +3273,10 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual('done', operation['status'])
         directory = archive_store.run_directory(self.base, task['run_id'])
         before = {p.name: p.read_bytes() for p in directory.iterdir()}
-        current_before = task_store.current_path(self.base).read_bytes()
+        current_before = task_state_snapshot(self.base)
         self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
         self.apply('draft', {'id': 'next', 'body': '归档后继续处理'})
-        self.assertEqual(current_before, task_store.current_path(self.base).read_bytes())
+        self.assertEqual(current_before, task_state_snapshot(self.base))
         self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
         # 后续完成操作替换归档操作记录，也不能重新冻结历史快照所属任务。
         digest = self.view()['publications']['next']['digest']

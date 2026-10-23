@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 独立测试进程共享一个明确的测试会话；并发用例自行更换或清除。
+export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 test_root="$(mktemp -d)"
 test_root="$(cd "$test_root" && pwd -P)"
@@ -972,6 +975,7 @@ printf '%s\n' \
   'fi' \
   'printf "%s\n" "$*" > "$AGENTIC_OPS_CAPTURE"' \
   'printf "%s\0" "$@" > "$AGENTIC_OPS_CAPTURE.argv"' \
+  'printf "%s\n" "$AGENTICOPS_EXECUTION_ID" >> "$AGENTIC_OPS_CAPTURE.sessions"' \
   > "$fake_bin/codex"
 chmod +x "$fake_bin/codex"
 PATH="$fake_bin:$PATH" \
@@ -988,9 +992,13 @@ PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
   "$station/agenticops" station start codex --non-interactive -- --model 'model with spaces' >/dev/null
-python3 - "$capture.argv" <<'PY'
+python3 - "$capture.argv" "$capture.sessions" <<'PY'
 import sys
 from pathlib import Path
+sessions = Path(sys.argv[2]).read_text().splitlines()
+assert len(sessions) == 3 and len(set(sessions)) == 3
+assert all(len(value) == 32 and all(c in '0123456789abcdef' for c in value) for value in sessions)
+assert '0123456789abcdef0123456789abcdef' not in sessions
 assert Path(sys.argv[1]).read_bytes().split(b'\0') == [b'--approve-for-me', b'--model', b'model with spaces', b'']
 PY
 if "$station/agenticops" station start codex --agent codex >/dev/null 2>&1; then
