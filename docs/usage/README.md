@@ -93,7 +93,7 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 [常见问题](faq.md)负责同 epoch 旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责当前跨工位状态代际的切换操作。外部操作不再由通用 Hook 拦截。
 
-授权到期但方案未变时，按[任务授权指引](task-authorization.md)显式续签，保留当前 run 和证据；完成操作中断时，按[常见问题](faq.md)重试原请求，收敛已提交的完成状态，不重新验收或重置任务。
+旧授权或显式有限授权到期但方案未变时，按[任务授权指引](task-authorization.md)显式续签，保留当前 run 和证据；完成操作中断时，按[常见问题](faq.md)重试原请求，收敛已提交的完成状态，不重新验收或重置任务。
 
 这些文档只说明安装目录和工位。维护 AgenticOps 源码、测试或发布请使用[维护指引](../maintenance-guide.md)。
 

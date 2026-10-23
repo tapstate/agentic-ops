@@ -552,7 +552,8 @@ def main():
                   branch_relevant=False), expected)
 
         original_authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
-        for field, value in (("status", "revoked"), ("expires_at_epoch", 1)):
+        for field, value in (("status", "revoked"), ("expires_at_epoch", 1),
+                             ("expires_at_epoch", None), ("expires_at_epoch", True), ("expires_at_epoch", "later")):
             malformed = dict(original_authorization, **{field: value})
             authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
             check("失效授权收回放行：" + field, decision("git_commit", ws), "ask")
@@ -636,6 +637,12 @@ def main():
         }
         # free 是本地策略分级，不是用户或 Jira 服务端的写权限授权。
         comment_request = dict(auth_request, operations=["write_jira_comment"])
+        for expiry in (None, True, "later"):
+            authorization_path.write_text(json.dumps(dict(original_authorization, expires_at_epoch=expiry)), encoding="utf-8")
+            check("损坏期限的双引擎判定", parity(auth_request)["decision"], "ask")
+        unlimited = {k: v for k, v in original_authorization.items() if k != "expires_at_epoch"}
+        authorization_path.write_text(json.dumps(unlimited), encoding="utf-8")
+        check("无固定期限的双引擎判定", parity(auth_request)["decision"], "allow")
         for label, raw in (
             ("缺失", None), ("有效", json.dumps(original_authorization)),
             ("过期", json.dumps(dict(original_authorization, expires_at_epoch=1))),

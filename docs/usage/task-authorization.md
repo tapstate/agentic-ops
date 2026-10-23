@@ -1,6 +1,6 @@
 # 任务接管与授权
 
-本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)另定义多次归档接续点、两个清理操作和闲置接管；均不能当作已发布能力。特别是当前授权到期与源码保留规则尚未替换。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)另定义多次归档接续点、两个清理操作和闲置接管；均不能当作已发布能力。源码保留与闲置接管仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
 
 生命周期边界以[工位合同](../architecture/single-task-station.md)为准。清理脚本自动消费工位及项目清单，归档只记录结果，不要求完整会话或源码导出。
 
@@ -86,9 +86,11 @@ python3 <agenticops-root>/workflow/task.py repository amend \
 
 范围或方案改变使旧确认失效；必要时 revoke，重新确认和签发，不手改授权文件。改变完整工程版本则先结束当前处理再接管。归档不冻结开发；release/clean 后须建立新 run 才能继续。
 
+默认 `grant` 不设置固定到期时间；用户明确限定期限时才传 `--ttl-hours <小时>`。撤销、退出、run/范围/方案绑定变化仍按原规则处理。新默认值不删除已有授权的显式期限；无固定期限不等于允许无限扩大动作，也不控制 Agent Token 预算。执行接管的 8 小时闲置判断是独立目标，尚未由此实现。
+
 ### 方案未变时显式续签
 
-审查或 CI 等待导致授权到期，不必仅因此结束当前任务。先用 `authorization.py show` 查看原确认，并用 `show --digest` 取得原授权摘要；向用户展示当前 run、方案、仓库范围和新的有效期，取得明确决定及可回查来源后，使用此前固定的摘要执行：
+对旧授权或用户明确限定期限的授权，审查或 CI 等待导致到期时，不必仅因此结束当前任务。先用 `authorization.py show` 查看原确认，并用 `show --digest` 取得原授权摘要；向用户展示当前 run、方案、仓库范围和新的有效期，取得明确决定及可回查来源后，使用此前固定的摘要执行：
 
 ```sh
 python3 "$agenticops_root/workflow/authorization.py" renew \
@@ -97,6 +99,8 @@ python3 "$agenticops_root/workflow/authorization.py" renew \
   --confirmed-by "$decision_maker" --confirmation-ref "$confirmation_source" \
   --ttl-hours 8 --dir "$project_station"
 ```
+
+无固定期限的授权无需 `renew`；普通继续与 `reconfirm` 保持无固定期限。若需要重新限定期限，明确撤销并按当前方案重新签发，不把有限续签附加到无期限记录上。
 
 `renew` 仅适用于当前未归档任务的 `design_review`、`implementation`、`pr_review` 和 `ci_validation`。它核对原授权的任务、run、方案摘要、完整仓库绑定及当前 Project endpoint，只延长有效期并追加确认记录，不修改阶段、基线、方案、Agent 或质量证据。原授权摘要已变化、授权已撤销、方案或绑定改变、缺少旧方案摘要时拒绝；这些情况不能通过自动换参数重试解决。方案改变仍须按原流程重新设计确认。成功后重复提交同一摘要也拒绝，不能利用重放延长授权。确认来源是可回查记录，不提供用户身份认证。
 

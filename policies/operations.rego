@@ -167,6 +167,12 @@ auth_problem contains "无法确定当前分支，门禁按保守处理" if {
 	count(matching_repositories) == 1
 }
 
+auth_problem contains "授权有效期无效" if {
+    auth.scope
+    "expires_at_epoch" in object.keys(auth)
+    not is_number(auth.expires_at_epoch)
+}
+
 auth_problem contains "授权已过期" if {
 	auth.scope
 	is_number(auth.expires_at_epoch)

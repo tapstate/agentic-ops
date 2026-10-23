@@ -2,7 +2,7 @@
 
 脚本与 LLM 的执行职责及失败接续见[统一开发原则](../maintenance-guide.md#确定性执行与-ai-接续原则)。此原则由现有 Workflow、Policy、原生工具与 Agent 协作落实，不增加调度器、异常中心、万能状态导入器或新的架构层。
 
-数据归属与生成、归档、恢复、清理责任统一见[数据生命周期开发规范](../development-data-lifecycle.md)；目标操作见[工位合同](single-task-station.md#任务生命周期目标合同)。两者不新增架构层；当前源码保留、release 和授权到期等实现与目标差异由合同集中说明。
+数据归属与生成、归档、恢复、清理责任统一见[数据生命周期开发规范](../development-data-lifecycle.md)；目标操作见[工位合同](single-task-station.md#任务生命周期目标合同)。两者不新增架构层；当前源码保留、release 和执行接管等实现与目标差异由合同集中说明。
 
 本文描述单任务工位产品架构。身份、退出职责及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。现役升级边界见[工位合同](single-task-station.md#10-升级与恢复)；本文单独标明待实现的功能依赖检查目标，不提供旧 Runtime。本文不代替真实应用启动与发布验收。
 

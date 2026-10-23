@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import re
 import subprocess
 import time
@@ -398,6 +399,16 @@ def _push_refspec_error(context, repositories):
     return ""
 
 
+def authorization_expiration(record):
+    """缺少期限表示不固定到期；显式期限必须有效，不能把损坏值当无限期。"""
+    if "expires_at_epoch" not in record:
+        return None
+    value = record["expires_at_epoch"]
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError("原授权有效期无效，先核实原确认")
+    return value
+
+
 def check_authorization(auth, context, policy, now=None):
     """校验任务授权与仓库、分支执行上下文的稳定绑定。"""
     scope = policy["authorization_scopes"]["task_execution"]
@@ -424,9 +435,12 @@ def check_authorization(auth, context, policy, now=None):
     if invalid_types:
         reasons.append("授权绑定字段类型错误：%s" % ", ".join(invalid_types))
     now = now if now is not None else time.time()
-    expires_at = auth.get("expires_at_epoch")
-    if isinstance(expires_at, (int, float)) and now > expires_at:
-        reasons.append("授权已过期")
+    try:
+        expires_at = authorization_expiration(auth)
+        if expires_at is not None and now > expires_at:
+            reasons.append("授权已过期")
+    except ValueError:
+        reasons.append("授权有效期无效")
     target_issue = context.get("issue_key")
     if target_issue and auth.get("issue_key") != target_issue:
         reasons.append(
