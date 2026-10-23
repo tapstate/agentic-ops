@@ -142,7 +142,8 @@ def cmd_cleanup_preflight(args):
     with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         from workflow import station_clean, station_clean_view, station_operation
-        station_clean_view.emit(station_clean.check(args.dir, task, operation=station_operation.read(args.dir)),
+        station_clean_view.emit(station_clean.check(args.dir, task, operation=station_operation.read(args.dir),
+                                                   source_preservation=getattr(args, 'source_preservation', False)),
                                 details=getattr(args, 'details', False))
     return 0
 
@@ -807,6 +808,7 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--dir", default=".")
     p.add_argument('--details', action='store_true')
+    p.add_argument('--source-preservation', action='store_true', help='只读核验源码远端保全及本地唯一内容')
     p.set_defaults(func=cmd_cleanup_preflight)
     p = sub.add_parser("source-readiness", help="编码前刷新引用、检查工作区及分支关系")
     p.add_argument("--issue-key", required=True)

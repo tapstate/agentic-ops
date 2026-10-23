@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 RULES = (
+    ("workflow/station_source_preservation.py", ("source_preservation",)),
     ("workflow/git_environment.py", ("git_refs", "quality", "station_source", "engineering_baseline", "station_resources")),
     ("workflow/verification.py", ("quality",)),
     ("workflow/file_digest.py", ("quality", "station_resources")),
@@ -40,6 +41,7 @@ RULES = (
 )
 
 TEST_SUITES = {
+    "source_preservation": ("python3", "tests/test_source_preservation.py"),
     "station_clean": ("python3", "tests/test_station_clean.py"),
     "gate": ("python3", "tests/test_gate.py"), "contracts": ("python3", "tests/test_contracts.py"),
     "adapter_boundary": ("python3", "tests/test_adapter_boundary.py"), "workflow": ("python3", "tests/test_workflow.py"),

@@ -13,9 +13,13 @@ from workflow import station_context, station_operation as operations, station_r
 from workflow import station_resources as resources, task_store
 
 
-def check(base, task=None, request=None, operation=None, replacements=None):
+def check(base, task=None, request=None, operation=None, replacements=None, source_preservation=False):
     plan = rules.plan(base, task, request)
-    return {'status': 'preview', 'cleanup_plan': plan, 'residuals': plan['residuals'], 'retained': plan['retained']}
+    result = {'status': 'preview', 'cleanup_plan': plan, 'residuals': plan['residuals'], 'retained': plan['retained']}
+    if source_preservation:
+        from workflow import station_source_preservation
+        result['source_preservation'] = station_source_preservation.source_preservation(base, plan['config'])
+    return result
 
 
 def stop_resources(base, task, observe_only=False):
@@ -360,6 +364,7 @@ def main(argv=None):
     parser.add_argument('--action', choices=('work-clean', 'clean', 'release', 'archive'), default='release')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--source-preservation', action='store_true', help='只读核验源码远端保全与本地唯一内容；不改变清理范围')
     parser.add_argument('--clear-config', action='append', default=[])
     parser.add_argument('--operation-id')
     parser.add_argument('--resume', action='store_true')
@@ -372,6 +377,8 @@ def main(argv=None):
     parser.add_argument('--details', action='store_true')
     parser.add_argument('--output', help='完整结果输出到工位外的新文件')
     args = parser.parse_args(argv)
+    if args.source_preservation and (args.execute or args.resume or args.action == 'archive'):
+        raise ValueError('--source-preservation 只适用于清理预检，不能与执行、恢复或归档组合')
     if bool(args.archive_decision) != bool(args.expected_archive_digest) or args.archive_decision and not args.resume:
         raise ValueError('归档决定必须带 --resume 和 --expected-archive-digest')
     from workflow.station_clean_view import emit
@@ -390,7 +397,9 @@ def main(argv=None):
                 preview = task_handoff.prepare(args.dir, task, json.loads(Path(args.handoff_input).read_text()))
             emit({'status': 'preview', 'handoff': preview, 'boundary': 'Git 远端只读核验；尚未写入 Jira'}, args.details, args.output, args.dir)
             return 0
-        emit(check(args.dir, task, {'clear_config': args.clear_config}), args.details, args.output, args.dir)
+        with task_store.task_state_lock(args.dir, execution=False):
+            preview = check(args.dir, task_store.read_task(args.dir), {'clear_config': args.clear_config}, source_preservation=args.source_preservation)
+        emit(preview, args.details, args.output, args.dir)
         return 0
     if args.resume:
         if not operation or args.operation_id and args.operation_id != operation['operation_id']:
