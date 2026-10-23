@@ -1,5 +1,11 @@
 # AgenticOps 扩展使用
 
+[数据生命周期开发规范](../development-data-lifecycle.md)统一分类与管理责任；[工位目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义目标操作。下列指引负责现役入口，不另复制目标规则或提供尚未实现的命令。
+
+清理、恢复与环境维护的共同开发要求见[生命周期协作规范](../maintenance-guide.md#生命周期协作规范)。工作清理、任务退出、工位注销和环境卸载的范围不得相互替代；本目录及项目指引只说明已支持的入口，待实现的资源收尾归属不改变当前操作。
+
+升级使用说明须先区分[目标设计与当前实现](update-and-rollback.md#目标设计与当前实现)：按功能发现差异、AI 修补后沿原入口继续属于待实现目标；本目录现有退出、purge、重接管及命令示例仍按实际安装能力执行。开发要求只在[维护指引](../maintenance-guide.md#外部依赖检查与修补继续)维护，本目录不复制规范或提供通用状态迁移入口。
+
 [问题反馈流程](problem-feedback.md)负责所有项目研发工位共用的 [ao-feedback](../../skills/shared/ao-feedback/SKILL.md) 上报流程：研发在接管和执行任务中遇到问题，由 Agent 总结问题、整理必要复现资料并提交 AO；维护者通过 AO 项目问题列表统一受理和处理，技能不承担维护职责。排障仍由[常见问题](faq.md)导航，业务任务执行和退出沿用各自合同；反馈不切换工位任务、不新增本地队列。使用时核验绑定安装、接线和对应 Agent 实际能力，源码候选验证不代表旧安装已采用。
 
 [更新与回退](update-and-rollback.md#部分克隆更新与材料准备)负责部分克隆安装的材料准备、预检副作用和失败恢复；设计职责与本地核验限制链接[现役架构](../architecture/agenticops-v1-architecture.md#7-生成清理与升级分层)，不在操作指引重复定义下载或状态逻辑。
@@ -17,7 +23,7 @@
 
 [任务存档与恢复](task-archive-and-resume.md)面向使用者，按暂停存档、隔离升级、从 Jira 接续和恢复验证的顺序组织操作及可直接使用的请求示例。它只导航现役授权、工位和升级合同，不定义另一套状态或迁移格式；任务进展仍记录在 Jira。
 
-[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)只负责原版本退出和目标版本重建。共享任务接续 Skill 的业务任务路径复用这两页；源码维护任务进入[维护接续指引](../maintenance-guide.md#从-jira-接续维护任务)，不要求业务工位，不建立与 epoch 绑定的转换合同。
+[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)负责当前产品切换操作。共享任务接续 Skill 的业务任务路径复用这两页；源码维护任务进入[维护接续指引](../maintenance-guide.md#从-jira-接续维护任务)，不要求业务工位，不建立与 epoch 绑定的转换合同。
 
 [质量检查与证据](quality-checkpoints.md)统一维护阶段评论的人读摘要、Jira 正文表示与回读，以及 PR 提审预检、Checks 具体例外和 GitHub Ready for review 回读闭环。PR Ready 只表示全部目标 PR 已退出 Draft 且回读确认，预检通过不代表提审完成；项目字段采集时机与审批责任由 Project 配置维护。详细结构化证据留在当前 run，不在评论或其它文档重复维护。
 
@@ -40,7 +46,7 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 [源码定位与实时核验](quality-checkpoints.md#源码定位与实时核验)负责质量事件不保存源码绝对路径、同类实现的历史与实时核验边界、材料缺口与工具故障的处理，以及发送正文检查；兼容代际变更统一遵循[更新与回退](update-and-rollback.md)，不导入旧任务确认。
 
-[更新与回退](update-and-rollback.md)同时负责当前产品版本查询，说明源码、安装和工位入口的版本归属及未提交修改的显示方式；通用工具 Hook 退役导致的跨 epoch 切换也复用该页的原版本退出和重建顺序，不另建迁移入口。
+[更新与回退](update-and-rollback.md)同时负责当前产品版本查询，说明源码、安装和工位入口的版本归属及未提交修改的显示方式；通用工具 Hook 退役导致的跨 epoch 切换也引用该页，不另建迁移入口。
 
 [功能方案完整性与一次决策包](quality-checkpoints.md#功能方案完整性与一次决策包)覆盖同类源码、AC 映射、公共层必要性、交付依赖、环境及验证计划，并区分实现前置环境与已选后续验收项的环境依赖；项目环境的实际取值与核对顺序由现有 TapData Runbook 维护。延期只影响 Q2 缺项判定，执行与验收仍遵循原检查项合同。
 
@@ -48,9 +54,9 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 完成预检归[任务授权指引](task-authorization.md#完成预检与等待合并)说明：`next`、实际推进和释放共用判定，预检只读，实际变更重新核验；PR Ready 与合并完成分开。
 
-[配置化清理入口](task-authorization.md#清理与退出)负责 `station-clean.py` 的预检、成果保全、一次范围确认、默认执行和 Agent 接力后的结果验收，并说明中央/项目名单及恢复请求；仅支持计划版本 6，旧现场退出复用[更新与回退](update-and-rollback.md)。验收标准和安全依赖以[工位合同](../architecture/single-task-station.md)为准。
+[配置化清理入口](task-authorization.md#清理与退出)负责 `station-clean.py` 的预检、成果保全、一次范围确认、默认执行和 Agent 接力后的结果验收，并说明中央/项目名单及恢复请求；当前计划格式由该入口核验，旧现场退出复用[更新与回退](update-and-rollback.md)。验收标准和安全依赖以[工位合同](../architecture/single-task-station.md)为准。
 
-任务退出保留源码、撤销授权并解除任务绑定：[任务授权指引](task-authorization.md)说明清单驱动清理、可选配置和原操作恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，工位代际及支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划 schema 是独立的格式版本，不能当作工位 epoch；[更新与回退](update-and-rollback.md)说明跨代际必须原版退出、purge 后再重建的边界。
+任务退出保留源码、撤销授权并解除任务绑定：[任务授权指引](task-authorization.md)说明清单驱动清理、可选配置和原操作恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，工位代际及支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划 schema 是独立的格式版本，不能当作工位 epoch；[更新与回退](update-and-rollback.md)说明当前版本切换的操作边界。
 
 [工位源码与材料](station-materials.md)负责源码池下载加速、独立源码生成、中央共享 Wiki 的显式生命周期、TapData 新接管前自动更新及缓存丢失后的使用边界；初始化接线、接管准备源码和实际应用运行保持分离。源码准备成功不等于工具链、数据库、构建产物或应用健康已验证；运行操作依据由 TapData 构建运行指引维护。
 
@@ -60,9 +66,9 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 首次工位初始化必须显式指定 `--project`，已有工位沿用绑定；项目不一致须先退出并 purge，不能通过 init 或 repair 换项目。项目选择示例由[首次使用指引](../usage-guide.md#2-创建项目工位)维护，材料复用与跨版本顺序分别由本目录对应指引说明。
 
-[更新与回退](update-and-rollback.md)负责产品切换前的兼容性预检、旧版本受控解绑、失败恢复和新版本重建顺序；不兼容的空绑定也不能通过 repair 在线采用新代际。单任务工位的状态合同仍由架构文档维护。
+[更新与回退](update-and-rollback.md)负责现役产品切换预检、解绑和失败恢复的操作顺序；当前实现限制与目标设计在该页集中区分。单任务工位的状态合同仍由架构文档维护。
 
-[质量检查与证据](quality-checkpoints.md)也负责共同验证材料的字段与检查点绑定、失败归因、跨本地/CI/审查的累计修复轮次、PR 审查意见的逐项处理，以及研发追加轮数或接受具体缺口后的恢复；失败工具只记录和检查条件，修复与重验仍使用原生工具。工位 epoch 以机器契约为准，升级不在线迁移旧任务。
+[质量检查与证据](quality-checkpoints.md)也负责共同验证材料的字段与检查点绑定、失败归因、跨本地/CI/审查的累计修复轮次、PR 审查意见的逐项处理，以及研发追加轮数或接受具体缺口后的恢复；失败工具只记录和检查条件，修复与重验仍使用原生工具。当前兼容限制见更新指引。
 
 [质量检查与证据](quality-checkpoints.md)同时负责按任务类型选择项目质量配置、方案字段检查及旧授权兼容边界；它说明可复用控制的使用合同，不代表任一业务任务类型已通过真实接入验收。
 
@@ -85,7 +91,7 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 | 排障与恢复 | [常见问题](faq.md) | 安装、启动、Hook 或已接管任务出现问题 |
 | 工位遇到问题需要反馈 | [问题反馈流程](problem-feedback.md) | 所有项目的研发通过统一入口总结问题、提交必要复现资料到 AO，由维护者从问题列表处理并回写结果 |
 
-[常见问题](faq.md)负责同 epoch 旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责跨工位状态代际的原版本退出、purge 与切换重建，不由 repair 在线迁移。外部操作不再由通用 Hook 拦截。
+[常见问题](faq.md)负责同 epoch 旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责当前跨工位状态代际的切换操作。外部操作不再由通用 Hook 拦截。
 
 授权到期但方案未变时，按[任务授权指引](task-authorization.md)显式续签，保留当前 run 和证据；完成操作中断时，按[常见问题](faq.md)重试原请求，收敛已提交的完成状态，不重新验收或重置任务。
 

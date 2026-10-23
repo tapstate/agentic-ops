@@ -1,8 +1,10 @@
 # TapData 工位 Docker 开发环境
 
+数据分类与生成、归档、恢复、清理责任统一遵循[数据生命周期开发规范](../../../docs/development-data-lifecycle.md)。本文项目操作仍以当前实现为准；目标两个清理操作及源码删除见[工位目标合同](../../../docs/architecture/single-task-station.md#任务生命周期目标合同)，不能用现有环境卸载或 purge 冒充已实现。
+
 本环境用于研发本地测试和联调。现有 `tapdata-test-env` Skill、脚本、配置及运行目录标识继续兼容，用户界面与指引统一称为“开发环境”。
 
-本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不引入环境池；配置布局与兼容性以工位合同的 epoch 33 为准，旧工位须按原版本退出并重建。
+本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不引入环境池；配置布局以工位合同为准，版本切换使用[当前升级指引](../../../docs/usage/update-and-rollback.md#目标设计与当前实现)。与任务退出、恢复及构建的职责遵循[生命周期协作规范](../../../docs/maintenance-guide.md#生命周期协作规范)，本页只定义项目操作；资源收尾职责收敛尚未实现，不代表已有统一清理接口。
 
 ## 空闲工位连接外部 TM 的目标设计
 
@@ -162,7 +164,7 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 
 所有节点属于同一个 Compose 项目 `ao-tapdata-<station_id>`，定义保存在 `runtime/tapdata-test-env/compose.json`；节点是其中的 services，不按节点分别执行 docker run 或生成独立项目。脚本统一传 `docker compose -p <project> -f <compose-file>`，更新和切换沿用同一项目，工位之间以 station_id 隔离。Docker Desktop 中按该项目查看整组。可用同一组参数执行只读 `ps --all` 核验分组；部署和删除优先使用生命周期入口，避免绕过归属、构建及诊断检查。
 
-卸载先保留私有诊断，再回读确认受管容器和网络已删除，最后清理当前运行目录。不执行 Docker prune、不删除镜像、不删除外部数据库；诊断留在 `runtime/tapdata-test-env-diagnostics/`，配置和源码保留。任务释放前先卸载 Docker 资源，诊断按现有归档规则保全，不能仅删除绑定目录。
+卸载先保留私有诊断，再回读确认受管容器和网络已删除，最后清理当前运行目录。不执行 Docker prune、不删除镜像、不删除外部数据库；诊断留在 `runtime/tapdata-test-env-diagnostics/`，配置和源码保留。环境卸载与任务退出按实际对象和结果衔接，任务清理已有 Docker 收尾时不要求先重复手工卸载。当前环境入口仍读取工位绑定、操作与运行记录，损坏材料可能使卸载失败；最小依赖收尾是开发目标，不能假定已覆盖所有异常。此时保留现场，由 AI 核实资源并在有效范围内使用原生工具收尾，再按原操作复查，不重新部署来满足卸载条件。停止或删除失败时保留受影响运行目录并报告残留；是否已释放任务及能否再次接管按工位合同回读，不能将资源失败一概等同于任务仍占用。需要保留的诊断在 runtime 清理前独立保存，归档引用不代表已复制诊断正文；不能仅删除本地目录就认定 Docker 资源已回收。
 
 ## 验收
 

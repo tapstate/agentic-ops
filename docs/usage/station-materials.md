@@ -1,5 +1,7 @@
 # 工位源码与持久材料
 
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)另定义多次归档接续点、两个清理操作和闲置接管；均不能当作已发布能力。特别是当前授权到期与源码保留规则尚未替换。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+
 ## 查看工位基本信息
 
 在工位目录执行 `./agenticops station status`，查看工位路径与标识、绑定应用目录、应用版本、项目、Agent、源码池、状态代际、登记状态和当前任务的运行、状态与阶段。跨目录使用 `<product-root>/agenticops station status --station <工位目录>`，需要机器可读结果时追加 `--json`。

@@ -1,5 +1,7 @@
 # AgenticOps 仓库指令
 
+涉及数据写入、归档恢复或清理的开发先读[数据生命周期开发规范](docs/development-data-lifecycle.md)及[工位目标合同](docs/architecture/single-task-station.md#任务生命周期目标合同)。规范集中维护分类与责任；目标两个清理操作、源码删除和 8 小时闲置接管尚未替换现役实现，不据此绕过当前保护。
+
 ## 目标与必读文档
 
 涉及设计、计划、架构、流程、策略或项目适配变更前，必须先读取 `docs/strategy/project-goals.md`。项目方向以该文档为准；工作项、进度、阻塞和验收写入 Jira，不在仓库新增执行计划。
@@ -9,12 +11,14 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 ## 架构边界与按需阅读
 
 - 修改层间职责、目录归属或 Adapter 时读取[工程架构](docs/architecture/agenticops-v1-architecture.md)。保持单一产品内核、无状态声明式 Adapter 和薄启动入口；`internal/` 只服务本仓库，不进入产品运行层。
-- 修改工位路径、状态字段或读写语义时读取[工位合同](docs/architecture/single-task-station.md)及 `contracts/station-state-compatibility.json`，明确兼容性；不兼容提升 epoch，兼容保留旧状态回归。升级与清理读取[更新与回退](docs/usage/update-and-rollback.md)，跨 epoch 必须先原版退出、归档释放或清理并显式 purge，不在线迁移旧任务。
+- 修改工位路径、状态字段或读写语义时读取[工位合同](docs/architecture/single-task-station.md)及 `contracts/station-state-compatibility.json`，明确兼容性并保留合法状态回归。外部依赖变更遵循[开发规范](docs/maintenance-guide.md#外部依赖检查与修补继续)；目标设计与当前实现须分开。当前 epoch 判定和升级操作仍遵循工位合同及[更新与回退](docs/usage/update-and-rollback.md#目标设计与当前实现)，不得因目标设计手改状态或绕过现有保护。
 - Jira、Git、GitHub PR/CI 分别是任务、代码、审查和检查事实源；源码仓库、安装目录和业务工位必须分开。状态布局遵循工位合同，不复制中央规则或 Runtime 到工位。
 - 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。本仓库规则只约束 AgenticOps，不引入业务仓库约定；规则归属遵循工程架构。
 - 旧版只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、`developer/` 工作面、`ao-work`、`ao_work`、`ao-maint`、Go Runtime、`agentic-cli` 或兼容入口。
 
 ## 流程连续性
+
+功能研发的脚本/LLM 分工、异常接续及闭环验收以[确定性执行与 AI 接续原则](docs/maintenance-guide.md#确定性执行与-ai-接续原则)为准；本节只保留执行时的安全底线，不另建规则副本。
 
 辅助能力缺失或脚本异常不能默认阻塞整个研发流程。Agent 可在原授权、范围和材料保全要求内接管剩余工作，复用已核验成果，按相同成果标准验收；缺项引导研发补齐。没有安全执行路径时，只暂停受影响步骤，说明已完成内容、剩余缺项及所需决策，继续不依赖该步骤的准备工作。验收能力异常时保持待核验，不以脚本退出码或手改状态代替验收。
 
