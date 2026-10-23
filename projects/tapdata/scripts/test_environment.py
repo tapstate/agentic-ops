@@ -219,7 +219,7 @@ class Environment:
             operation = station_operation.read(self.station)
             if operation and operation["status"] != "done":
                 read_only = operation_name in ("status", "list", "check-inputs")
-                cleanup = operation_name == "uninstall" and operation["kind"] in ("clean", "release", "work-clean")
+                cleanup = operation_name == "uninstall" and operation["kind"] == "clean"
                 if not (read_only or cleanup):
                     raise EnvironmentError("工位存在未完成操作，请先恢复原操作")
             if read_only:

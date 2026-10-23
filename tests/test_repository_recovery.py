@@ -5,7 +5,7 @@ import shutil
 import unittest
 from unittest import mock
 from test_station_source import ROOT, SourceFixture
-from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories, engineering_baseline, station
+from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories, engineering_baseline, station, station_cleanup
 
 
 class RecoveryTests(SourceFixture, unittest.TestCase):
@@ -19,6 +19,10 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         init = self.ws / '.agenticops/init.json'
         value = json.loads(init.read_text()); value['cleanup'] = json.loads((ROOT / 'policies/station-clean.json').read_text()); init.write_text(json.dumps(value))
         (self.ws / 'config').mkdir()
+        cleanup = self.root / 'product/projects/tapdata/station-clean.json'
+        value = json.loads(cleanup.read_text())
+        value['resources'] = []  # 此夹具只验证 Git 恢复，不访问宿主机 Docker。
+        cleanup.write_text(json.dumps(value))
 
     def test_failed_fetch_keeps_clone_for_retry(self):
         original = source.git
@@ -44,23 +48,24 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         directories.create(self.ws, task, "runtime", "workflow", adopt=True)
         return task
 
-    def exit(self, task):
+    def exit(self, task, materials="discard"):
         current = task_store.read_task(self.ws)
-        return station.execute(self.ws, 'clean', task['issue_key'], task['run_id'], current['_revision'], 'op-partial-cleanup', {})
+        return station.execute(self.ws, 'clean', task['issue_key'], task['run_id'], current['_revision'], 'op-partial-cleanup', {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': materials, 'decision_ref': '确认处理本地源码范围'})
 
-    def test_partial_clone_can_be_released_without_deleting_source(self):
+    def test_partial_clone_can_be_cleaned_after_disposition(self):
         task = self.partial()
-        before = {p.name for p in self.repo.iterdir()}
         self.exit(task)
-        self.assertEqual({p.name for p in self.repo.iterdir()}, before)
+        self.assertFalse(self.repo.exists())
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_partial_clone_unknown_file_preserved(self):
         task = self.partial()
         (self.repo / 'personal.txt').write_text('retain')
-        result = self.exit(task)
+        with self.assertRaisesRegex(ValueError, '尚有未保全'):
+            self.exit(task, materials='preserved')
         self.assertEqual((self.repo / 'personal.txt').read_text(), 'retain')
-        self.assertTrue(result['cleanup_result']['released'])
+        result = self.exit(task)
+        self.assertTrue(result['cleanup_result']['complete'], result)
 
     def test_fetch_receipt_rejects_reference_drift(self):
         self.prepare()
@@ -68,7 +73,7 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "漂移"):
             source.prepare_repositories(self.ws, self.catalog, [self.name], self.op)
 
-    def test_cleanup_preserves_unmerged_branch_and_commits(self):
+    def test_cleanup_requires_discard_for_unmerged_local_commits(self):
         self.prepare()
         self.git(self.repo, "checkout", "-b", "fix/retained")
         self.git(self.repo, "config", "user.email", "test@example.com")
@@ -86,9 +91,12 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         task_store.write_task(self.ws, task)
         (self.ws / "runtime").mkdir(exist_ok=True)
         directories.create(self.ws, task, "runtime", "workflow", adopt=True)
-        self.exit(task)
+        with self.assertRaisesRegex(ValueError, "尚有未保全"):
+            self.exit(task, materials="preserved")
         self.assertEqual(self.git(self.repo, "rev-parse", "fix/retained"), head)
-        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "fix/retained")
+        result = self.exit(task)
+        self.assertTrue(result["cleanup_result"]["complete"], result)
+        self.assertFalse(self.repo.exists())
 
 
 if __name__ == "__main__":

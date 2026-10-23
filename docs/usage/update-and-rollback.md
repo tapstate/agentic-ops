@@ -15,7 +15,7 @@
 
 程序更新完成不等于当前会话已采用新版指引，也不等于环境可用。切换仍须防止新旧代码并发操作；产品调用停用不等于默认卸载业务环境。仍读取待切换产品文件的业务进程属于受影响调用，必须核验并协调停止；只使用独立构建快照且无其它切换依赖的环境不因升级自动清理。目标不承诺热更新。对应功能实现并验收前，继续使用下文现役入口，不提供尚不存在的修补命令。
 
-当前源码的执行接管使用 epoch 36（持久归档 Jira 回读自 epoch 35 引入）；安装版本是否包含该能力须核实实际产品。epoch 35 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。重建复用 config 时，不兼容旧输入先按[工位配置合同](../architecture/single-task-station.md#兼容与可复用验收)备份隔离；初始化不批量转换，配置具体环境时再查找并转换为草稿。
+当前源码候选的整区清理使用 epoch 37（执行接管自 epoch 36、持久归档 Jira 回读自 epoch 35 引入）；安装版本是否包含该能力须核实实际产品。epoch 36 及以前的工位须先使用原版本结束任务并归档释放或清理，再显式 purge 后切换并初始化；目标版本不解析或迁移旧任务。兼容值仍以[机器清单](../../contracts/station-state-compatibility.json)为准。重建复用 config 时，不兼容旧输入先按[工位配置合同](../architecture/single-task-station.md#兼容与可复用验收)备份隔离；初始化不批量转换，配置具体环境时再查找并转换为草稿。
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
 
@@ -108,7 +108,7 @@
 3. 明确执行 agenticops station purge --station <绝对路径> --yes。清理验证生成归属，不删除 source/config、Product Root `.archive/` 和未知用户材料；本版 purge 先调用统一退出脚本，保留未知对象并返回结果，不将已解绑误称清理无残留。
 4. 确认 .agenticops 与受管接线已移除，再初始化。保留目录非空时明确追加 --reuse-materials；这只允许保留既有真实目录，不授权覆盖、删除或导入旧任务。runtime 必须为空，重新生成新的 station_id。
 
-接线刷新使用 station repair；工作清理使用 workflow/station-clean.py --action work-clean。
+接线刷新使用 station repair；任务或工位清理使用 `workflow/station-clean.py --scope task|station`，先预检并确认材料处置，详见[清理与退出](task-authorization.md#清理与退出)。
 
 ## 第二阶段：跨版本编排
 

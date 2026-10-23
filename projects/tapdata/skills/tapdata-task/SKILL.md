@@ -21,7 +21,7 @@ metadata:
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。新接管入口按[中央共享 Wiki 合同](../../../../docs/usage/station-materials.md#中央共享-wiki)自动准备并更新 Wiki；读取更新结果，不额外重复刷新。原 run 和在途操作恢复跳过；更新失败或不可用时说明缺口，继续有充分源码依据的工作。
 
-1. 先按[执行接管](../../../../docs/architecture/single-task-station.md#执行接管当前源码)核对当前会话和已有占用，再只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先由脚本 release/clean 退出，保留源码与未选择配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
+1. 先按[执行接管](../../../../docs/architecture/single-task-station.md#执行接管当前源码)核对当前会话和已有占用，再只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先核实成果保全或明确放弃，再由脚本清理任务，保留用户配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
 3. 新接管先按[更新选择合同](../../../../docs/usage/update-and-rollback.md#新任务前检查与更新目标设计)处理入口返回的更新选择；复用本次有效 SHA 决定，不从 Agent 内嵌套启动新 Agent。空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。用户已选择当前会话处理 TapTest 且需要测试仓时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
@@ -30,11 +30,11 @@ metadata:
 7. 接管成功并核验基线后，在本轮主动处理 `takeover_comment`，不等待 Q1、实施方案确认或研发提醒。先用 snapshot 固化 Jira 初始事实，再从 `external_sync.py status` 取得当前 run 的评论待办与正文，按[接管摘要发布与回读](../../../../docs/usage/quality-checkpoints.md#接管摘要发布与回读)复用稳定 id 和现有评论链发布基本信息并回读确认；已有接管及对应 Jira 回写授权直接复用，不重复索取。已回读完成不重复发送，已有 intent/unknown/created 先核对原评论。评论、回执或回读异常只暂停对应同步，说明原因并保留待办，继续无依赖研发；不能重跑已成功 takeover 或用 Q1 评论替代接管摘要。
 8. jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
 
-## 清理、归档和释放
+## 清理与归档
 
-用户明确请求工作清理、任务清理、归档或 release 后，直接使用[清理入口](../../../../docs/usage/task-authorization.md#清理与退出)的脚本，不先由 Agent 盘点或生成清理计划。项目清单声明生成物，工位清单维护接线和配置；源码及 Git 成果保留，环境配置默认保留。release 支持中途退出与完成退出，归档只记录已有结果，失败不阻断清理。
+使用[清理与退出](../../../../docs/usage/task-authorization.md#清理与退出)的统一入口。先由脚本预检，Agent 解释 task/station 范围、源码保全缺口和唯一数据，复用用户有效决定后执行。任务清理保留配置，工位清理删除用户数据并保留初始接线；归档独立，不是清理前置。现有安装须先核验支持的入口和 epoch，不用新命令处理旧状态。
 
-只有脚本返回残留或异常时，Agent 才分析并接手未完成工作。复用原 operation 和已完成回执，按原范围使用原生工具处理后通过 --verify-result 验收。剩余未知内容由用户决定保留、移出、删除或暂停，未决定不扩大删除范围。任务是否释放与文件是否全部清理分别说明；不要求先修脚本、重跑验证或补齐会话才能退出。
+失败沿原 operation 恢复，先核实外部未知结果，再处理原范围的剩余事项。目录删除开始后不换新操作扩大范围。分别说明任务是否解绑、清理是否完成、执行占用是否释放；不手改状态或补造回执。程序自产合法状态无法继续时反馈产品缺陷，外部数据与环境缺项由 Agent 和研发补齐。
 
 ## 准入、设计和多仓库
 

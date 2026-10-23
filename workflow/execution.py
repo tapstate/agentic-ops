@@ -85,6 +85,21 @@ def touch(base, identity):
     _save(base, current, control)
 
 
+def release(base, identity):
+    """调用者持工位锁，且已完成原清理操作；只释放本会话的空闲工位占用。"""
+    current = task_store.read_current(base)
+    control = current.get('execution_control')
+    validate(control)
+    if current['current'] is not None:
+        raise ValueError('任务尚未解除，不能释放执行占用')
+    if control is None:
+        return
+    if control['session_id'] != identity:
+        raise ValueError('执行占用已经交接，不能释放其它会话')
+    current.pop('execution_control', None)
+    task_store._write_json_atomic(task_store.current_path(base), current)
+
+
 def claim(base, executor, expected_control_digest=None, conflict_check_ref=None, decision_ref=None):
     identity = session_id()
     if not isinstance(executor, str) or not executor.strip():

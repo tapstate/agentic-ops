@@ -86,7 +86,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
-现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，.agenticops 只绑定一个 current 与 operation；正式档案独立保存在 Product Root 的 `.archive/`，不随工位清理删除。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
+现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，.agenticops 只绑定一个 current 与 operation；正式档案独立保存在 Product Root 的 `.archive/`，不随工位清理删除。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、生命周期操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
 
 同版本闭环与异常恢复遵循维护开发规范；当前版本切换的 epoch 判定、旧工位退出和重建边界由[工位合同](architecture/single-task-station.md#10-升级与恢复)唯一说明，使用顺序见[更新与回退](usage/update-and-rollback.md)。目标设计不新增逐版本迁移器，也不授权直接采用旧状态。
 

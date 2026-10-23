@@ -3264,12 +3264,29 @@ class SyncRecoveryTests(unittest.TestCase):
             self.readback(record)
         self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
 
+    def archive_request(self, task):
+        from workflow import external_sync
+        return {'handoff': {'plan': '已确认方案', 'progress': '已有实施进展',
+            'remaining': '继续核实任务成果', 'environment': '新工位重新准备',
+            'discard_repositories': {name: 'fixture:explicit-discard' for name in task.get('task_repositories', {})},
+            'unresolved_operations': {row['kind']: 'fixture:original-publication-readback'
+                                      for row in external_sync.existing_warnings(self.base, task)}}}
+
+    def archive_receipt(self, operation):
+        result = operation['archive_result']
+        return {**{key: result[key] for key in ('site', 'issue_key', 'body')},
+                'comment_id': 'archive-123', 'source_ref': 'fixture:jira/archive-123'}
+
     def test_completed_archive_keeps_active_receipts_and_next_work_available(self):
         from workflow import station, station_operation, archive_store
         record = self.publication()
         task = task_store.read_task(self.base)
+        request = self.archive_request(task)
+        pending = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
+                                  task['_revision'], 'op-active-archive', request)
         operation = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
-                                    task['_revision'], 'op-active-archive', {})
+                                    task['_revision'], 'op-active-archive', request,
+                                    jira_readback=self.archive_receipt(pending))
         self.assertEqual('done', operation['status'])
         directory = archive_store.run_directory(self.base, task['run_id'])
         before = {p.name: p.read_bytes() for p in directory.iterdir()}
@@ -3291,19 +3308,18 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
 
     def test_pending_archive_freezes_active_receipt_until_original_retry(self):
-        from workflow import station, station_clean, station_archive
+        from workflow import station, station_clean
         record = self.publication()
         task = task_store.read_task(self.base)
-        with mock.patch.object(station_archive, 'publish', side_effect=PermissionError('fixture failure')):
-            operation = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
-                                        task['_revision'], 'op-pending-archive', {})
+        request = self.archive_request(task)
+        operation = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
+                                    task['_revision'], 'op-pending-archive', request)
         before = quality.state_path(self.base, self.task).read_bytes()
         with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
             self.readback(record)
         self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
         resumed = station_clean.execute(self.base, 'archive', task['issue_key'], task['run_id'],
-            task['_revision'], 'op-pending-archive', {}, archive_decision={
-                'action': 'retry', 'digest': operation['archive_result']['digest']})
+            task['_revision'], 'op-pending-archive', request, jira_readback=self.archive_receipt(operation))
         self.assertEqual('done', resumed['status'])
         self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
 

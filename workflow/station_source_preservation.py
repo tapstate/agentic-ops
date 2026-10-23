@@ -43,6 +43,23 @@ def repositories(root):
     return found
 
 
+def assert_isolated(root):
+    root = Path(root).resolve()
+    found = repositories(root)
+    for path in found:
+        relative = path.relative_to(root).as_posix()
+        common = Path(git(path, 'rev-parse', '--git-common-dir'))
+        common = (path / common).resolve() if not common.is_absolute() else common.resolve()
+        if common != root and root not in common.parents:
+            raise ValueError('源码关联外部 Git 元数据，先处理关联工作树：' + relative)
+        for row in git(path, 'worktree', 'list', '--porcelain').splitlines():
+            if row.startswith('worktree '):
+                worktree = Path(row[len('worktree '):]).resolve()
+                if worktree != root and root not in worktree.parents:
+                    raise ValueError('源码 Git 仍被外部工作树使用，先由研发处理：' + relative)
+    return found
+
+
 def generated(config, name, relative):
     path = Path(relative)
     actions = [rules.classify(config, relative, False, 'repository', name)['action']]
@@ -56,21 +73,12 @@ def source_preservation(base, config):
     if root.is_symlink():
         raise ValueError('source 根为链接，先核实并修复工位路径，不递归删除目标')
     catalog = project_rules.load_repository_catalog(station=base)['repositories']
-    found = repositories(root)
+    found = assert_isolated(root)
     result = []
     task = task_store.read_task(base) or {}
     frozen = task.get('engineering_baseline', {}).get('repositories', {})
     for path in found:
         relative = path.relative_to(root).as_posix()
-        common = Path(git(path, 'rev-parse', '--git-common-dir'))
-        common = (path / common).resolve() if not common.is_absolute() else common.resolve()
-        if common != root and root not in common.parents:
-            raise ValueError('源码关联外部 Git 元数据，先处理关联工作树：' + relative)
-        for row in git(path, 'worktree', 'list', '--porcelain').splitlines():
-            if row.startswith('worktree '):
-                worktree = Path(row[len('worktree '):]).resolve()
-                if worktree != root and root not in worktree.parents:
-                    raise ValueError('源码 Git 仍被外部工作树使用，先由研发处理：' + relative)
         bare = git(path, 'rev-parse', '--is-bare-repository') == 'true'
         refs = dict(row.split('\t', 1) for row in git(path, 'for-each-ref', '--format=%(refname)\t%(objectname)').splitlines() if row)
         local = {key: value for key, value in refs.items() if not key.startswith('refs/remotes/')}
@@ -116,6 +124,5 @@ def source_preservation(base, config):
             for name in files + [name for name in names if (path / name).is_symlink()]:
                 unknown.append((path / name).relative_to(root).as_posix())
     return {'repositories': result, 'unknown_files': sorted(unknown),
-            'boundary': '仅供源码保全核验，不授权删除；现役清理仍保护源码。远端只核对同名引用及完整 SHA，未核实项由 Agent 与研发处理；本地 reflog 和悬空对象随未来源码删除丢弃，不作为持久成果。',
+            'boundary': '仅供源码保全核验，不授权删除；删除由清理操作另行核验范围与处置决定。远端只核对同名引用及完整 SHA，未核实项由 Agent 与研发处理；本地 reflog 和悬空对象随源码删除丢弃，不作为持久成果。',
             'requires_decision': bool(unknown or any(row['unpreserved_refs'] or row['changed_files'] or row['unique_files'] or row['unchecked_files'] or not row['remote_verified'] for row in result))}
-

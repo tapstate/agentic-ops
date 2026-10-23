@@ -2,7 +2,7 @@
 
 脚本与 LLM 的执行职责及失败接续见[统一开发原则](../maintenance-guide.md#确定性执行与-ai-接续原则)。此原则由现有 Workflow、Policy、原生工具与 Agent 协作落实，不增加调度器、异常中心、万能状态导入器或新的架构层。
 
-数据归属与生成、归档、恢复、清理责任统一见[数据生命周期开发规范](../development-data-lifecycle.md)；目标操作见[工位合同](single-task-station.md#任务生命周期目标合同)。两者不新增架构层；当前源码保留、release 和执行接管等实现与目标差异由合同集中说明。
+数据归属与生成、归档、恢复、清理责任统一见[数据生命周期开发规范](../development-data-lifecycle.md)；目标操作见[工位合同](single-task-station.md#任务生命周期目标合同)。两者不新增架构层；清理、归档和执行接管等实现与目标差异由合同集中说明。
 
 本文描述单任务工位产品架构。身份、退出职责及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。现役升级边界见[工位合同](single-task-station.md#10-升级与恢复)；本文单独标明待实现的功能依赖检查目标，不提供旧 Runtime。本文不代替真实应用启动与发布验收。
 
@@ -82,17 +82,17 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 完整工程基线保存 Profile、版本解析输入、每仓 origin/ref/SHA 与摘要；任务修改仓另存分支、目标、范围、验证和交付事实，引用冻结基线。上下文通过 task.py repository context 返回已核验路径，Agent 在同一工位会话使用原生工具操作，不另建会话状态或复制中央规则。
 
-## 6. 四操作与恢复
+## 6. 生命周期与恢复
 
 清理、恢复和环境维护的开发要求统一引用[生命周期协作规范](../maintenance-guide.md#生命周期协作规范)。资源专属的收尾能力归创建功能、退出流程复用该能力是目标职责；当前 Docker 公共清理处理器尚未收敛，不能据此假定已有统一接口。状态语义仍由工位合同维护，不扩展 Bootstrap 为编译、部署或任务恢复中心。
 
-takeover 先完成只读预检，再登记操作与任务并准备独立源码；已有副作用的失败恢复同 run/op。工作清理保持当前任务；任务清理撤销授权并解绑；archive 尽力记录已有结果，不冻结开发或阻断退出；release 组合 archive 和任务清理，覆盖处理中途退出和完成后退出。业务完成验收独立执行。
+takeover 先完成只读预检，再登记操作与任务并准备独立源码；已有副作用的失败恢复同 run/op。archive 建立持久接续点，不冻结开发、不释放任务。clean 的 task/station 两个范围复用同一执行链，先核验成果处置和资源停写，再删除对应区域，最后释放任务与执行占用。业务完成验收独立执行。
 
 状态由工位锁串行，写请求绑定 run/revision，副作用由原操作及逐对象回执恢复。未知对象、路径漂移和未停止写入者使受影响对象保留，独立步骤继续；解绑结果必须回读。具体清单、保护与异常接力规则只在[工位合同](single-task-station.md)维护。
 
 ## 7. 生成、清理与升级分层
 
-Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 编排本版统一退出后移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
+Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 要求当前任务和原操作先结束，再移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
 
 同版本生成→任务闭环→purge→生成先独立验收。当前升级器只编排产品切换，不解释旧任务；epoch 判定、登记及原版退出要求统一见[工位合同](single-task-station.md#10-升级与恢复)，当前操作见[更新与回退](../usage/update-and-rollback.md)。这些限制仍有效，不代表上文功能内聚目标已实现。
 

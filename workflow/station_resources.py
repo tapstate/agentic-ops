@@ -108,13 +108,14 @@ def preflight(base, task):
 
 
 def require_cleanup_version(version):
-    if version != 7:
-        raise ValueError("仅支持清理计划版本 7；旧工位由原版本退出")
+    if version != 8:
+        raise ValueError("仅支持清理计划版本 8；旧工位由原版本退出")
 
 
 def plan(base, task, version=None, **options):
-    require_cleanup_version(7 if version is None else version)
-    return station_clean_rules.plan(base, task, options)
+    require_cleanup_version(8 if version is None else version)
+    from workflow import station_cleanup
+    return station_cleanup.plan(base, options.get('scope', 'task'))
 
 
 def export_plan(base, task, decisions_override=None, **unused):
@@ -328,6 +329,11 @@ def cleanup_declared(base, config, operation, observe_only=False):
                     labels = config_value.get('Labels') if isinstance(config_value, dict) else None
                     if not isinstance(labels, dict) or labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
                         raise ValueError('Docker 对象身份标签不符，保留')
+                    mounts = info.get('Mounts', []) if kind == 'container' else []
+                    if not isinstance(mounts, list) or any(not isinstance(mount, dict) for mount in mounts):
+                        raise ValueError('容器挂载信息格式无效，先由 Agent 核实，保留原对象')
+                    if any(mount.get('Type') == 'volume' for mount in mounts):
+                        raise ValueError('容器关联数据卷，先由 Agent 核实保全与独占/共享关系，保留容器定位线索：' + info['Id'])
                     rows.append({'kind': kind, 'id': info['Id']})
             if observe_only:
                 if rows:
@@ -353,8 +359,7 @@ def cleanup_declared(base, config, operation, observe_only=False):
                 operations.receipt(base, operation, step_name, {'status': 'removed'})
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             pending.append({'resource': spec, 'reason': str(error)})
-            if step_name in operation['steps'] and operation['steps'][step_name]['receipt'] is None:
-                operations.receipt(base, operation, step_name, {'status': 'retained', 'reason': str(error)})
+            # 未完成保留空回执，原操作重试继续回读和收尾，不能固化为已完成。
     return pending
 
 

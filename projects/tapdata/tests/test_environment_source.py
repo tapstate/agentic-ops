@@ -147,15 +147,18 @@ with mock.patch.object(subject.source, 'git', side_effect=interrupted):
         self.assertTrue(all(path.is_dir() for path in residuals))
         self.assertEqual(task_state_snapshot(self.ws), current)
         self.assertFalse((self.ws / ".agenticops/operation.json").exists())
-        # 使用真实清理入口核验：含 Git 的残留保留，不能绕过嵌套仓库保护。
-        result = station_clean.execute(self.ws, "work-clean", None, "run-" + "a" * 32,
-                                       task_store.read_current(self.ws)["revision"], "op-source-clean",
-                                       {"clear_config": []})
-        self.assertEqual(result["status"], "done")
-        self.assertFalse(result["cleanup_result"]["complete"])
-        self.assertTrue(any("嵌套 Git" in item["reason"] for item in result["cleanup_result"]["residuals"]))
-        self.assertTrue(any(path.is_dir() for path in residuals))
-        self.assertTrue((self.ws / "source/tapdata/tapdata/.git").is_dir())
+        # 独立临时 Git 纳入明确放弃范围，不能永久阻塞正常清理。
+        preview = station_clean.check(self.ws)['cleanup_plan']
+        self.assertTrue(preview['source']['other_repositories'])
+        with mock.patch('workflow.station_resources.cleanup_declared', return_value=[]):
+            result = station_clean.execute(self.ws, 'clean', None, 'run-' + 'a' * 32,
+                                           task_store.read_current(self.ws)['revision'], 'op-source-clean',
+                                           {'scope': 'task', 'expected_plan_digest': preview['digest'],
+                                            'decision_ref': 'test explicit discard', 'materials': 'discard'})
+        self.assertEqual(result['status'], 'done')
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertFalse(list((self.ws / 'runtime').iterdir()))
+        self.assertFalse(list((self.ws / 'source').iterdir()))
 
     def cli_error(self):
         from projects.tapdata.scripts.test_environment import main
@@ -220,9 +223,11 @@ with mock.patch.object(subject.source, 'git', side_effect=interrupted):
                 return subprocess.CompletedProcess(args, 0, "", "")
             return original(args, **kwargs)
         with mock.patch("workflow.station_resources.subprocess.run", side_effect=docker_empty):
-            result = station_clean.execute(self.ws, "work-clean", None, "run-" + "a" * 32,
+            preview = station_clean.check(self.ws)["cleanup_plan"]
+            result = station_clean.execute(self.ws, "clean", None, "run-" + "a" * 32,
                                            task_store.read_current(self.ws)["revision"], "op-idle-clean",
-                                           {"clear_config": []})
+                                           {"scope": "task", "expected_plan_digest": preview["digest"],
+                                            "decision_ref": "test explicit discard", "materials": "discard"})
         self.assertEqual(result["status"], "done")
         self.assertFalse(list((self.ws / "runtime").iterdir()))
         self.takeover()
@@ -245,9 +250,9 @@ with mock.patch.object(subject.source, 'git', side_effect=interrupted):
         from workflow import station_operation
         env = Environment(self.ws)
         with task_store.task_state_lock(self.ws):
-            pending = station_operation.begin(self.ws, "work-clean", "op-clean-pending",
+            pending = station_operation.begin(self.ws, "clean", "op-clean-pending",
                                               task_store.read_current(self.ws)["revision"],
-                                              {"clear_config": []}, "run-" + "a" * 32)
+                                              {"scope": "task"}, "run-" + "a" * 32)
         original = (self.ws / ".agenticops/operation.json").read_bytes()
         for name in ("status", "list", "uninstall"):
             with env.lock(name):

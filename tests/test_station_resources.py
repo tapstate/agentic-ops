@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """目录生产归属、独立导出和源码保护的真实 Git 回归。"""
 import json
+import base64
 import io
 import os
 from pathlib import Path
@@ -34,7 +35,8 @@ class ResourceTests(unittest.TestCase):
         return task
 
     def reset_request(self, task):
-        return {'summary': '记录已有结果'}
+        from workflow import station_cleanup
+        return {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': 'discard', 'decision_ref': '确认保全导出并放弃其余本地材料'}
 
     def execute(self, task, request, kind='clean', op='op-resource-reset'):
         return station.execute(self.ws, kind, task['issue_key'], task['run_id'], task['_revision'], op, request)
@@ -52,15 +54,14 @@ class ResourceTests(unittest.TestCase):
         self.git(self.seed, 'push', str(self.remote), 'develop')
         return self.ready()
 
-    def test_empty_gitlink_survives_clean(self):
+    def test_empty_gitlink_deleted_only_after_scope_decision(self):
         task = self.gitlink_ready()
         before = self.git(self.repo, 'ls-files', '--stage')
         self.git(self.repo, 'config', 'submodule.recurse', 'true')
         self.execute(task, self.reset_request(task))
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertEqual(before, self.git(self.repo, 'ls-files', '--stage'))
-        self.assertTrue((self.repo / 'vendor/api').is_dir())
-        self.assertEqual([], list((self.repo / 'vendor/api').iterdir()))
+        self.assertFalse(self.repo.exists())
+        self.assertTrue(before)
 
 
     def test_runtime_child_is_lazy_and_rejects_links(self):
@@ -143,7 +144,8 @@ class ResourceTests(unittest.TestCase):
             self.execute(task, self.reset_request(task))
         self.assertTrue(output.exists())
         self.assertEqual(artifacts.digest(output.read_bytes()), result['sha256'])
-        self.assertEqual((self.repo/'file.txt').read_text(),'exported content')
+        self.assertFalse(self.repo.exists())
+        self.assertIn(b'exported content', base64.b64decode(json.loads(output.read_text())['bundle']['worktree_patch']))
 
 
     def test_export_new_snapshot_uses_new_receipt(self):

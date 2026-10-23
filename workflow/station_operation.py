@@ -42,7 +42,7 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean")
+            or value["kind"] not in ("takeover", "archive", "clean", "scope_change", "replan")
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
@@ -70,7 +70,7 @@ def _verify_superseded(operation, name, step):
 
 
 def begin(base, kind, operation_id, expected_revision, request, run_id=None, before_create=None):
-    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean"):
+    if kind not in ("takeover", "archive", "clean", "scope_change", "replan"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
         raise ValueError("operation_id 必须为 op- 前缀的稳定操作编号")
@@ -108,7 +108,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None, bef
                 raise ValueError(
                     "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
                 ) from error
-    elif kind != "work-clean" and (current["current"] is None or current["current"]["run_id"] != run_id):
+    elif not (kind == "clean" and request.get("scope") in ("task", "station") and current["current"] is None) and (current["current"] is None or current["current"]["run_id"] != run_id):
         raise ValueError("工位 run 已变化")
     value = {
         "schema_version": 1, "operation_id": operation_id, "kind": kind,
@@ -177,7 +177,8 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, k
     if not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id) or operation_id == previous["operation_id"]:
         raise ValueError("清理交接需要新的有效操作编号")
     current = task_store.read_current(base)
-    if not current["current"] or current["current"]["run_id"] != run_id or previous["run_id"] != run_id:
+    initial_takeover = current["current"] is None and previous["kind"] == "takeover"
+    if previous["run_id"] != run_id or not initial_takeover and (not current["current"] or current["current"]["run_id"] != run_id):
         raise ValueError("清理交接 run 已变化")
     target = {"operation_id": operation_id, "kind": kind, "expected_revision": revision,
               "request": copy.deepcopy(request), "request_digest": engineering_baseline.digest(request),

@@ -189,35 +189,30 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertIn('代际', result.stderr)
         self.assertEqual('invalid old state', state.read_text())
 
-    def test_purge_composes_release_for_incomplete_task_and_optional_config(self):
+    def test_purge_requires_explicit_task_cleanup(self):
         task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
             'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
             'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
             'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
         (self.station / 'config/service').write_text('reusable')
-        (self.station / 'config/keep').write_text('keep')
         (self.station / 'runtime/unknown').write_text('disposable runtime output')
         (self.station / 'source/notes').write_text('source')
-        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False, clear_config=['config/service'])
-        from workflow import station_archive, station_clean, station_operation
-        with mock.patch.object(station_archive, 'publish', side_effect=OSError('unavailable')):
-            with self.assertRaisesRegex(ValueError, '归档待用户决定'):
-                registry.command_detach(args, ROOT, purge=True)
-            self.assertTrue((self.station / '.agenticops/station.json').exists())
-            self.assertTrue((self.station / 'config/service').exists())
-            self.assertTrue((self.station / 'runtime/unknown').exists())
-            operation = station_operation.read(self.station)
-            for checkpoint in ('before-cleanup', 'after-cleanup'):
-                self.assertEqual(checkpoint, operation['archive_result']['checkpoint'])
-                operation = station_clean.execute(self.station, 'release', 'TAP-123', operation['run_id'],
-                    operation['expected_revision'], operation['operation_id'], operation['request'],
-                    archive_decision={'action': 'discard', 'digest': operation['archive_result']['digest']})
+        args = argparse.Namespace(station=str(self.station), all=False, yes=True, lifecycle_held=False)
+        with self.assertRaisesRegex(ValueError, '工位仍有任务'):
             registry.command_detach(args, ROOT, purge=True)
+        self.assertTrue((self.station / 'source/notes').exists())
+        self.assertTrue((self.station / 'runtime/unknown').exists())
+        from workflow import station_cleanup, station_resources
+        plan = station_cleanup.plan(self.station)
+        request = {'scope': 'task', 'expected_plan_digest': plan['digest'], 'materials': 'discard', 'decision_ref': '明确放弃本地成果并清理任务'}
+        with mock.patch.object(station_resources, 'cleanup_declared', return_value=[]):
+            result = station_cleanup.execute(self.station, 'TAP-123', 'run-test', 1, 'op-purge-preceding-clean', request)
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        registry.command_detach(args, ROOT, purge=True)
         self.assertFalse((self.station / '.agenticops/station.json').exists())
-        self.assertFalse((self.station / 'config/service').exists())
-        self.assertFalse((self.station / 'runtime/unknown').exists())
-        for name in ('config/keep', 'source/notes'):
-            self.assertTrue((self.station / name).exists())
+        self.assertEqual('reusable', (self.station / 'config/service').read_text())
+        self.assertEqual([], list((self.station / 'source').iterdir()))
+        self.assertEqual([], list((self.station / 'runtime').iterdir()))
 
     def test_generate_purge_generate(self):
         before = json.loads((self.station / '.agenticops/station.json').read_text())

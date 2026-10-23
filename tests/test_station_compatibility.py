@@ -152,20 +152,20 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new')
 
-    def test_execution_epoch_thirty_six_boundary(self):
+    def test_cleanup_epoch_thirty_seven_boundary(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(manifest(36), current)
+        self.assertEqual(manifest(37), current)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
-        path.write_text(json.dumps({'station_state_epoch': 36}))
+        path.write_text(json.dumps({'station_state_epoch': 37}))
         before = path.read_bytes()
         self.write_registry([str(self.station)])
         for operation in ('update', 'rollback'):
-            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(36), manifest(36)]):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(37), manifest(37)]):
                 compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
         compatibility.require_station_can_adopt(self.product_root, self.station)
         self.assertEqual(before, path.read_bytes())
-        for epoch in range(1, 36):
+        for epoch in range(1, 37):
             with self.subTest(epoch=epoch):
                 path.write_text(json.dumps({'station_state_epoch': epoch}))
                 before = path.read_bytes()

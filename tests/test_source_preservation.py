@@ -144,10 +144,10 @@ class SourcePreservationTests(unittest.TestCase):
     def test_opt_in_preflight_does_not_change_existing_cleanup_plan(self):
         self.ready()
         original = station_clean.check(self.ws, self.task)
-        observed = station_clean.check(self.ws, self.task, source_preservation=True)
+        observed = station_clean.check(self.ws, self.task)
         self.assertEqual(original['cleanup_plan'], observed['cleanup_plan'])
-        self.assertIn('source_preservation', observed)
-        self.assertNotIn('source_preservation', original)
+        self.assertIn('source', observed['cleanup_plan'])
+        self.assertEqual(original['cleanup_plan']['source'], observed['cleanup_plan']['source'])
         self.assertIsNotNone(task_store.read_task(self.ws))
 
     def test_public_preflight_without_execution_identity(self):
@@ -156,12 +156,12 @@ class SourcePreservationTests(unittest.TestCase):
         env = dict(os.environ)
         env.pop('AGENTICOPS_EXECUTION_ID', None)
         for command in (
-            [str(product_cli(self.ws, 'workflow/station-clean.py')), '--dir', str(self.ws), '--check', '--source-preservation', '--details'],
-            [str(product_cli(self.ws, 'workflow/task.py')), 'cleanup-preflight', '--dir', str(self.ws), '--issue-key', self.task['issue_key'], '--expected-run-id', self.task['run_id'], '--source-preservation', '--details'],
+            [str(product_cli(self.ws, 'workflow/station-clean.py')), '--dir', str(self.ws), '--check', '--details'],
+            [str(product_cli(self.ws, 'workflow/task.py')), 'cleanup-preflight', '--dir', str(self.ws), '--issue-key', self.task['issue_key'], '--expected-run-id', self.task['run_id'], '--details'],
         ):
             response = subprocess.run([sys.executable, *command], capture_output=True, text=True, env=env)
             self.assertEqual(0, response.returncode, response.stderr)
-            self.assertFalse(json.loads(response.stdout)['source_preservation']['requires_decision'])
+            self.assertFalse(json.loads(response.stdout)['cleanup_plan']['source']['requires_decision'])
             self.assertEqual(before, task_store.current_path(self.ws).read_bytes())
 
     def test_idle_empty_source(self):
