@@ -406,7 +406,13 @@ class CleanupTests(unittest.TestCase):
         resources.register(self.ws, task['issue_key'], task['run_id'], [dict(entry, status='cleaned', readback_ref='observed:absent')], 'op-cleanup-test')
         resources.check_retained_resources(self.ws, operations.read(self.ws))
 
+    def enable_docker(self):
+        source = Path(__file__).resolve().parents[1] / 'projects/tapdata/station-clean.json'
+        target = self.product / 'projects/tapdata/station-clean.json'
+        target.write_bytes(source.read_bytes())
+
     def docker_fixture(self, mismatch=False):
+        self.enable_docker()
         root = self.ws / 'runtime/tapdata-test-env'; root.mkdir()
         state = {'container': True, 'network': True}; calls = []
         def run(args, **kwargs):
@@ -434,12 +440,65 @@ class CleanupTests(unittest.TestCase):
         self.assertIn(['docker', 'network', 'rm', 'network-id'], calls)
         self.assertFalse(any('prune' in c or 'volume' in c or 'image' in c for c in calls))
 
+    def test_docker_resources_discovered_after_runtime_directory_loss(self):
+        task = self.ready(); self.real_run = subprocess.run
+        root, calls, run = self.docker_fixture()
+        root.rmdir()
+        with mock.patch.object(resources.shutil, 'which', return_value='/fixture/docker'), \
+                mock.patch.object(resources.subprocess, 'run', side_effect=run):
+            result = self.run_exit(task)
+        self.assertEqual([], result['cleanup_result']['resources'])
+        self.assertIn(['docker', 'rm', 'container-id'], calls)
+        self.assertIn(['docker', 'network', 'rm', 'network-id'], calls)
+
+    def test_missing_driver_with_environment_configuration_is_unverified(self):
+        self.enable_docker()
+        task = self.ready()
+        (self.ws / 'config/environments').mkdir()
+        real_run = subprocess.run
+        def unavailable(args, **kwargs):
+            if args[0] == 'docker':
+                raise FileNotFoundError('Docker unavailable')
+            return real_run(args, **kwargs)
+        with mock.patch.object(resources.shutil, 'which', return_value=None), \
+                mock.patch.object(resources.subprocess, 'run', side_effect=unavailable):
+            result = self.run_exit(task)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertTrue(result['cleanup_result']['resources'])
+
+    def test_unused_optional_environment_does_not_require_docker(self):
+        self.enable_docker()
+        task = self.ready()
+        real_run = subprocess.run
+        def no_docker(args, **kwargs):
+            if args[0] == 'docker':
+                raise AssertionError('从未配置的可选环境不安装 Docker')
+            return real_run(args, **kwargs)
+        with mock.patch.object(resources.shutil, 'which', return_value=None), \
+                mock.patch.object(resources.subprocess, 'run', side_effect=no_docker):
+            result = self.run_exit(task)
+        self.assertEqual([], result['cleanup_result']['resources'])
+
     def test_docker_identity_mismatch_never_deletes(self):
         task = self.ready(); self.real_run = subprocess.run
         root, calls, run = self.docker_fixture(mismatch=True)
         with mock.patch.object(resources.subprocess, 'run', side_effect=run): result = self.run_exit(task)
         self.assertTrue(root.exists()); self.assertTrue(result['cleanup_result']['released'])
         self.assertFalse(any('stop' in c or 'rm' in c for c in calls))
+
+    def test_malformed_docker_readback_is_reported_without_deletion(self):
+        task = self.ready(); self.real_run = subprocess.run
+        root, calls, run = self.docker_fixture()
+        def malformed(args, **kwargs):
+            if args[:2] == ['docker', 'inspect']:
+                return subprocess.CompletedProcess(args, 0, '[]', '')
+            return run(args, **kwargs)
+        with mock.patch.object(resources.subprocess, 'run', side_effect=malformed):
+            result = self.run_exit(task)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertTrue(root.exists())
+        self.assertFalse(any('stop' in c or 'rm' in c for c in calls))
+        self.assertIn('回读结构', result['cleanup_result']['resources'][0]['reason'])
 
     def test_verify_result_does_not_mutate_docker(self):
         task = self.ready(); self.real_run = subprocess.run

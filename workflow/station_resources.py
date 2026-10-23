@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import stat
 import sys
 
@@ -304,16 +305,28 @@ def cleanup_declared(base, config, operation, observe_only=False):
         step_name = 'docker:' + baseline.digest(spec)
         try:
             path = resource_path(base, spec['path'])
-            if not path.exists() and step_name not in operation['steps']:
+            # 缺失 runtime 不能证明外部对象不存在；可用驱动始终按工位标签发现。
+            # 从未配置环境、也没有本机 Docker 的空工位无需安装可选驱动。
+            configured = Path(base) / station_layout.station_name(base, 'configuration') / 'environments'
+            if (not path.exists() and not path.is_symlink() and not configured.exists()
+                    and not configured.is_symlink() and step_name not in operation['steps']
+                    and shutil.which('docker') is None):
                 continue
             ids = call(['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
             networks = call(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project]).split()
             rows = []
             for kind, identifiers in (('container', ids), ('network', networks)):
                 for identifier in identifiers:
-                    info = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))[0]
-                    labels = info.get('Config', {}).get('Labels', {}) if kind == 'container' else info.get('Labels', {})
-                    if labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
+                    observation = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))
+                    if (not isinstance(observation, list) or len(observation) != 1
+                            or not isinstance(observation[0], dict)
+                            or not isinstance(observation[0].get('Id'), str)
+                            or not observation[0]['Id'].startswith(identifier)):
+                        raise ValueError('Docker 对象回读结构或身份无效，先由 Agent 核实原对象')
+                    info = observation[0]
+                    config_value = info.get('Config', {}) if kind == 'container' else info
+                    labels = config_value.get('Labels') if isinstance(config_value, dict) else None
+                    if not isinstance(labels, dict) or labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
                         raise ValueError('Docker 对象身份标签不符，保留')
                     rows.append({'kind': kind, 'id': info['Id']})
             if observe_only:

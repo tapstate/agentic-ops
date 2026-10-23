@@ -23,6 +23,11 @@ class StationTests(unittest.TestCase):
         self.ws = self.root / "ws"
         self.product = self.root / "product"
         shutil.copytree(ROOT / "projects", self.product / "projects")
+        # 普通任务夹具不启用外部环境；Docker 专项用例另行声明并模拟驱动。
+        cleanup_path = self.product / 'projects/tapdata/station-clean.json'
+        cleanup = json.loads(cleanup_path.read_text())
+        cleanup['resources'] = []
+        cleanup_path.write_text(json.dumps(cleanup))
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
         shutil.copytree(ROOT / "policies", self.product / "policies")
         (self.ws / ".agenticops").mkdir(parents=True)
