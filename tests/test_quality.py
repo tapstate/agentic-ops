@@ -3234,10 +3234,11 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(before, task_store.current_path(self.base).read_bytes())
         self.assertEqual([], list(target.iterdir()))
 
-    def test_archive_content_or_unsafe_target_still_rejects_comment_readback(self):
+    def test_terminal_archive_content_or_unsafe_target_rejects_comment_readback(self):
         from workflow import archive_store
         target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
         record = self.publication()
+        self.terminal()
         before = quality.state_path(self.base, self.task).read_bytes()
         for name in ('record.json', 'result-fixture.json', 'unknown'):
             with self.subTest(name=name):
@@ -3258,6 +3259,64 @@ class SyncRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
             self.readback(record)
         self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_completed_archive_keeps_active_receipts_and_next_work_available(self):
+        from workflow import station, station_operation, archive_store
+        record = self.publication()
+        task = task_store.read_task(self.base)
+        operation = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
+                                    task['_revision'], 'op-active-archive', {})
+        self.assertEqual('done', operation['status'])
+        directory = archive_store.run_directory(self.base, task['run_id'])
+        before = {p.name: p.read_bytes() for p in directory.iterdir()}
+        current_before = task_store.current_path(self.base).read_bytes()
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+        self.apply('draft', {'id': 'next', 'body': '归档后继续处理'})
+        self.assertEqual(current_before, task_store.current_path(self.base).read_bytes())
+        self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
+        # 后续完成操作替换归档操作记录，也不能重新冻结历史快照所属任务。
+        digest = self.view()['publications']['next']['digest']
+        self.apply('confirm', {'id': 'next', 'digest': digest, 'proof': proof()})
+        next_record = self.apply('prepare_write', {'id': 'next', 'digest': digest})['publications']['next']
+        with mock.patch.object(station_operation, 'read', return_value={
+                'kind': 'scope_change', 'status': 'done', 'run_id': task['run_id']}):
+            result = self.apply('readback', {'id': 'next', 'operation_id': next_record['operation_id'],
+                'site': next_record['site'], 'issue_key': task['issue_key'], 'comment_id': '124',
+                'body': next_record['body'], 'source_ref': 'fixture:jira/comment/124'})
+            self.assertEqual('verified', result['publications']['next']['status'])
+        self.assertEqual(before, {p.name: p.read_bytes() for p in directory.iterdir()})
+
+    def test_pending_archive_freezes_active_receipt_until_original_retry(self):
+        from workflow import station, station_clean, station_archive
+        record = self.publication()
+        task = task_store.read_task(self.base)
+        with mock.patch.object(station_archive, 'publish', side_effect=PermissionError('fixture failure')):
+            operation = station.execute(self.base, 'archive', task['issue_key'], task['run_id'],
+                                        task['_revision'], 'op-pending-archive', {})
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        resumed = station_clean.execute(self.base, 'archive', task['issue_key'], task['run_id'],
+            task['_revision'], 'op-pending-archive', {}, archive_decision={
+                'action': 'retry', 'digest': operation['archive_result']['digest']})
+        self.assertEqual('done', resumed['status'])
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+
+    def test_active_receipt_rejects_unsafe_archive_path(self):
+        from workflow import archive_store
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        record = self.publication()
+        target.rmdir()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        target.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
+        target.unlink()
+        target.write_text('not a directory')
+        with self.assertRaisesRegex(ValueError, '归档证据已冻结'):
+            self.readback(record)
 
     def test_early_unconfirmed_archive_allows_original_readback(self):
         from workflow import station_operation
