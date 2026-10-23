@@ -199,6 +199,17 @@ def check(base, issue_key, jira_input):
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", []), rules),
     }
+    summaries = {}
+    if (rules.get("verification_plan") or {}).get("case_coverage"):
+        from bootstrap.product_version import describe
+        from workflow import project_rules, test_coverage
+        try:
+            version = describe(project_rules.product_root_from_station(base))
+            publication, summaries = test_coverage.publication_problems(
+                task, packet, quality.replay(quality.load(base, task)), quality.context(base, task), rules, version)
+        except (ValueError, OSError) as error:
+            publication = ["PR 测试总结无法核验：" + str(error)]
+        groups["pr_publication"] = publication
     if task.get("stage") != "ci_validation":
         groups["task_checks"].append("本地任务尚未到 ci_validation，不能进入 PR Ready 核对")
     status = jira_status.load_state(base, task)
@@ -220,6 +231,7 @@ def check(base, issue_key, jira_input):
     ready = preflight_ready and bool(submissions) and all(r["confirmed"] for r in submissions)
     return {"issue_key": issue_key, "run_id": task["run_id"], "source_ref": source_ref,
             "preflight_ready": preflight_ready, "ready": ready,
+            "required_pr_summaries": summaries,
             "submission_status": "confirmed" if ready else ("pending" if preflight_ready else "blocked"),
             "pull_requests": submissions,
             "remaining": [r for r in submissions if not r["confirmed"]],

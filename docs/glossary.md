@@ -1,12 +1,13 @@
 # AgenticOps 术语表
 
-本页只解释 AgenticOps 的专有名词；Git、Jira、GitHub 和 CI 使用其原有含义。
+本页解释 AgenticOps 及项目适配中需要统一的术语；Git、Jira、GitHub 和 CI 使用其原有含义。
 
 | 名词 | 含义 |
 |---|---|
 | 安装目录（Installation Directory） | 承载 AgenticOps 中央产品资产并提供 `agenticops` 入口的目录，默认位于 `~/.agentic-ops`；本机配置位于 `.local/`。产品源码目录仅用于维护 AgenticOps，不是用户工作目录。 |
 | 源码目录 | 维护者克隆的 AgenticOps Git 仓库，即源码产品根目录；在 `develop` 分支维护和运行产品。它不是业务项目工位。 |
 | 项目工位 | 业务项目的本地工作目录。一工位、一套完整 source、一个 current；config/runtime 分离持久配置与运行现场，不复制中央规则。正式档案保存在绑定 Product Root 的 `.archive/`。 |
+| IT（Integration Test） | 指 TapData 的集成测试。测试级别按项目 Wiki 和目标源码判断，与是否在 CI 执行分开；多级测试分别验收，具体材料见[共同验证材料](usage/quality-checkpoints.md#共同验证材料)。 |
 | 产品项目（Project） | 一个业务项目的适配配置，位于 `projects/<project>/`，包含 Jira、仓库、分支、准入规则和 Runbook。 |
 | 完整应用源码集 Profile | `full-application` 指定完整应用对应的源码仓库集合；接管准备独立仓库和冻结基线，不表示依赖、构建、应用启动或健康检查已完成。 |
 | Agent | 实际执行研发任务的平台，例如 Codex 或 Claude。 |

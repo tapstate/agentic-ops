@@ -29,11 +29,21 @@ def proof():
             "at": datetime.now(timezone.utc).isoformat()}
 
 
+def it_plan_cases():
+    return [{"id": "behavior", "change": "reuse", "reason": "已有断言覆盖目标行为",
+             "baseline_ref": "fixture:verify.py@baseline"}]
+
+
+def it_case_results(result="PASS"):
+    return [{"id": "behavior", "status": "written", "case_ref": "fixture:verify.py@current",
+             "result": result, "report_ref": "fixture:case-report"}]
+
+
 def feature_review(criterion, repository, module, item):
     return {
         'integration_tests': [{'repository': repository, 'scope': module + ':value',
-            'level': 'fixture:跨进程集成', 'knowledge_ref': 'fixture:测试合同', 'rationale': '验证调用与返回边界',
-            'case_strategy': '复用 verify.py 独立断言', 'execution_plan': '本地及模拟 CI 运行 verify.py，回读报告'}],
+            'level': 'L1', 'knowledge_ref': 'fixture:测试合同', 'rationale': '验证调用与返回边界',
+            'cases': it_plan_cases(), 'case_strategy': '复用 verify.py 独立断言', 'execution_plan': '本地及模拟 CI 运行 verify.py，回读报告'}],
         'reference_implementations': [{'status': 'not_found', 'search_scope': [module],
             'source_revision': 'fixture:isolated-source', 'evidence_ref': 'fixture:search', 'difference': '新增目标行为'}],
         'acceptance_mapping': [{'criterion': criterion, 'behavior': '新增约定行为', 'repository': repository,
@@ -116,8 +126,8 @@ class QualityTests(unittest.TestCase):
         for name, fact in (("quality.json", "fix_plan"), ("quality-feature.json", "implementation_plan")):
             rules = json.loads((ROOT / "projects/tapdata" / name).read_text())
             rows = [{"repository": repo["repository"], "scope": "module:behavior",
-                     "level": "fixture:知识分级", "knowledge_ref": "fixture:wiki-path",
-                     "rationale": "变更触及模块契约", "case_strategy": "新增边界断言，复用正常路径",
+                     "level": "L1", "knowledge_ref": "fixture:wiki-path",
+                     "rationale": "变更触及模块契约", "cases": it_plan_cases(), "case_strategy": "新增边界断言，复用正常路径",
                      "execution_plan": "本地定向、模块回归及 PR 报告核对"} for repo in self.task["repositories"]]
             ctx = quality.context(self.base, self.task)
             ctx["facts"][fact] = {"integration_tests": rows}
@@ -2378,6 +2388,8 @@ class QualityTests(unittest.TestCase):
 
 class FeatureFlowTests(unittest.TestCase):
     def setUp(self):
+        version_read = mock.patch("bootstrap.product_version.describe", return_value="develop-v1.0-2-12345678")
+        version_read.start(); self.addCleanup(version_read.stop)
         temp = tempfile.TemporaryDirectory(prefix="ao-feature-flow-")
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
@@ -2410,6 +2422,20 @@ class FeatureFlowTests(unittest.TestCase):
         profile_doc["profiles"]["full-application"]["repositories"] = [self.repo]
         profile_doc["profiles"]["full-application"]["optional_repositories"] = []
         profiles.write_text(json.dumps(profile_doc))
+
+    def publish_summary(self):
+        from workflow import test_coverage, verification
+        current = self.read(); ctx = quality.context(self.ws, current)
+        rules = quality.config(self.ws, current)
+        model = quality.replay(quality.load(self.ws, current))
+        material = model['verification'][self.repo]['ci']['data']
+        packet = {'schema_version': 1, 'issue_key': 'TAP-123', 'run_id': current['run_id'],
+                  'checks_exceptions': [], 'pull_requests': [{'repository': self.repo, 'number': 1,
+                  'url': 'https://' + current['repositories'][0]['authorized_endpoint'].split('/', 1)[0] + '/' + self.repo + '/pull/1', 'headRefOid': material['head_revision'],
+                  'state': 'OPEN', 'isDraft': True, 'source_ref': 'fixture:github', 'observed_at': self.proof()['at'],
+                  'body': test_coverage.summary(verification.plan_rows(rules, ctx), material, 'develop-v1.0-2-12345678')}]}
+        path = task_store.interaction_path(self.ws, 'TAP-123', current['run_id'], 'pr-ready-input.json', create=True)
+        path.write_text(json.dumps(packet))
 
     def git(self, *args):
         return subprocess.check_output(["git", "-c", "user.name=Fixture", "-c",
@@ -2475,7 +2501,8 @@ class FeatureFlowTests(unittest.TestCase):
                 "target_revision": plan["target_revision"], "source_ref": "fixture:run/" + Path(path).name,
                 "analysis_ref": "fixture:confirmed-value-behavior", "case_review_ref": "fixture:verify.py-assertion",
                 "case_version": "v1", "dependency_analysis_ref": "fixture:no-jar-dependency",
-                "required_scope": ["feature.py:value"], "results": [{"scope": "feature.py:value", "method": "integration", "result": "PASS",
+                "required_scope": ["feature.py:value"], "results": [{"scope": "feature.py:value", "level": "L1", "method": "integration", "result": "PASS",
+                    "case_coverage": {"status": "covered", "reason": "verify.py 断言", "framework_supported": True, "cases": it_case_results()},
                     "report_ref": "fixture:run/" + Path(path).name, "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
             self.apply("verification", self.local_material)
 
@@ -2589,6 +2616,7 @@ class FeatureFlowTests(unittest.TestCase):
         snapshot.write_text(json.dumps({"source_ref": "fixture:jira-readback", "issue": {
             "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
                 "status": {"name": "Tests Passed"}, "issuelinks": []}}}))
+        self.publish_summary()
         result = pr_ready.check(self.ws, "TAP-123", snapshot)
         self.assertTrue(result["preflight_ready"], result)
         self.assertTrue(result["jira_status_todos"])
@@ -2599,11 +2627,13 @@ class FeatureFlowTests(unittest.TestCase):
         self.apply("verification", material)
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         material["results"][0].update(method="integration", result="UNKNOWN", report_ref="fixture:缺报告")
+        material["results"][0]["case_coverage"]["cases"] = it_case_results("UNKNOWN")
         self.apply("verification", material)
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         material["results"][0]["decision"] = {"reason": "报告未上传",
-            "uncovered": "feature.py:value", "follow_up": "研发安排补测；不替代已选用例验收", "proof": self.proof()}
+            "uncovered": "feature.py:value", "level": "L1", "follow_up": "研发安排补测；不替代已选用例验收", "proof": self.proof()}
         self.apply("verification", material)
+        self.publish_summary()
         self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         current = quality.replay(quality.load(self.ws, self.read()))
         self.assertEqual("UNKNOWN", current["verification"][self.repo]["ci"]["data"]["results"][0]["result"])
@@ -2624,12 +2654,257 @@ class FeatureFlowTests(unittest.TestCase):
                          "proof": self.proof()}})
         self.checkpoint("q4-acceptance")
         before = task_store.task_path(self.ws, "TAP-123").read_bytes()
+        self.publish_summary()
         self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
 
 
+
+
+class TestCoverageClosureTests(unittest.TestCase):
+    def setUp(self):
+        from workflow import verification, test_coverage
+        self.v, self.c = verification, test_coverage
+        self.rules = json.loads((ROOT / 'projects/tapdata/quality.json').read_text())
+        self.repo, self.head = 'tapdata/tapdata', 'a' * 40
+        self.row = {'repository': self.repo, 'scope': '模块:行为', 'level': 'L1', 'knowledge_ref': 'fixture:wiki',
+                    'rationale': '跨模块边界', 'cases': it_plan_cases(), 'case_strategy': '复用正常用例，新增异常场景', 'execution_plan': 'CI'}
+        self.ctx = {'repositories': {self.repo: {'live_revision': self.head, 'ci_digest': 'ci-1'}},
+                    'facts': {'fix_plan': {'integration_tests': [self.row]}}, 'failures': {}}
+        self.result = {'scope': self.row['scope'], 'level': 'L1', 'method': 'integration', 'result': 'PASS',
+                       'report_ref': 'fixture:report', 'tests': 2, 'failures': 0, 'errors': 0, 'skipped': 0,
+                       'case_coverage': {'status': 'covered', 'reason': '正常与异常用例完整',
+                                         'framework_supported': True, 'cases': it_case_results()}}
+        self.material = {'kind': 'ci', 'repository': self.repo, 'target_revision': self.head, 'head_revision': self.head,
+                         'source_ref': 'fixture:ci', 'analysis_ref': 'fixture:analysis', 'case_review_ref': 'fixture:cases',
+                         'case_version': 'v1', 'dependency_analysis_ref': 'fixture:no-deps', 'run_ref': 'fixture:run',
+                         'checkout_ref': 'fixture:checkout', 'attempt': 1,
+                         'required_scope': [self.row['scope']], 'results': [self.result]}
+        self.task = {'repositories': [{'repository': self.repo, 'pull_request': '9'}]}
+        self.url = 'https://github.com/' + self.repo + '/pull/9'
+        self.packet = {'pull_requests': [{'repository': self.repo, 'number': 9, 'url': self.url,
+                        'headRefOid': self.head, 'state': 'OPEN', 'isDraft': True,
+                        'source_ref': 'fixture:github', 'observed_at': proof()['at']}], 'issues': []}
+        self.config = self.rules['verification_plan']['case_coverage']
+        self.version = 'develop-v1.0-2-12345678'
+        self.refresh()
+
+    def refresh(self):
+        self.model = {}; self.v.record(self.model, self.material, self.ctx, self.rules)
+        self.packet['pull_requests'][0]['body'] = self.c.summary([self.row], self.material, self.version)
+
+    def problems(self):
+        return (self.v.problems(self.model, self.ctx, ['ci'], self.rules)
+                + self.c.publication_problems(self.task, self.packet, self.model, self.ctx, self.rules, self.version)[0])
+
+    def missing(self, level='L1', supported=True):
+        self.row['level'] = level
+        self.result['level'] = level
+        self.result['result'] = 'NOT_RUN'
+        self.result['decision'] = {'reason': '用例尚未完成', 'uncovered': self.row['scope'], 'level': level,
+                                   'follow_up': '完成后执行', 'proof': proof()}
+        self.result['case_coverage'] = {'status': 'missing', 'reason': '尚未编写异常用例', 'framework_supported': supported,
+            'cases': [{'id': 'behavior', 'status': 'missing', 'result': 'NOT_RUN', 'report_ref': 'fixture:pending'}],
+            'decision': {'reason': '本次延期补齐异常场景', 'uncovered': self.row['scope'], 'level': level,
+                         'follow_up': '研发跟进补测', 'proof': proof()}}
+
+    def link_issue(self, repository='tapdata/test-framework'):
+        url = 'https://github.com/' + repository + '/issues/23'
+        self.result['case_coverage']['issue'] = {'repository': repository, 'url': url}
+        self.packet['issues'] = [{'repository': repository, 'url': url, 'body': '关联 PR：' + self.url,
+                                 'source_ref': 'fixture:issue-readback', 'observed_at': proof()['at']}]
+        self.refresh()
+
+    def test_existing_coverage_needs_no_issue_and_draft_can_pass_preflight(self):
+        self.assertEqual([], self.problems())
+        self.assertEqual([], self.packet['issues'])
+        self.assertIn('AgenticOps 版本 ' + self.version, self.packet['pull_requests'][0]['body'])
+
+    def test_l1_missing_even_with_partial_pass_requires_decision_and_issue(self):
+        self.missing(); self.refresh()
+        self.assertTrue(any('Issue' in p for p in self.problems()))
+        self.link_issue(); self.assertEqual([], self.problems())
+        del self.result['case_coverage']['decision']; self.refresh()
+        self.assertTrue(any('人工决定' in p for p in self.problems()))
+        self.assertEqual('NOT_RUN', self.material['results'][0]['result'])
+
+    def test_threshold_multi_level_and_unsupported_are_one_rule(self):
+        for level, supported, required in [('L0', True, False), ('L0', False, True), ('L1', True, True),
+                                            ('L2', True, True), ('L3', True, True)]:
+            self.missing(level, supported); self.packet['issues'] = []; self.refresh()
+            self.assertEqual(required, bool(self.problems()), (level, supported))
+            if required:
+                self.link_issue(); self.assertEqual([], self.problems())
+        self.config['issue_min_level'] = 2
+        self.missing('L1'); self.refresh(); self.assertEqual([], self.problems())
+
+    def test_written_but_not_run_preserves_execution_gap_without_issue(self):
+        self.result['result'] = 'NOT_RUN'; self.result['case_coverage']['cases'] = it_case_results('NOT_RUN'); self.refresh(); self.assertTrue(self.problems())
+        self.result['decision'] = {'reason': '环境暂不可用', 'uncovered': self.row['scope'], 'level': 'L1',
+                                  'follow_up': '恢复环境后运行', 'proof': proof()}
+        self.refresh(); self.assertEqual([], self.problems())
+        self.assertIn('NOT\\_RUN', self.packet['pull_requests'][0]['body'])
+        self.assertEqual([], self.packet['issues'])
+
+    def test_cross_repository_bidirectional_readback_and_repeat_are_required(self):
+        self.missing(); self.link_issue(); original = copy.deepcopy(self.packet)
+        for _ in range(2): self.assertEqual([], self.problems())
+        self.assertEqual(original, self.packet)
+        for field, value in [('body', '尚未回链'), ('repository', 'wrong/repo'), ('observed_at', ''), ('source_ref', '')]:
+            self.packet = copy.deepcopy(original); self.packet['issues'][0][field] = value
+            self.assertTrue(self.problems(), field)
+        self.packet = copy.deepcopy(original); self.packet['issues'].append(copy.deepcopy(self.packet['issues'][0]))
+        self.assertTrue(self.problems())
+        self.packet = copy.deepcopy(original); self.packet['issues'][0]['body'] = self.url + '0'
+        self.assertTrue(self.problems())
+
+    def test_issue_link_with_underscore_and_shared_issue_snapshot(self):
+        self.missing(); self.link_issue('tapdata/test_framework')
+        self.assertEqual([], self.problems())
+        row = dict(self.row, scope='模块:第二场景')
+        result = copy.deepcopy(self.result); result['scope'] = row['scope']
+        result['case_coverage']['decision']['uncovered'] = row['scope']
+        result['decision']['uncovered'] = row['scope']
+        self.ctx['facts']['fix_plan']['integration_tests'].append(row)
+        self.material['required_scope'].append(row['scope']); self.material['results'].append(result)
+        self.model = {}; self.v.record(self.model, self.material, self.ctx, self.rules)
+        self.packet['pull_requests'][0]['body'] = self.c.summary([self.row, row], self.material, self.version)
+        self.assertEqual([], self.problems()); self.assertEqual(1, len(self.packet['issues']))
+
+    def test_current_head_body_version_and_visible_summary(self):
+        original = copy.deepcopy(self.packet)
+        for field, value in [('headRefOid', 'b' * 40), ('url', self.url + '0'), ('state', 'CLOSED'), ('observed_at', '')]:
+            self.packet = copy.deepcopy(original); self.packet['pull_requests'][0][field] = value
+            self.assertTrue(self.problems(), field)
+        for template in ('<!-- %s -->', '```markdown\n%s\n```', '~~~\n%s\n~~~'):
+            self.packet = copy.deepcopy(original)
+            self.packet['pull_requests'][0]['body'] = template % original['pull_requests'][0]['body']
+            self.assertTrue(self.problems())
+        self.packet = copy.deepcopy(original)
+        self.version = 'develop-v1.0-3-87654321'; self.assertTrue(self.problems())
+
+    def test_plan_head_or_ci_change_invalidates_materials(self):
+        self.missing(); self.link_issue(); self.assertEqual([], self.problems())
+        for field in ('live_revision', 'ci_digest'):
+            old = self.ctx['repositories'][self.repo][field]
+            self.ctx['repositories'][self.repo][field] = 'changed'; self.assertTrue(self.problems())
+            self.ctx['repositories'][self.repo][field] = old
+        self.row['rationale'] = '新判断'; self.assertTrue(self.problems())
+
+    def test_invalid_levels_and_incomplete_coverage_fail_closed(self):
+        for level in ('unknown', 'L-1', 'L1 and L2', ''):
+            self.row['level'] = level; self.refresh(); self.assertTrue(self.problems())
+        self.row['level'] = 'L1'
+        for case in (None, {}, {'status': 'covered'}, {'status': 'not_applicable', 'reason': '不适用', 'framework_supported': True}):
+            self.result['case_coverage'] = case
+            self.model = {}; self.v.record(self.model, self.material, self.ctx, self.rules)
+            self.assertTrue(self.problems())
+
+    def test_legacy_events_keep_their_rules_and_no_false_compatibility(self):
+        old = copy.deepcopy(self.rules); del old['verification_plan']['case_coverage']
+        self.result.pop('case_coverage')
+        state = {'events': [{'command': {'action': 'verification', 'payload': self.material},
+                           'rules': old, 'context': self.ctx}]}
+        before = copy.deepcopy(state); model = quality.replay(state)
+        self.assertEqual([], self.v.problems(model, self.ctx, ['ci'], old))
+        self.assertTrue(self.v.problems(model, self.ctx, ['ci'], self.rules))
+        self.assertEqual(before, state)
+
+    def test_same_scope_multiple_levels_are_independently_accepted(self):
+        low_row = copy.deepcopy(self.row)
+        low_result = copy.deepcopy(self.result)
+        self.missing('L2'); self.link_issue()
+        self.ctx['facts']['fix_plan']['integration_tests'].insert(0, low_row)
+        self.material['results'].insert(0, low_result)
+        self.refresh()
+        self.packet['pull_requests'][0]['body'] = self.c.summary([low_row, self.row], self.material, self.version)
+        self.assertEqual([], self.problems())
+        body = self.packet['pull_requests'][0]['body']
+        self.assertIn('模块:行为 / L1', body)
+        self.assertIn('模块:行为 / L2', body)
+        self.assertIn('尚未完成', body)
+        self.assertEqual('PASS', low_result['result'])
+        self.assertEqual('NOT_RUN', self.result['result'])
+        self.result['case_coverage']['decision']['level'] = 'L1'
+        self.refresh()
+        self.assertTrue(any('当前场景及级别' in p for p in self.problems()))
+        self.result['case_coverage']['decision']['level'] = 'L2'
+        self.result['decision']['level'] = 'L1'
+        self.refresh()
+        self.assertTrue(any('当前场景及级别' in p for p in self.problems()))
+        self.material['results'].pop()
+        self.refresh()
+        self.assertTrue(any('精确覆盖' in p for p in self.problems()))
+
+    def test_duplicate_and_combined_levels_fail_closed(self):
+        self.ctx['facts']['fix_plan']['integration_tests'].append(copy.deepcopy(self.row))
+        self.assertTrue(any('重复' in p for p in self.v.plan_problems(self.rules, self.ctx)))
+        self.ctx['facts']['fix_plan']['integration_tests'].pop()
+        self.material['results'].append(copy.deepcopy(self.result))
+        with self.assertRaisesRegex(ValueError, '重复'):
+            self.refresh()
+        self.material['results'].pop()
+        for value in ('L1,L2', 'L01', 'L1 L2', None):
+            self.row['level'] = value
+            self.assertTrue(self.v.plan_problems(self.rules, self.ctx))
+            self.result['level'] = value
+            with self.assertRaises(ValueError): self.refresh()
+
+    def test_mixed_reuse_modify_new_require_individual_evidence(self):
+        for change in ('modify', 'new'):
+            self.row['cases'].append({'id': change, 'change': change, 'reason': '覆盖新增边界',
+                                      'baseline_ref': 'fixture:original@sha'})
+            self.result['case_coverage']['cases'].append({'id': change, 'status': 'written',
+                'case_ref': 'fixture:' + change + '@current', 'change_ref': 'fixture:diff-' + change,
+                'result': 'PASS', 'report_ref': 'fixture:report-' + change})
+        self.result['tests'] = 3
+        self.refresh(); self.assertEqual([], self.problems())
+        for label in ('复用', '修改', '新增'):
+            self.assertIn(label, self.packet['pull_requests'][0]['body'])
+        actual = self.result['case_coverage']['cases']
+        for field in ('change_ref', 'case_ref', 'report_ref'):
+            old = actual[1].pop(field); self.refresh(); self.assertTrue(self.problems(), field)
+            actual[1][field] = old
+        baseline = self.row['cases'][1].pop('baseline_ref')
+        self.assertTrue(self.v.plan_problems(self.rules, self.ctx))
+        self.row['cases'][1]['baseline_ref'] = baseline
+        original = copy.deepcopy(actual)
+        for cases in (original[:-1], original + [original[0]], original + [dict(original[0], id='extra')]):
+            self.result['case_coverage']['cases'] = cases
+            self.refresh(); self.assertTrue(self.problems())
+        self.result['case_coverage']['cases'] = original
+        original[-1].update(status='missing', result='NOT_RUN')
+        self.refresh(); self.assertTrue(self.problems())
+        original[-1].update(status='written', result='SKIPPED')
+        self.refresh(); self.assertTrue(self.problems())
+        original[-1]['result'] = 'PASS'
+        self.result['tests'] = 2
+        self.refresh(); self.assertTrue(self.problems())
+
+    def test_unwritten_new_case_cannot_claim_coverage_or_pass(self):
+        self.row['cases'][0].update(change='new', reason='新行为')
+        self.missing(); self.link_issue(); self.assertEqual([], self.problems())
+        self.result['case_coverage']['status'] = 'covered'
+        self.refresh(); self.assertTrue(self.problems())
+        self.result['case_coverage']['status'] = 'missing'
+        self.result['result'] = 'PASS'
+        self.refresh(); self.assertTrue(self.problems())
+
+    def test_case_plan_changes_invalidate_prior_material(self):
+        self.row['cases'][0]['change'] = 'modify'
+        self.assertTrue(any('方案' in p for p in self.problems()))
+
+    def test_not_applicable_has_no_cases_and_cannot_pass(self):
+        self.row.update(level='N/A', cases=[])
+        self.result.update(level='N/A', result='NOT_RUN', decision={
+            'reason': '行为不适用 IT', 'uncovered': self.row['scope'], 'level': 'N/A',
+            'follow_up': '保留其它验证', 'proof': proof()})
+        self.result['case_coverage'] = {'status': 'not_applicable', 'reason': '行为无适用 IT',
+                                      'framework_supported': True, 'cases': []}
+        self.refresh(); self.assertEqual([], self.problems())
+        self.result['result'] = 'PASS'; self.refresh(); self.assertTrue(self.problems())
 
 class VerificationContractTests(unittest.TestCase):
     def setUp(self):
@@ -2645,8 +2920,8 @@ class VerificationContractTests(unittest.TestCase):
     def integration_rules(self):
         rules = json.loads((ROOT / "projects/tapdata/quality.json").read_text())
         self.ctx["facts"] = {"fix_plan": {"integration_tests": [{"repository": "a/repo",
-            "scope": "module:behavior", "level": "fixture:知识分级", "knowledge_ref": "fixture:wiki",
-            "rationale": "模块对外行为", "case_strategy": "复用正常路径，新增边界",
+            "scope": "module:behavior", "level": "L1", "knowledge_ref": "fixture:wiki",
+            "rationale": "模块对外行为", "cases": it_plan_cases(), "case_strategy": "复用正常路径，新增边界",
             "execution_plan": "本地与 CI 模块全量，回读真实报告"}]}}
         return rules
 
@@ -2654,6 +2929,8 @@ class VerificationContractTests(unittest.TestCase):
         p = dict(copy.deepcopy(self.p), kind="ci", head_revision="a" * 40,
                  run_ref="fixture:run", checkout_ref="fixture:checkout", attempt=1)
         p["results"][0]["method"] = "integration"
+        p["results"][0]["level"] = "L1"
+        p["results"][0]["case_coverage"] = {"status": "covered", "reason": "真实用例覆盖", "framework_supported": True, "cases": it_case_results()}
         return p
 
     def test_ci_cannot_omit_planned_integration_even_when_other_checks_pass(self):
@@ -2679,13 +2956,14 @@ class VerificationContractTests(unittest.TestCase):
                             ("UNKNOWN", "零用例"), ("UNKNOWN", "缺报告"), ("FAIL", "断言失败")):
             p = self.ci_material()
             p["results"][0].update(result=raw, report_ref="fixture:" + reason)
+            p["results"][0]["case_coverage"]["cases"] = it_case_results(raw)
             if reason == "工作流未触发":
                 p["run_status"] = "not_triggered"
                 for key in ("run_ref", "attempt", "checkout_ref"): p.pop(key)
             model = {}; self.v.record(model, p, self.ctx, rules)
             self.assertTrue(self.v.problems(model, self.ctx, ["ci"], rules))
             decision = {"reason": reason, "uncovered": "module:behavior",
-                        "follow_up": "由研发安排补测；仅确认本次验证缺口", "proof": proof()}
+                        "level": "L1", "follow_up": "由研发安排补测；仅确认本次验证缺口", "proof": proof()}
             p["results"][0]["decision"] = decision
             model = {}; self.v.record(model, p, self.ctx, rules)
             self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], rules))

@@ -28,6 +28,8 @@ Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求
 
 ## 兼容规则
 
+工位 epoch 34 增加项目声明的单级独立验收、逐用例计划与实绩、测试编写情况及 PR 总结/补测 Issue 关联检查，沿用质量事件和 `pr-ready-input.json`，不新增状态账本。原始执行结果与编写缺口决定分别保存，历史事件按当时规则重放；旧客户端不能解释新的提审要求，跨 epoch 必须原版退出并 purge 后重建。字段与操作以[共同验证材料](../docs/usage/quality-checkpoints.md#共同验证材料)为准。
+
 epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读确认，预检结果使用 `preflight_ready`。PR 提审证据复用当前 run 的 `interactions/pr-ready-input.json`，不新增状态账本；旧客户端不能解释具体 Checks 例外及新评论表示，因此切换版本前必须原版归档释放、purge 后重建。旧质量事件保留原评论生成与严格回读，新增 `human-text-v2` 只生成阶段总结。质量 readback 的可选 `body_representation=literal-markdown-v1` 仅用于已核验为字面文本的 Markdown 转换，不解码原文已有反斜杠或其它转义；缺省保持原严格比较。
 
 项目 `plan_contract.review.environment_version=2` 显式启用环境阶段依赖，缺省或版本1保持全部 missing 阻塞 Q2，未知版本拒绝。质量事件已有 rules 快照承载该声明，历史回放使用当时规则，不按当前配置重解释。新增阶段/检查项声明改变旧客户端的解释能力，独立交付时再次提升 epoch；升级与回退均原版退出并 purge，不在线迁移或补造确认。

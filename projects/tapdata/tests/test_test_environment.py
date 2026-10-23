@@ -810,7 +810,7 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
             render_spec.loader.exec_module(render)
             skills = render.project_skill_sources(ROOT, "tapdata")
         self.assertIn(ROOT / "projects/tapdata/skills/tapdata-test-env", skills)
-        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 33)
+        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 34)
 
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，容器健康脚本行为待核验")

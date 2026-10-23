@@ -30,8 +30,12 @@ def plan_problems(rules, ctx):
     seen, repositories = set(), set(ctx["repositories"])
     for row in rows:
         key = (row["repository"], row["scope"])
+        if contract.get("case_coverage"):
+            from workflow import test_coverage
+            key += (row["level"],)
+            errors.extend(test_coverage.plan_case_problems(row))
         if key in seen:
-            errors.append("验证方案范围重复：%s / %s" % key)
+            errors.append("验证方案范围重复：" + " / ".join(key))
         seen.add(key)
         if row["repository"] not in repositories:
             errors.append("验证方案引用未登记仓库：" + row["repository"])
@@ -49,14 +53,24 @@ def coverage_problems(p, rules, ctx):
     from workflow import quality
     if p["kind"] == "ci" and not quality.exact_commit(p["target_revision"]):
         errors.append("CI 验证必须绑定当前完整提交 SHA")
-    results = {r["scope"]: r for r in p["results"]}
+    key = lambda r: (r["scope"], r.get("level")) if contract.get("case_coverage") else r["scope"]
+    results = {key(r): r for r in p["results"]}
+    if len(results) != len(p["results"]):
+        errors.append("验证结果场景/级别重复")
+    if contract.get("case_coverage"):
+        expected = {key(r) for r in plan_rows(rules, ctx) if r["repository"] == p["repository"]}
+        if set(results) != expected:
+            errors.append("IT 验证结果必须精确覆盖计划的场景/级别；请求研发确认缺口")
     for row in plan_rows(rules, ctx):
         if row["repository"] != p["repository"]:
             continue
-        result = results.get(row["scope"])
+        result = results.get(key(row))
         if not result or result.get("method") != contract["method"]:
             errors.append("%s %s 缺少 %s / %s 实测或缺口材料；请求研发确认具体未覆盖范围及处置，不能以其它 Checks 成功替代" %
                           (p["repository"], p["kind"], contract["method"], row["scope"]))
+        elif contract.get("case_coverage"):
+            from workflow import test_coverage
+            errors.extend(test_coverage.case_problems(row, result, contract["case_coverage"]))
     return errors
 
 
@@ -145,7 +159,7 @@ def gap(decision):
     quality.check_proof(proof)
 
 
-def validate(p, ctx):
+def validate(p, ctx, rules=None):
     from workflow import quality
     kind, repo = p.get("kind"), p.get("repository")
     if kind not in KINDS or repo not in ctx["repositories"]:
@@ -163,10 +177,15 @@ def validate(p, ctx):
         if not isinstance(results, list):
             raise ValueError("缺少逐项验证结果")
         seen = []
+        contract = (rules or {}).get("verification_plan") or {}
+        leveled = bool(contract.get("case_coverage") and kind in contract.get("kinds", []))
         for result in results:
             if not isinstance(result, dict) or result.get("scope") not in required:
                 raise ValueError("验证结果范围不属于应测清单")
-            seen.append(result["scope"])
+            seen.append((result["scope"], result.get("level")) if leveled else result["scope"])
+            if leveled:
+                from workflow import test_coverage
+                test_coverage.levels(result)
             if result.get("result") not in ("PASS", "FAIL", "UNKNOWN", "NOT_RUN", "SKIPPED"):
                 raise ValueError("验证结果无效")
             nonempty(result.get("report_ref"), "报告或缺失原因来源")
@@ -180,7 +199,8 @@ def validate(p, ctx):
                 gap(result["decision"])
                 if result["decision"]["uncovered"] != result["scope"]:
                     raise ValueError("人工决定必须精确对应当前缺口范围")
-        if set(seen) != set(required) or len(seen) != len(set(seen)):
+        scopes = {key[0] for key in seen} if leveled else set(seen)
+        if scopes != set(required) or len(seen) != len(set(seen)):
             raise ValueError("应测范围存在遗漏或重复结果")
         jars = p.get("jars", [])
         if not isinstance(jars, list):
@@ -248,7 +268,7 @@ def validate(p, ctx):
 
 
 def record(model, p, ctx, rules=None):
-    validate(p, ctx)
+    validate(p, ctx, rules)
     revisions, scope = binding(p, ctx)
     value = {"data": copy.deepcopy(p), "versions": revisions, "bindings": scope}
     contract = (rules or {}).get("verification_plan")

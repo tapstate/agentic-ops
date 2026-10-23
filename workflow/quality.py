@@ -85,7 +85,7 @@ def config(base, task=None):
         if "verification_plan" in result:
             declaration = result["verification_plan"]
             if (not isinstance(declaration, dict)
-                    or set(declaration) != {"fact_key", "field", "method", "kinds", "schema"}
+                    or set(declaration) - {"case_coverage"} != {"fact_key", "field", "method", "kinds", "schema"}
                     or declaration.get("fact_key") not in result.get("plan_fact_keys", [])
                     or not isinstance(declaration.get("field"), str) or not declaration["field"].strip()
                     or not isinstance(declaration.get("method"), str) or declaration["method"] not in result["methods"]
@@ -93,6 +93,9 @@ def config(base, task=None):
                     or any(k not in ("local", "ci") for k in declaration["kinds"])
                     or not isinstance(declaration.get("schema"), dict)):
                 raise ValueError("验证方案配置无效")
+            if "case_coverage" in declaration:
+                from workflow import test_coverage
+                test_coverage.validate_config(declaration["case_coverage"])
         if profile is not None:
             validate_task_profile(result, task)
             required = {f["key"] for f in cls.get("required_facts", [])}
