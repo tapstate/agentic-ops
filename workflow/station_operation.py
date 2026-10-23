@@ -168,6 +168,8 @@ def save(base, operation):
 def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, kind="clean"):
     """先在原任务操作记录固化完整交接，再替换；任何中断点都有唯一后继。"""
     previous = read(base)
+    if previous and previous.get('request', {}).get('handoff') is not None and not previous.get('handoff_readback'):
+        raise ValueError('接续点 Jira 写入尚未核实；先回读，明确尚未发送才可取消，不能直接清理')
     if previous and previous.get('archive_result', {}).get('status') == 'awaiting_decision':
         raise ValueError('归档仍待用户决定，先恢复原操作处理归档，不能以 clean 绕过')
     if previous is None or previous["kind"] not in ("takeover", "scope_change", "replan", "archive") or previous["status"] == "done":

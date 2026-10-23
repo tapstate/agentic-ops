@@ -132,6 +132,49 @@ def _archive_checkpoint(base, task, operation, checkpoint, decision=None):
     return True
 
 
+def _handoff_archive(base, task, operation, candidate=None, jira_readback=None):
+    from workflow import task_handoff
+    if 'archive_payload' not in operation:
+        payload = archives.prepare(base, task, operation['request'], operation)
+        payload['snapshot'] = {'handoff': candidate}
+        operation['archive_payload'] = payload
+        operation['phase'] = 'awaiting_jira'
+        operations.save(base, operation)
+    candidate = operation['archive_payload']['snapshot']['handoff']
+    if jira_readback is not None:
+        receipt = task_handoff.verify_readback(candidate, jira_readback)
+        old = operation.get('handoff_readback')
+        if old and old != receipt:
+            raise ValueError('已有不同 Jira 回读，先核对原操作，不能替换')
+        operation['handoff_readback'] = receipt
+        operations.save(base, operation)
+    if not operation.get('handoff_readback'):
+        operation['archive_result'] = {
+            'status': 'awaiting_jira', 'content_digest': candidate['digest'],
+            'site': candidate['site'], 'issue_key': task['issue_key'], 'body': candidate['body'],
+            'guidance': '先查找并回读相同接续点；未写入时按原授权用原生 Jira 工具保存。结果未知先回读，再沿原 operation 提交 --jira-readback。'}
+        operations.save(base, operation)
+        return operation
+    receipt = operation['handoff_readback']
+    if receipt.get('status') == 'not_sent':
+        operation['archive_result'] = {'status': 'discarded', 'reason': '明确未发送，取消本次准备；旧接续点保持有效',
+                                       'content_digest': candidate['digest'], 'decision_ref': receipt['decision_ref']}
+        operations.finish(base, operation)
+        return operation
+    operation['archive_payload']['snapshot']['jira'] = {
+        key: receipt[key] for key in ('site', 'issue_key', 'comment_id')}
+    result = {'status': 'saved', 'storage': 'jira', 'content_digest': candidate['digest'],
+              'jira': receipt, 'snapshot_digest': baseline.digest(operation['archive_payload']['snapshot']),
+              'guidance': '仅对应已回读正文中的成果；后续新增修改仍须保存或明确放弃。'}
+    try:
+        result['local_reference'] = archives.publish(base, task, operation['request'], operation=operation)
+    except OSError as error:
+        result['local_warning'] = type(error).__name__ + '：本地副本未保存，Jira 接续点已核实；新工位不依赖本地档案'
+    operation['archive_result'] = result
+    operations.finish(base, operation)
+    return operation
+
+
 def _clear_active(base, operation):
     """受管活动状态移除不依赖档案；错误保持可恢复，不伪造解绑。"""
     from workflow import station_directories as directories
@@ -160,7 +203,7 @@ def _clear_active(base, operation):
     directories.sync(root)
 
 
-def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode='execute', allow_product_lifecycle=False, archive_decision=None):
+def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode='execute', allow_product_lifecycle=False, archive_decision=None, jira_readback=None):
     if kind not in ('clean', 'release', 'archive', 'work-clean') or cleanup_mode not in ('execute', 'prepare', 'verify'):
         raise ValueError('清理操作或模式无效')
     if request.get('cleanup_version', 7) != 7:
@@ -170,6 +213,15 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
         current = task_store.read_current(base)
         task = task_store.read_task(base)
         same = old and old['operation_id'] == operation_id
+        candidate = None
+        if archive_decision and 'handoff' in request:
+            raise ValueError('持久归档请提交 Jira 回读；明确未发送时使用 not_sent 取消，不能使用本地归档决定')
+        if jira_readback is not None and (kind != 'archive' or 'handoff' not in request):
+            raise ValueError('Jira 接续回读只适用于持久归档')
+        if kind == 'archive' and 'handoff' in request and not same:
+            from workflow import task_handoff
+            task = task_store.check_expected_run(base, issue, run_id)
+            candidate = task_handoff.prepare(base, task, request['handoff'])
         if archive_decision and (not same or kind not in ('archive', 'release')):
             raise ValueError('归档决定只能恢复原归档或 release 操作')
         if same:
@@ -179,6 +231,11 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operation = old
             task = task or operation.get('exit_task')
             if operation['status'] == 'done' and cleanup_mode != 'verify':
+                if jira_readback is not None:
+                    from workflow import task_handoff
+                    receipt = task_handoff.verify_readback(operation['archive_payload']['snapshot']['handoff'], jira_readback)
+                    if receipt != operation.get('handoff_readback'):
+                        raise ValueError('已完成归档不能替换原 Jira 回读')
                 return operation
         else:
             if kind != 'work-clean':
@@ -201,6 +258,8 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operation['exit_task'] = task
             operations.save(base, operation)
         if kind == 'archive':
+            if 'handoff' in request:
+                return _handoff_archive(base, task, operation, candidate, jira_readback)
             if not _archive_checkpoint(base, task, operation, 'archive', archive_decision):
                 return operation
             operations.finish(base, operation)
@@ -304,6 +363,8 @@ def main(argv=None):
     parser.add_argument('--clear-config', action='append', default=[])
     parser.add_argument('--operation-id')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--handoff-input', help='Agent 整理的持久接续材料 JSON')
+    parser.add_argument('--jira-readback', help='原生 Jira 回读 JSON，仅核验不发送')
     parser.add_argument('--archive-decision', choices=('retry', 'discard'))
     parser.add_argument('--expected-archive-digest')
     parser.add_argument('--verify-result', action='store_true')
@@ -320,6 +381,15 @@ def main(argv=None):
     task = task_store.read_task(args.dir)
     operation = operations.read(args.dir)
     if not args.execute and not args.resume or args.check:
+        if args.action == 'archive':
+            from workflow import task_handoff
+            if task is None or not args.handoff_input:
+                raise ValueError('归档预检需要当前任务和 --handoff-input')
+            with task_store.task_state_lock(args.dir):
+                task = task_store.read_task(args.dir)
+                preview = task_handoff.prepare(args.dir, task, json.loads(Path(args.handoff_input).read_text()))
+            emit({'status': 'preview', 'handoff': preview, 'boundary': 'Git 远端只读核验；尚未写入 Jira'}, args.details, args.output, args.dir)
+            return 0
         emit(check(args.dir, task, {'clear_config': args.clear_config}), args.details, args.output, args.dir)
         return 0
     if args.resume:
@@ -329,6 +399,10 @@ def main(argv=None):
         issue = (task or operation.get('exit_task') or {}).get('issue_key')
     else:
         kind, request = args.action, {'clear_config': args.clear_config}
+        if kind == 'archive':
+            if not args.handoff_input:
+                raise ValueError('任务归档需 --handoff-input；计划/进度由 Agent 整理，代码由程序核验')
+            request['handoff'] = json.loads(Path(args.handoff_input).read_text())
         if not task and kind != 'work-clean':
             print(json.dumps({'status': 'idle', 'released': True}, ensure_ascii=False)); return 0
         op = args.operation_id or 'op-' + uuid.uuid4().hex
@@ -337,7 +411,8 @@ def main(argv=None):
         issue = task['issue_key'] if task else None
     result = execute(args.dir, kind, issue, run_id, revision, op, request,
                      'verify' if args.verify_result else 'prepare' if args.prepare_only else 'execute',
-                     archive_decision={'action': args.archive_decision, 'digest': args.expected_archive_digest} if args.archive_decision else None)
+                     archive_decision={'action': args.archive_decision, 'digest': args.expected_archive_digest} if args.archive_decision else None,
+                     jira_readback=json.loads(Path(args.jira_readback).read_text()) if args.jira_readback else None)
     emit({'operation_id': result['operation_id'], 'status': result['status'],
           'cleanup': result.get('cleanup_result'), 'archive': result.get('archive_result')}, args.details, args.output, args.dir)
     return 0

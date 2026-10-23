@@ -151,20 +151,20 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new')
 
-    def test_test_coverage_epoch_thirty_four_boundary(self):
+    def test_handoff_epoch_thirty_five_boundary(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(manifest(34), current)
+        self.assertEqual(manifest(35), current)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
-        path.write_text(json.dumps({'station_state_epoch': 34}))
+        path.write_text(json.dumps({'station_state_epoch': 35}))
         before = path.read_bytes()
         self.write_registry([str(self.station)])
         for operation in ('update', 'rollback'):
-            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(34), manifest(34)]):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(35), manifest(35)]):
                 compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
         compatibility.require_station_can_adopt(self.product_root, self.station)
         self.assertEqual(before, path.read_bytes())
-        for epoch in range(1, 34):
+        for epoch in range(1, 35):
             with self.subTest(epoch=epoch):
                 path.write_text(json.dumps({'station_state_epoch': epoch}))
                 before = path.read_bytes()
@@ -172,9 +172,16 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.require_station_can_adopt(self.product_root, self.station)
                 self.assertEqual(before, path.read_bytes())
 
+    def test_handoff_rejects_bound_upgrade_and_rollback(self):
+        self.write_registry([str(self.station)])
+        for operation, epochs in (('update', (34, 35)), ('rollback', (35, 34))):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(e) for e in epochs]):
+                with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
+                    compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
+
     def test_ci_plan_epoch_rejects_epoch_twenty_two_and_bound_switch(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(34, current['station_state_epoch'])
+        self.assertGreaterEqual(current['station_state_epoch'], 24)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 22}))
@@ -191,7 +198,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_merged_cleanup_epoch_rejects_both_epoch_twenty_three_candidates(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(34, current['station_state_epoch'])
+        self.assertGreaterEqual(current['station_state_epoch'], 24)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 23}))
@@ -208,7 +215,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(34, current["station_state_epoch"])
+        self.assertGreaterEqual(current["station_state_epoch"], 17)
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))

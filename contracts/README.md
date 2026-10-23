@@ -28,6 +28,8 @@ Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求
 
 ## 兼容规则
 
+工位 epoch 35 增加持久归档的待 Jira 回读操作与明确未发送取消语义，复用原 operation 记录。旧客户端不能把这一状态当成本地快照已完成，升级与回退仍遵守同 epoch 限制；详情见[持久接续点操作](../docs/usage/task-archive-and-resume.md#持久接续点操作)。
+
 工位 epoch 34 增加项目声明的单级独立验收、逐用例计划与实绩、测试编写情况及 PR 总结/补测 Issue 关联检查，沿用质量事件和 `pr-ready-input.json`，不新增状态账本。原始执行结果与编写缺口决定分别保存，历史事件按当时规则重放；旧客户端不能解释新的提审要求，跨 epoch 必须原版退出并 purge 后重建。字段与操作以[共同验证材料](../docs/usage/quality-checkpoints.md#共同验证材料)为准。
 
 epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读确认，预检结果使用 `preflight_ready`。PR 提审证据复用当前 run 的 `interactions/pr-ready-input.json`，不新增状态账本；旧客户端不能解释具体 Checks 例外及新评论表示，因此切换版本前必须原版归档释放、purge 后重建。旧质量事件保留原评论生成与严格回读，新增 `human-text-v2` 只生成阶段总结。质量 readback 的可选 `body_representation=literal-markdown-v1` 仅用于已核验为字面文本的 Markdown 转换，不解码原文已有反斜杠或其它转义；缺省保持原严格比较。

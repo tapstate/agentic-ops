@@ -10,9 +10,41 @@
 
 本文提供操作顺序和请求示例。授权与接续记录遵循[任务授权指引](task-authorization.md#从-jira-任务接续)，产品切换遵循[更新与回退](update-and-rollback.md#任务处理中升级后继续)，本地归档和清理语义以[工位合同](../architecture/single-task-station.md)为准。实际进度、阻塞和验收写入 Jira，不写入本文。
 
-当前归档按[工位合同](../architecture/single-task-station.md#8-脚本执行异常接力与恢复)尽力记录已有状态和引用，不要求抓取平台会话或先补齐一套准入材料。归档缺项如实披露，写入失败按原操作处理，不能将缺项与写入失败混为一谈。原安装的行为须单独核验；原版读取或清理存在缺陷时，先保全并核验匹配版本的恢复候选，不以新版可启动或档案目录存在证明旧工位已退出。
+release 内部本地快照按[工位合同](../architecture/single-task-station.md#8-脚本执行异常接力与恢复)尽力记录已有状态和引用，不要求抓取平台会话或先补齐一套准入材料。归档缺项如实披露，写入失败按原操作处理，不能将缺项与写入失败混为一谈。原安装的行为须单独核验；原版读取或清理存在缺陷时，先保全并核验匹配版本的恢复候选，不以新版可启动或档案目录存在证明旧工位已退出。
 
 请求移除工位时，应先核验本工位的任务与原清理操作，再按[退出合同](../architecture/single-task-station.md#8-脚本执行异常接力与恢复)展示任务退出及受管注销范围。结果分别说明归档覆盖、实际释放与注销；清理中断后的占用取决于实际解绑结果，可能已经释放但仍有待收尾操作，必须回读，不能从档案或错误退出码推断。缺陷处理结束应说明根因、具体修改、候选与实际安装版本及验证，设计修正不表述为代码已生效。
+
+## 持久接续点操作
+
+本节对应源码候选新增的持久归档入口，安装版本必须实际包含该能力并满足机器 epoch 合同；不代表旧安装已更新。`release` 内部仍使用本地尽力快照，不能把它当成 Jira 接续点已保存。两个目标清理操作和闲置接管仍按工位合同标注实现状态。
+
+Agent 先核实已有方案与实际进度，整理 JSON（不是要求研发填写表单）：`plan`、`progress`、`remaining`、`environment` 为必要文本；`evidence` 可提供已核实的持久引用；需放弃本次代码时 `discard_repositories` 按仓库记录明确决定来源，既不删除代码也不授权远端删除。未知外部操作须先回读，或在 `unresolved_operations` 按待办 kind 给出原操作、对象和回读线索。程序不能认证这些语义材料，Agent 仍需核对可信事实。
+
+```sh
+python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action archive --handoff-input <材料.json>
+```
+
+程序检查保留代码的工作区、分支、历史基线及远端 Head；不会执行 commit/push。返回 `awaiting_jira`、稳定正文和内容摘要，保存原操作。Agent 用原生 Jira 工具查找相同摘要并回读；已有相同正文则复用，确认未写入且有授权才新增评论，未知结果禁止重发。正文包含可读取的方案、进度、代码引用与环境缺项，不含旧授权或阶段迁移数据。
+
+将原生回读整理为 `site/issue_key/comment_id/body/source_ref`，原操作继续：
+
+```sh
+python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --jira-readback <回读.json>
+```
+
+尚未调用外部写入且决定取消时，同一回读文件可使用 `status=not_sent`、`decision_ref` 代替 `comment_id`，仍须绑定 site/issue_key/body/source_ref；这是明确未发送的决定，不是查不到评论就可推定未写入。取消不删除旧接续点；未核实发送结果时禁止改走清理。
+
+只有对象与正文匹配才返回 `saved`、`storage=jira`。Jira 与 Git 无跨服务事务，不把部分保存当成整体成功；本地副本写入遇到 I/O 故障时明确警告，已核实的 Jira 接续点仍有效。原操作写回失败先回读再恢复；本地档案不是新工位的依赖。归档只覆盖正文对应成果，归档后新增变更须另存或明确放弃。
+
+多次归档沿同一流程：有变化产生新摘要，无变化要求复用相同 Jira 评论；原生查重与回读由 Agent 执行，程序不隐式联网查询 Jira。失败的新点不取代上次有效点。恢复 Agent 从 Jira 选取最新可核实的有效正文；不同记录冲突时先解释事实，不能只按评论时间覆盖业务决定。
+
+新工位核实正文中的 JSON 与摘要后，可提取既有接管输入：
+
+```sh
+python3 <product-root>/workflow/task.py handoff-continuations --dir <new-station> --input <正文中的JSON.json> --expected-digest <接续点摘要>
+```
+
+输出供现有 `takeover --continuation-input` 使用；缺失或变化的分支、历史基线与 Head 仍由接管入口核验。方案与进度由 Agent 按当前检查点补录，不能直接赋值旧阶段。放弃的代码不进入续办输入；新工位重新配置环境并补齐剩余工作。同工位继续仍沿原 run/op。
 
 ## 何时需要存档
 

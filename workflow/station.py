@@ -348,6 +348,6 @@ def apply_completion(task, proof):
     task.update(outcome="completed", stage="completed", terminal_proof=proof)
 
 
-def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode="execute"):
+def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode="execute", jira_readback=None):
     from workflow import station_clean
-    return station_clean.execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode)
+    return station_clean.execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode, jira_readback=jira_readback)

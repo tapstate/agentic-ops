@@ -153,6 +153,8 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 补充必要用例后，执行最终范围的本地验证并回读对应 PR CI；关联当前源码、用例、依赖 Jar 和报告。若 Merge 或后续处理改变版本，旧执行按原版本保留，不能改写为当前结果；来源已包含且代码、用例及依赖全部未变时可引用仍有效的原执行并说明核对依据。失败按同一问题的累计修复记录续办；研发引导处理后重做受影响环节，不默认清空任务或从头开始。
 
+归档材料与原生 Jira 回读操作统一见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。归档不是自动提交或推送授权；缺少远端代码时先按有效授权保全，或记录研发明确放弃的仓库。
+
 ## 清理与退出
 
 用户已明确请求时，直接调用清理脚本；不要求先由 AI 分析、手写精确清单或准备会话输入。环境配置默认保留，源码、索引和工作区修改不被清理覆盖。需要预览时使用 --check，但它不是执行前置。
@@ -160,7 +162,7 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 ```sh
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action work-clean
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action clean
-python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action archive
+python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action archive --handoff-input <Agent整理的接续材料.json>
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action release
 ```
 

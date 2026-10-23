@@ -103,11 +103,23 @@ def cmd_takeover(args):
     return 0
 
 
+def cmd_handoff_continuations(args):
+    from workflow import task_handoff, engineering_baseline
+    packet = json.loads(Path(args.input).read_text(encoding='utf-8'))
+    if engineering_baseline.digest(packet) != args.expected_digest:
+        raise ValueError('接续正文摘要不匹配，先核对 Jira 最新有效接续点')
+    print(json.dumps(task_handoff.continuation_input(packet), ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_lifecycle(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if args.cmd == 'archive' and 'handoff' not in request:
+        raise ValueError('任务归档 input 需包含 handoff（plan/progress/remaining/environment）；先整理持久接续材料')
+    readback = json.loads(Path(args.jira_readback).read_text()) if args.jira_readback else None
     result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
-                             args.expected_revision, args.operation_id, request)
+                             args.expected_revision, args.operation_id, request, jira_readback=readback)
     print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
     return 0
 
@@ -765,6 +777,11 @@ def main():
     p.add_argument("--expected-revision", required=True, type=int)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_takeover)
+    p = sub.add_parser('handoff-continuations', help='从已回读的接续正文提取现有 takeover 输入，不导入阶段或授权')
+    p.add_argument('--input', required=True)
+    p.add_argument('--expected-digest', required=True)
+    p.add_argument('--dir', default='.')
+    p.set_defaults(func=cmd_handoff_continuations)
     for kind in ("archive", "release", "clean"):
         p = sub.add_parser(kind)
         p.add_argument("--issue-key", required=True)
@@ -774,6 +791,7 @@ def main():
         p.add_argument("--input", required=True)
         p.add_argument("--dir", default=".")
         p.add_argument("--details", action="store_true")
+        p.add_argument("--jira-readback", help="原生 Jira 回读 JSON；不执行网络写入")
         p.set_defaults(func=cmd_lifecycle)
     p = sub.add_parser("cleanup-plan")
     p.add_argument("--issue-key", required=True)
