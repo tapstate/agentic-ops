@@ -176,10 +176,10 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual({'issue_key': 'TAP-123', 'run_id': 'run-test', 'status': 'in_progress',
                           'stage': 'waiting_takeover'}, query()['task'])
 
-    def test_station_status_rejects_incompatible_epoch_before_reading_task(self):
+    def test_station_status_rejects_invalid_origin_before_reading_task(self):
         init_path = self.station / '.agenticops/init.json'
         init = json.loads(init_path.read_text())
-        init['station_state_epoch'] += 1
+        init['station_state_epoch'] = True
         init_path.write_text(json.dumps(init))
         state = self.station / '.agenticops/current-task.json'
         state.write_text('invalid old state')

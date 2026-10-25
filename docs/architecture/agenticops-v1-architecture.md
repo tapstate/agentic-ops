@@ -48,7 +48,7 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 产品切换仍由 Bootstrap 保证代码版本一致和调用互斥，采用新版指引仍须核验会话生效；它不读取并转换业务任务。各功能满足当前条件后继续任务，状态采用细则见[工位合同](single-task-station.md#修补后继续现有任务的目标设计)。复杂度约束沿用维护规范，不在本层增加兼容编排。
 
-现有 epoch 检查尚未被上述能力替代。第 4、7、8 节涉及代际切换和重新接管的内容描述当前实现；只有受影响功能的诊断、保全、采用与恢复通过验收后，才调整对应保护。
+新版 validation: feature 将依赖校验交回所属功能，支持范围与旧在途操作限制只在工位合同维护。本文后续涉及跨 epoch 退出和重新接管的描述适用于未声明该模式的旧客户端或回退目标；新模式不删除或转换任务，当前缺项仍由现有功能入口处理。
 
 ## 3. 通用 Agent 适配
 
@@ -70,7 +70,7 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 - `.local/product.json` 记录仓库、跟踪分支、生命周期同步提交及 `source_pool`；`.local/gate/events.jsonl` 只记录直接在安装目录执行且无法归属任务的门禁事件，避免把产品状态误写成项目工位状态；
 - 安装目录不包含 `internal/` 或仅供产品维护的 Skill。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于明确共享安装影响范围；旧模式跨 epoch 另要求全部解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
 安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 负责准备、快进更新和本地核验；Workflow 在新接管预检通过后、创建 run 之前按 Project Profile 的 `wiki_update_before_takeover` 配置复用该能力。TapData 启用新接管前自动准备并更新 Wiki，原 run 和在途操作恢复跳过；初始化和查询不自动刷新。更新失败明确提示，仅暂停依赖 Wiki 的工作，不增加任务门禁。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
@@ -94,7 +94,7 @@ takeover 先完成只读预检，再登记操作与任务并准备独立源码�
 
 Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 要求当前任务和原操作先结束，再移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
 
-同版本生成→任务闭环→purge→生成先独立验收。当前升级器只编排产品切换，不解释旧任务；epoch 判定、登记及原版退出要求统一见[工位合同](single-task-station.md#10-升级与恢复)，当前操作见[更新与回退](../usage/update-and-rollback.md)。这些限制仍有效，不代表上文功能内聚目标已实现。
+同版本生成→任务闭环→purge→生成先独立验收。当前升级器只编排产品切换，不解释旧任务；epoch 判定、登记及原版退出要求统一见[工位合同](single-task-station.md#10-升级与恢复)，当前操作见[更新与回退](../usage/update-and-rollback.md)。支持范围与局部未完成能力以该合同为准，不将安装成功等同于任务通过。
 
 安装采用 `blob:none` 部分克隆，安装更新必须依次执行“显式补齐材料→本地核验→切换版本”。Bootstrap 先核验产品记录、来源远端和原/目标提交归属，再从 Git 树枚举两端安装范围并集的文件对象（包含两端兼容清单），向已核验的 `origin` 显式请求缺失对象，并本地回读确认。cone 安装包含根文件、所选目录的祖先文件；范围刷新先作用于当前版本，故只补目标文件或只补两端兼容清单均不足。排除的维护目录不整树下载，不改变部分克隆过滤器；获取失败不自动换远端或重试，不检出、不更新版本记录或工位。版本快进显式禁用 Git 的整仓 diffstat：该显示统计会读取排除目录的文件对象，不能为了输出统计而下载维护源码。该边界同样适用于定点更新与维护恢复；它不在线迁移任务，也不改变工位 epoch。
 

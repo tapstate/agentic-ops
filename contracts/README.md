@@ -1,5 +1,6 @@
 # AgenticOps 标准契约
 
+工位兼容清单的 `validation: feature` 表示由各功能核验所需状态，epoch 作为来源信息保留；未声明时仍为旧 epoch 模式。支持范围及旧操作限制以[工位合同](../docs/architecture/single-task-station.md#10-升级与恢复)为准。下述跨 epoch 强制退出描述仅适用于旧模式。
 `contracts/` 维护显式 Gate API、声明式 Agent 接线与工位状态的机器合同。本文导航各合同职责与兼容边界；分层与执行保证以[工程架构](../docs/architecture/agenticops-v1-architecture.md)为准。
 
 Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.arguments` 声明，Bootstrap 按参数数组传递，再追加使用者参数，不执行 shell 二次解析。旧 Manifest 不声明时仍使用空参数数组；这不改变工位状态格式或 epoch。Codex 的当前默认值与原生审批含义见[Codex Adapter](../adapters/agents/codex/README.md)。
@@ -13,32 +14,32 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
 - `station-layout.json`：工位固定路径、结构角色和合法动作能力，由 Bootstrap 与 Workflow 共同读取，不提供默认清理动作。
-- `station-reset.schema.json`：唯一现役版本 7 的清单快照、精确处理对象、保留项与残留；旧计划必须由原版本退出，不在线转换。历史档案保留，不作为可恢复执行合同。
+- `station-reset.schema.json`：当前整区清理计划，格式版本以 Schema 为准；未完成旧计划须由原版本核实收尾，不在线转换。历史档案保留，不作为可恢复执行合同。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
 - `jira-field-readback.schema.json`：字段同步回读输入，绑定当前本地事实摘要及 Jira 来源，不修改本地有效事实。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 
-Manifest v3 删除 `entrypoint`、`hook` 和 `capabilities`，不再要求 Agent 提供 Python Hook；`adapter_version` 只标识平台接线修订。可选 `retired_artifacts` 仍用于显式移除已核验归属的托管产物，不能删除用户修改文件。注册器不解析旧版 Manifest，也不提供工具拦截模式开关。Gate v1 继续支持独立测试和显式调用，但不接入使用者原生工具；以下 Gate 目标字段不代表当前 Jira 同步有强制单次调用保证。删除旧 Hook 执行依赖属于工位接线读用语义不兼容，必须通过 epoch 边界由原版本退出并 purge 后重建，不能靠新版扫描或在线迁移旧任务。
+Manifest v3 删除 `entrypoint`、`hook` 和 `capabilities`，不再要求 Agent 提供 Python Hook；`adapter_version` 只标识平台接线修订。可选 `retired_artifacts` 仍用于显式移除已核验归属的托管产物，不能删除用户修改文件。注册器不解析旧版 Manifest，也不提供工具拦截模式开关。Gate v1 继续支持独立测试和显式调用，但不接入使用者原生工具；以下 Gate 目标字段不代表当前 Jira 同步有强制单次调用保证。旧 Hook 退役仍须沿受支持入口显式确认归属，不通过删除任务记录代替接线迁移。
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
-工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。该清单只维护单调递增的 `station_state_epoch`：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；升级与回退也只比较这个值，不另设旧 epoch 映射、支持列表或最低 updater protocol。`station-init.schema.json` 要求新工位记录当前 epoch 和自己的 cleanup 清单；项目清单由 `projects/<project>/station-clean.json` 提供，执行与保护由统一 Workflow 负责。初始化合同；缺少该字段的工位不受支持，必须由原版本完成任务归档、释放并 purge。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
+工位兼容清单由同名 Schema 校验；`station_state_epoch` 保留单调递增的来源标识，`validation: feature` 将执行条件交给所属功能检查。旧客户端没有该声明时仍按其原 epoch 合同运行。`station-init.schema.json` 记录生成来源和 cleanup 清单；刷新旧工位保留来源 epoch，不用改标记代替校验。升级与回退的唯一规则见[工位合同](../docs/architecture/single-task-station.md#10-升级与恢复)，这里不另维护支持列表或逐版本转换规则。
 
 ## 兼容规则
 
-工位 epoch 36 在 current-task 信封增加可选 `execution_control`，由受管写入入口核对会话；旧客户端会忽略或丢失占用，因此不能跨代际直接采用。结构与交接行为见[执行接管](../docs/architecture/single-task-station.md#执行接管当前源码)。
+工位 epoch 36 在 current-task 信封增加可选 `execution_control`，由受管写入入口核对会话；旧客户端会忽略或丢失占用，不能用旧版执行新版状态。结构与交接行为见[执行接管](../docs/architecture/single-task-station.md#执行接管当前源码)。
 
-工位 epoch 35 增加持久归档的待 Jira 回读操作与明确未发送取消语义，复用原 operation 记录。旧客户端不能把这一状态当成本地快照已完成，升级与回退仍遵守同 epoch 限制；详情见[持久接续点操作](../docs/usage/task-archive-and-resume.md#持久接续点操作)。
+工位 epoch 35 增加持久归档的待 Jira 回读操作与明确未发送取消语义，复用原 operation 记录。旧客户端不能把这一状态当成本地快照已完成，切换遵循工位合同，不能丢弃在途回读；详情见[持久接续点操作](../docs/usage/task-archive-and-resume.md#持久接续点操作)。
 
-工位 epoch 34 增加项目声明的单级独立验收、逐用例计划与实绩、测试编写情况及 PR 总结/补测 Issue 关联检查，沿用质量事件和 `pr-ready-input.json`，不新增状态账本。原始执行结果与编写缺口决定分别保存，历史事件按当时规则重放；旧客户端不能解释新的提审要求，跨 epoch 必须原版退出并 purge 后重建。字段与操作以[共同验证材料](../docs/usage/quality-checkpoints.md#共同验证材料)为准。
+工位 epoch 34 增加项目声明的单级独立验收、逐用例计划与实绩、测试编写情况及 PR 总结/补测 Issue 关联检查，沿用质量事件和 `pr-ready-input.json`，不新增状态账本。原始执行结果与编写缺口决定分别保存，历史事件按当时规则重放；旧客户端不能解释新的提审要求；新版按当前要求复查，不沿用失效批准。字段与操作以[共同验证材料](../docs/usage/quality-checkpoints.md#共同验证材料)为准。
 
-epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读确认，预检结果使用 `preflight_ready`。PR 提审证据复用当前 run 的 `interactions/pr-ready-input.json`，不新增状态账本；旧客户端不能解释具体 Checks 例外及新评论表示，因此切换版本前必须原版归档释放、purge 后重建。旧质量事件保留原评论生成与严格回读，新增 `human-text-v2` 只生成阶段总结。质量 readback 的可选 `body_representation=literal-markdown-v1` 仅用于已核验为字面文本的 Markdown 转换，不解码原文已有反斜杠或其它转义；缺省保持原严格比较。
+epoch 27 将 PR Ready 的完成语义收敛为 GitHub 已退出 Draft 且回读确认，预检结果使用 `preflight_ready`。PR 提审证据复用当前 run 的 `interactions/pr-ready-input.json`，不新增状态账本；旧客户端不能解释具体 Checks 例外及新评论表示，不能据旧版提审结果推定当前条件已满足。旧质量事件保留原评论生成与严格回读，新增 `human-text-v2` 只生成阶段总结。质量 readback 的可选 `body_representation=literal-markdown-v1` 仅用于已核验为字面文本的 Markdown 转换，不解码原文已有反斜杠或其它转义；缺省保持原严格比较。
 
 项目 `plan_contract.review.environment_version=2` 显式启用环境阶段依赖，缺省或版本1保持全部 missing 阻塞 Q2，未知版本拒绝。质量事件已有 rules 快照承载该声明，历史回放使用当时规则，不按当前配置重解释。新增阶段/检查项声明改变旧客户端的解释能力，独立交付时再次提升 epoch；升级与回退均原版退出并 purge，不在线迁移或补造确认。
 
-来源同步验证的新事件由写入口生成 `binding_version=2`，仅绑定所属仓的源码版本与七字段仓库登记摘要；无该字段的历史事件保持全仓语义。未知版本及其它验证种类使用该字段必须拒绝，调用者不能指定该内部版本。`local/ci/review` 不改变失效范围。旧客户端不能理解新证据语义，因此跨 epoch 必须原版退出并 purge，不转换历史事件。
+来源同步验证的新事件由写入口生成 `binding_version=2`，仅绑定所属仓的源码版本与七字段仓库登记摘要；无该字段的历史事件保持全仓语义。未知版本及其它验证种类使用该字段必须拒绝，调用者不能指定该内部版本。`local/ci/review` 不改变失效范围。旧客户端不能理解新证据语义；历史事件按自身版本解释，不转换或伪造批准。
 
 `authorization.py renew` 使用 expected-run-id 与 expected-authorization-digest 双重绑定，只延长未撤销、方案摘要及仓库绑定不变的授权有效期；renewals 保存决定者、确认来源、前后有效期和原授权摘要。`show --digest` 只输出当前授权的规范化 SHA256。任务的 `completed` 阶段是验收提交点；同 run 的 `advance --expected-stage ci_validation` 重试可以收敛授权撤销及注册状态，成功收敛后重复调用不再写入。除该终态恢复外，过期阶段请求仍拒绝。
 

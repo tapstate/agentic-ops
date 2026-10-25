@@ -4,8 +4,16 @@
   "title": "AgenticOps Station State Compatibility",
   "type": "object",
   "additionalProperties": false,
-  "required": ["station_state_epoch"],
+  "required": [
+    "station_state_epoch"
+  ],
   "properties": {
-    "station_state_epoch": { "type": "integer", "minimum": 1 }
+    "station_state_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "validation": {
+      "const": "feature"
+    }
   }
 }

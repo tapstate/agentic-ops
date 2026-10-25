@@ -6,7 +6,7 @@
 
 工位清理、任务退出与恢复、编译部署共同遵循[生命周期协作规范](maintenance-guide.md#生命周期协作规范)；该节与外部依赖规范共同定义开发要求。具体状态由工位合同维护，项目构建和环境指引只维护项目操作，资源收尾归属的目标与现有实现分别说明。
 
-外部依赖检查与修补继续以[维护开发规范](maintenance-guide.md#外部依赖检查与修补继续)为唯一规范正文，适用于持久数据、受管文件、配置和运行环境。[项目目标](strategy/project-goals.md)定义升级后继续任务的方向，[工程架构](architecture/agenticops-v1-architecture.md#功能内聚的依赖检查目标设计)定义职责，[工位合同](architecture/single-task-station.md#修补后继续现有任务的目标设计)定义状态采用边界，[更新与回退](usage/update-and-rollback.md#目标设计与当前实现)区分目标体验和当前操作。该开发规范已经明确，产品能力尚待实现与验收；下文现役 epoch、退出和重建路径不因目标设计而解除。
+外部依赖检查与修补继续以[维护开发规范](maintenance-guide.md#外部依赖检查与修补继续)为唯一规范正文，适用于持久数据、受管文件、配置和运行环境。[项目目标](strategy/project-goals.md)定义升级后继续任务的方向，[工程架构](architecture/agenticops-v1-architecture.md#功能内聚的依赖检查目标设计)定义职责，[工位合同](architecture/single-task-station.md#修补后继续现有任务的目标设计)定义状态采用边界，[更新与回退](usage/update-and-rollback.md#目标设计与当前实现)区分目标体验和当前操作。当前已支持合同有效的旧任务原 run 接续，任意历史格式和旧在途操作仍有限制；支持范围由工位合同维护。下文 epoch 退出路径适用于未声明功能校验模式的旧客户端和旧目标。
 
 研发工位问题反馈属于“使用与维护”主题：[问题反馈流程](usage/problem-feedback.md)集中维护所有项目共用的 [ao-feedback](../skills/shared/ao-feedback/SKILL.md) 上报入口、问题总结、必要复现资料及提交 AO Jira 的使用合同，并说明维护者从 AO 问题列表统一处理后的反馈闭环；[扩展使用总纲](usage/README.md)负责场景导航，维护指引只引用列表受理边界。该能力复用原生 Jira 和现有现场材料，交付与验收记录在 Jira，不以文档存在证明旧安装或会话的技能已可用。
 

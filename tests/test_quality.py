@@ -123,6 +123,48 @@ class QualityTests(unittest.TestCase):
         self.save_task()
 
 
+    def test_historical_task_continues_after_coordination_without_rewriting_history(self):
+        from workflow import jira_coordination, station_context
+        historical = json.loads((ROOT / 'tests/fixtures/task-upgrade.json').read_text())
+        task_store.current_path(self.base).write_text(json.dumps(historical['task']))
+        init = self.base / '.agenticops/init.json'
+        original_init = json.loads(init.read_text())
+        original_init['station_state_epoch'] = historical['source_epoch']
+        init.write_text(json.dumps(original_init))
+        self.task = task_store.read_task(self.base)
+        path = quality.state_path(self.base, self.task)
+        path.write_text(json.dumps(historical['quality']))
+        # 采用真实当前项目要求，不沿用旧测试删减过的质量配置。
+        for name in ('quality.json', 'quality-feature.json'):
+            shutil.copy2(ROOT / 'projects/tapdata' / name, self.product / 'projects/tapdata' / name)
+        before_task = copy.deepcopy(self.task)
+        before_quality = path.read_bytes()
+        self.assertEqual(33, station_context.require_epoch(self.base, self.product))
+        self.assertEqual(historical['quality'], quality.load(self.base, self.task))
+        command = copy.deepcopy(historical['quality']['events'][0]['command'])
+        command['payload']['plan']['id'] = 'after-upgrade'
+        revision = historical['quality']['revision']
+        with self.assertRaisesRegex(ValueError, '任务级接管尚未核实'):
+            quality.apply(self.base, self.task['issue_key'], self.task['run_id'], revision, command)
+        self.assertEqual(before_quality, path.read_bytes())
+        supplied = {'site':'https://tapdata.atlassian.net', 'issue_id':'123', 'issue_key':self.task['issue_key'],
+                    'source_ref':'fixture:native-jira-readback',
+                    'pages':[{'startAt':0, 'total':0, 'isLast':True, 'comments':[]}]}
+        view = jira_coordination.snapshot(self.base, supplied)
+        pending = jira_coordination.run(self.base, 'prepare', supplied, 'upgrade-claim',
+                                       executor='升级验收', expected_digest=view['digest'])
+        supplied['pages'][0].update(total=1, comments=[{'id':'1', 'body':pending['body'],
+            'updated':datetime.now(timezone.utc).isoformat()}])
+        self.assertTrue(jira_coordination.run(self.base, 'complete', supplied,
+                                             claim_id=pending['claim_id'])['verified'])
+        quality.apply(self.base, self.task['issue_key'], self.task['run_id'], revision, command)
+        self.assertEqual(before_task, task_store.read_task(self.base))
+        current = quality.load(self.base, self.task)
+        self.assertEqual(historical['quality']['events'], current['events'][:-1])
+        self.assertEqual(revision + 1, current['revision'])
+        self.assertEqual(original_init, json.loads(init.read_text()))
+        self.assertFalse(self.view()['checkpoints']['q4-acceptance']['reviewed'])
+
     def test_production_integration_plan_required_for_feature_and_defect(self):
         from workflow import verification
         for name, fact in (("quality.json", "fix_plan"), ("quality-feature.json", "implementation_plan")):

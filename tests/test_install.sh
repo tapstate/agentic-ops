@@ -1053,6 +1053,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
 document["station_state_epoch"] += 1
+document.pop("validation", None)  # 目标使用旧模式时仍须拒绝带工位跨代际切换。
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 git -C "$source_repo" add contracts/station-state-compatibility.json

@@ -634,6 +634,10 @@ def main():
             adopted_epoch = None
             if init is not None:
                 adopted_epoch = require_station_can_adopt(install_root, station)
+                # 既有状态的校验前移；首次补建空状态仍沿 initialize_current，不改变原修复合同。
+                state_paths = [task_store.current_path(station)] + [task_store.state_path(station) / name for name in ("tasks", "worktrees")]
+                if any(path.exists() or path.is_symlink() for path in state_paths):
+                    task_store.read_current(station)
             document = init_document(
                 install_root,
                 artifacts,

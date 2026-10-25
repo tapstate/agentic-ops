@@ -135,7 +135,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
                                 resolve(station / "source" / "tapdata" / "tapdata")
                     self.assertEqual(before, binding.read_bytes())
 
-    def test_current_schema_with_old_epoch_is_rejected_by_both_readers(self):
+    def test_feature_readers_keep_old_origin_and_reject_invalid_origin(self):
         with tempfile.TemporaryDirectory() as temporary:
             station = Path(temporary) / "station"
             state = station / ".agenticops"
@@ -148,9 +148,14 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             before = (binding.read_bytes(), initialization.read_bytes())
             for resolve in (align.station_tapdata_root, align.git_refs_cache_file):
                 with self.subTest(resolver=resolve.__name__):
+                    expected = station / ("source/tapdata" if resolve == align.station_tapdata_root else ".agenticops/git-ref-cache-v2.json")
+                    self.assertEqual(expected.resolve(), resolve(station)[0])
+            self.assertEqual(before, (binding.read_bytes(), initialization.read_bytes()))
+            initialization.write_text(json.dumps({"station_state_epoch": True}))
+            for resolve in (align.station_tapdata_root, align.git_refs_cache_file):
+                with self.subTest(resolver=resolve.__name__):
                     with self.assertRaisesRegex(align.AlignmentError, "代际"):
                         resolve(station)
-            self.assertEqual(before, (binding.read_bytes(), initialization.read_bytes()))
 
     def test_execution_directory_is_only_fallback_not_user_home(self):
         root, source = align.resolve_tapdata_root(None, "/work/current")

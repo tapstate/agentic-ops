@@ -42,23 +42,26 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "clean", "scope_change", "replan")
+            or (value["kind"] not in ("takeover", "archive", "clean", "scope_change", "replan")
+                and not (value["status"] == "done" and value["kind"] in ("release", "work-clean")))
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
             or not isinstance(value["phase"], str) or not value["phase"]):
         raise ValueError("工位操作日志身份或请求摘要无效")
-    from workflow.station_clean_rules import validate_snapshot
-    if "cleanup_plan" in value:
-        validate_snapshot(value["cleanup_plan"])
-    if "cleanup_plan" in value.get("handoff", {}):
-        validate_snapshot(value["handoff"]["cleanup_plan"])
-    for revision in value.get("plan_revisions", []):
-        validate_snapshot(revision["plan"])
+    # 已完成操作只供历史查阅；未完成计划才要求满足当前执行合同。
+    if value["status"] != "done":
+        from workflow.station_clean_rules import validate_snapshot
+        if "cleanup_plan" in value:
+            validate_snapshot(value["cleanup_plan"])
+        if "cleanup_plan" in value.get("handoff", {}):
+            validate_snapshot(value["handoff"]["cleanup_plan"])
+        for revision in value.get("plan_revisions", []):
+            validate_snapshot(revision["plan"])
     for name, step in value["steps"].items():
         if not isinstance(name, str) or not isinstance(step, dict) or not {"before", "expected", "receipt"} <= set(step):
             raise ValueError("工位操作步骤结构无效")
-        if step.get("superseded_by"):
+        if step.get("superseded_by") and value["status"] != "done":
             _verify_superseded(value, name, step)
         if value["status"] == "done" and step["receipt"] is None and not step.get("superseded_by"):
             raise ValueError("已完成操作仍有未核验步骤")
