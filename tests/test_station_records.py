@@ -36,6 +36,48 @@ class RecordTests(unittest.TestCase):
     def cleanup_request(self):
         return {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': 'discard', 'decision_ref': '用户确认清理本地成果'}
 
+    def test_archive_resumes_after_operation_saved_before_payload(self):
+        from workflow import station_clean
+        self.task = self.takeover()
+        self.handoff = {'handoff': {'plan': '已确认方案', 'progress': '完成方案',
+                                    'remaining': '继续实现', 'environment': '研发补齐配置'}}
+        with mock.patch.object(station_clean, '_handoff_archive', side_effect=OSError('interrupted before payload')):
+            with self.assertRaises(OSError):
+                self.archive()
+        pending = self.archive()
+        self.assertEqual('awaiting_jira', pending['archive_result']['status'])
+        saved = self.archive(self.receipt(pending))
+        self.assertEqual('saved', saved['archive_result']['status'])
+        self.assertEqual(self.task, task_store.read_task(self.ws))
+
+    def test_handoff_does_not_collect_discarded_local_snapshot(self):
+        with mock.patch.object(archives, 'redact_evidence', side_effect=AssertionError('unused legacy collection')):
+            pending = self.begin()
+        self.assertEqual('awaiting_jira', pending['archive_result']['status'])
+
+    def test_previous_null_payload_can_resume_before_any_jira_write(self):
+        pending = self.begin()
+        pending['archive_payload']['snapshot']['handoff'] = None
+        pending.pop('archive_result')
+        station_operation.save(self.ws, pending)
+        restored = self.archive()
+        self.assertEqual('awaiting_jira', restored['archive_result']['status'])
+        self.assertEqual('saved', self.archive(self.receipt(restored))['archive_result']['status'])
+
+    def test_invalid_optional_local_copy_does_not_block_verified_jira(self):
+        pending = self.begin()
+        from workflow import archive_store
+        directory = archive_store.run_directory(self.ws, self.task['run_id'])
+        directory.mkdir(exist_ok=True)
+        damaged = directory / 'record.json'
+        damaged.write_text('invalid local copy')
+        saved = self.archive(self.receipt(pending))
+        self.assertEqual('done', saved['status'])
+        self.assertEqual('saved', saved['archive_result']['status'])
+        self.assertIn('local_warning', saved['archive_result'])
+        self.assertEqual('invalid local copy', damaged.read_text())
+        self.assertEqual(self.task, task_store.read_task(self.ws))
+
     def test_archive_does_not_collect_configuration_or_runtime(self):
         pending = self.begin()
         (self.ws / 'config/private').write_text('must-not-copy-config')

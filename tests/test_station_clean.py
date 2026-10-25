@@ -104,6 +104,21 @@ class CleanupTests(unittest.TestCase):
         result = self.run_clean(task, request)
         self.assertTrue(result['cleanup_result']['complete'], result)
 
+    def test_idle_handoff_resumes_pending_cleanup_without_new_run(self):
+        task = self.takeover()
+        request = self.cleanup_request()
+        with mock.patch.object(station_resources, 'cleanup_declared', return_value=[{'reason': 'offline'}]):
+            pending = self.run_clean(task, request)
+        observed = execution.status(self.ws)
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: 'b' * 32}), \
+                mock.patch.object(execution.time, 'time', return_value=observed['last_activity_epoch'] + 8 * 3600):
+            execution.claim(self.ws, '接续会话', observed['control_digest'], '已确认旧会话停写和资源状态')
+            result = self.run_clean(task, request)
+        self.assertEqual(pending['operation_id'], result['operation_id'])
+        self.assertEqual(task['run_id'], result['run_id'])
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertEqual('unclaimed', execution.status(self.ws)['status'])
+
     def test_resource_shutdown_may_flush_runtime_before_delete(self):
         task = self.takeover()
         request = self.cleanup_request()

@@ -1,6 +1,6 @@
 # AgenticOps 仓库指令
 
-涉及数据写入、归档恢复或清理的开发先读[数据生命周期开发规范](docs/development-data-lifecycle.md)及[工位目标合同](docs/architecture/single-task-station.md#任务生命周期目标合同)。规范集中维护分类与责任；目标两个清理操作、源码删除和 8 小时闲置接管尚未替换现役实现，不据此绕过当前保护。
+涉及数据写入、归档恢复或清理的开发先读[数据生命周期开发规范](docs/development-data-lifecycle.md)及[工位目标合同](docs/architecture/single-task-station.md#任务生命周期目标合同)。规范集中维护分类与责任；两个清理操作、源码删除和 8 小时闲置接管的支持范围以工位合同及实际安装提交为准。本地源码候选已实现不代表已发布或旧工位已更新，不据此绕过当前保护。
 
 ## 目标与必读文档
 

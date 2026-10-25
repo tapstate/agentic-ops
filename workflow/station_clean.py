@@ -60,9 +60,12 @@ def stop_resources(base, task, observe_only=False):
 
 def _handoff_archive(base, task, operation, candidate=None, jira_readback=None):
     from workflow import task_handoff
-    if 'archive_payload' not in operation:
-        payload = archives.prepare(base, task, operation['request'], operation)
-        payload['snapshot'] = {'handoff': candidate}
+    if operation.get('archive_payload', {}).get('snapshot', {}).get('handoff') is None:
+        if operation.get('handoff_readback'):
+            raise ValueError('已有 Jira 回读但接续正文缺失，先核对原操作，不能重新生成')
+        if candidate is None:
+            candidate = task_handoff.prepare(base, task, operation['request']['handoff'])
+        payload = archives.prepare(base, task, operation['request'], operation, handoff=candidate)
         operation['archive_payload'] = payload
         operation['phase'] = 'awaiting_jira'
         operations.save(base, operation)
@@ -94,7 +97,7 @@ def _handoff_archive(base, task, operation, candidate=None, jira_readback=None):
               'guidance': '仅对应已回读正文中的成果；后续新增修改仍须保存或明确放弃。'}
     try:
         result['local_reference'] = archives.publish(base, task, operation['request'], operation=operation)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         result['local_warning'] = type(error).__name__ + '：本地副本未保存，Jira 接续点已核实；新工位不依赖本地档案'
     operation['archive_result'] = result
     operations.finish(base, operation)

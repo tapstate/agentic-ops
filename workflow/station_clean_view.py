@@ -4,12 +4,6 @@ import os
 from pathlib import Path
 
 
-def safe_describe(base, task=None, plan=None, operation=None, problems=None):
-    result = (operation or {}).get("cleanup_result", {})
-    return {"released": result.get("released", False), "complete": result.get("complete", False),
-            "residuals": result.get("residuals", (plan or {}).get("residuals", [])), "problems": problems or []}
-
-
 def emit(value, details=False, output=None, base=None):
     if output:
         path = Path(output)
