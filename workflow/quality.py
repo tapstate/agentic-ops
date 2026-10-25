@@ -204,7 +204,7 @@ def load(base, task):
         replay(state)
         return state
     except (KeyError, TypeError, OSError, ValueError) as error:
-        raise ValueError("质量日志损坏或不兼容；先用 quality.py repair --dir <工位> 诊断，保留原件，不手改活动状态：%s" % error) from error
+        raise ValueError("质量日志损坏或不兼容，保留现场并人工恢复：%s" % error) from error
 
 
 def git_revision(path):
@@ -900,14 +900,12 @@ def advance_problems(base, task, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "review", "apply", "validate", "repair"))
+    parser.add_argument("command", choices=("status", "review", "apply", "validate"))
     parser.add_argument("--dir", default=".")
     parser.add_argument("--issue-key")
     parser.add_argument("--input")
     parser.add_argument("--expected-run-id")
     parser.add_argument("--expected-revision", type=int)
-    parser.add_argument("--expected-source-digest")
-    parser.add_argument("--event-field", default="events", help="原质量日志的事件数组字段，仅修补外层格式")
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -917,11 +915,7 @@ def main():
             print(json.dumps({"contract_valid": True, "boundary": "仅输入格式有效；未检查任务授权、证据和门禁"}, ensure_ascii=False))
             return 0
         issue = task_store.resolve_issue(args.dir, args.issue_key)
-        if args.command == "repair":
-            from workflow import quality_repair
-            result = quality_repair.repair(args.dir, issue, args.expected_run_id,
-                                           args.expected_source_digest, args.input, args.event_field)
-        elif args.command == "apply":
+        if args.command == "apply":
             if args.input is None or args.expected_run_id is None or args.expected_revision is None:
                 raise ValueError("apply 需要 input、expected-run-id 和 expected-revision")
             result = apply(args.dir, issue, args.expected_run_id, args.expected_revision,

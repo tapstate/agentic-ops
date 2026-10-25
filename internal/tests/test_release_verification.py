@@ -370,6 +370,27 @@ else: sys.exit(2)
         self.git('push', '-q', 'origin', commit + ':refs/heads/main')
         state.write_text(json.dumps(dict(state='MERGED', head=self.head, merge=commit)))
         self.git('push', '-q', 'origin', ':refs/heads/codex/AO-262/fix-main')
+        pr_gh = self.env['AGENTIC_OPS_GH_BIN']
+        self.governance_gh()
+        governance = self.env['AGENTIC_OPS_GH_BIN']
+        router = self.area / 'hotfix-router-gh'
+        router.write_text('#!' + sys.executable + '\n' + f'''import os,sys
+args=sys.argv[1:]
+path={governance!r} if args[0]=='api' or ('--json' in args and args[args.index('--json')+1]=='author') else {pr_gh!r}
+os.execv(path,[path]+args)
+''')
+        router.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(router)
+        good_rules, good_reviews = self.ruleset.read_text(), self.reviews.read_text()
+        rules = json.loads(good_rules)
+        rules['enforcement'] = 'disabled'
+        self.ruleset.write_text(json.dumps(rules))
+        self.assertIn('release_main_protection_required', self.hotfix_call().stderr)
+        self.ruleset.write_text(good_rules)
+        self.reviews.write_text('[[]]')
+        self.assertIn('release_independent_approval_required', self.hotfix_call().stderr)
+        self.assertNotEqual(commit, self.git('rev-parse', 'develop', root=bare))
+        self.reviews.write_text(good_reviews)
         second = self.hotfix_call()
         self.assertEqual(0, second.returncode, second.stderr)
         data = json.loads(second.stdout.splitlines()[-1])
@@ -563,6 +584,21 @@ else: sys.exit(2)
         self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
         self.assertEqual(self.base, self.git('rev-parse', 'codex/superseded-release-v1.4-' + self.base))
         self.assertEqual(0, self.count())
+
+    def test_candidate_replacement_rejects_change_during_remote_check(self):
+        self.remote(self.base)
+        self.git('branch', 'release/v1.4', self.base)
+        intervening = self.git('commit-tree', self.head + '^{tree}', '-p', self.head, '-m', 'other session')
+        gh = self.area / 'concurrent-gh'
+        gh.write_text('#!/bin/sh\ngit -C ' + shlex.quote(str(self.root)) +
+                      ' update-ref refs/heads/release/v1.4 ' + intervening + '\nprintf "0\\n"\n')
+        gh.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
+        result = self.shell(f'RELEASE_REPLACE_CANDIDATE={self.base}\n'
+                            f'release_prepare_fixed_branch "$PWD" release/v1.4 {self.head}', check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(intervening, self.git('rev-parse', 'release/v1.4'))
+        self.assertEqual('', self.git('for-each-ref', '--format=%(refname)', 'refs/heads/codex/superseded-'))
 
     def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
         bare, state = self.hotfix_fixture(cross_epoch=False)

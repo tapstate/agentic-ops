@@ -1396,6 +1396,7 @@ release_check_fixed_branch() {
   local remote_head
 
   local_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
+  RELEASE_CHECKED_LOCAL_HEAD="$local_head"
   remote_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null)" || return 1
   remote_head="${remote_head%%[[:space:]]*}"
   if [ -n "$remote_head" ]; then
@@ -1433,7 +1434,7 @@ release_prepare_fixed_branch() {
   local repo_root="$1" branch="$2" candidate_head="$3"
   release_check_fixed_branch "$repo_root" "$branch" "$candidate_head" || return 1
   local old_head backup
-  old_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
+  old_head="$RELEASE_CHECKED_LOCAL_HEAD"
   if [ -n "$old_head" ] && [ "$old_head" != "$candidate_head" ]; then
     backup="refs/heads/codex/superseded-${branch//\//-}-$old_head"
     # 旧引用同时成为保留分支；CAS 防止验收期间候选被其它会话改变。
