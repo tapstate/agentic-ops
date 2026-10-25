@@ -532,6 +532,10 @@ else: sys.exit(2)
 
     def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
         bare, state = self.hotfix_fixture(cross_epoch=True)
+        history = self.area / 'history'
+        shutil.copytree(self.root / '.local/story-gate', history)
+        shutil.rmtree(self.root / '.local/story-gate')
+        # 本地准备没有范围验收或人工批准历史，也应执行自己的独立验收。
         # 隔离远端使用真实 bare 仓库；仅映射传输身份，不替换发布判定。
         bin_dir = self.area / 'bin'
         bin_dir.mkdir()
@@ -559,6 +563,17 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
         self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
         self.assertEqual(4, self.count())
+        verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--version', 'v1.4'],
+                                  cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
+        self.assertEqual(8, self.count())
+        blocked = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--confirm-release'],
+                                 cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn('release_story_gate_blocked', blocked.stderr)
+        self.assertFalse(state.exists())
+        self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
+        shutil.copytree(history, self.root / '.local/story-gate', dirs_exist_ok=True)
         result = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--jira', 'AO-262', '--confirm-release'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -566,7 +581,7 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         self.assertEqual('OPEN', json.loads(state.read_text())['state'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual('', self.git('tag', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(8, self.count())
 
     def governance_gh(self):
         self.ruleset = self.area / 'ruleset.json'

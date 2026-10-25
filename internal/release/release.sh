@@ -129,7 +129,7 @@ case "$command_name" in
       release_fail release_same_epoch_reason_required preflight "同 epoch 默认 Hotfix" "正式版本需 --jira 与 --same-epoch-reason，说明已在 Jira 记录的版本发布理由及授权"
       exit 1
     fi
-    release_verify_story_gate "$repo_root" origin/main "$prepare_head" true || exit 1
+    release_verify_story_gate "$repo_root" origin/main "$prepare_head" true "" || exit 1
     release_run_full_verification "$repo_root" "$prepare_head" || exit 1
     release_branch="release/$version"
     release_prepare_fixed_branch "$repo_root" "$release_branch" "$prepare_head" || exit 1
@@ -233,7 +233,7 @@ case "$command_name" in
       release_resolve_prepared_fixed_branch "$repo_root" "release/$version" || exit 1
       verify_head="$RELEASE_FIXED_HEAD"
       release_preflight_candidate "$repo_root" "$verify_head" || exit 1
-      release_verify_story_gate "$repo_root" origin/main "$verify_head" true || exit 1
+      release_verify_story_gate "$repo_root" origin/main "$verify_head" true "" || exit 1
     fi
     release_run_full_verification "$repo_root" "$verify_head" verify || exit 1
     printf '{"ok":true,"operation":"release_verify","head":"%s","verified_at":"%s"}\n' "$verify_head" "$RELEASE_VERIFIED_AT"

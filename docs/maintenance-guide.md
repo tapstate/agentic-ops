@@ -224,7 +224,7 @@ epoch 只表示工位状态兼容性，不得为创建标签而提升 epoch，�
 
 | 阶段 | 入口与检查 | 边界 |
 |---|---|---|
-| 本地候选准备 | `release.sh prepare --version vX.Y`：核验 develop、固定 main 基线、版本占用、epoch、可信故事材料，独立完整验收并创建本地 release 分支 | 会读取远端引用及 fetch；不要求 Auto-merge 或 main 保护，不推送、不修改仓库设置。`delivery_checks=pending` 表示尚未核验交付条件 |
+| 本地候选准备 | `release.sh prepare --version vX.Y`：核验 develop、固定 main 基线、版本占用、epoch，并用可信 main 分析故事影响，独立完整验收并创建本地 release 分支 | 会读取远端引用及 fetch；不要求 Auto-merge 或 main 保护，不推送、不修改仓库设置。`delivery_checks=pending` 表示尚未核验交付条件 |
 | 独立人工审查 | 候选用 `release.sh submit-for-review --version vX.Y --confirm-release` 提交固定分支 PR，复用验证及绑定检查 | 默认 hard，也接受显式 soft；该确认仅授权推送候选和创建审查 PR，不授权合并或 Tag。保护尚未就绪可以先审查，不能因此合并 |
 | 远端交付 | 普通候选用 `publish`；独立人工 Merge commit 合并后用 `inspect`、`recover` | hard 交付核验 main 保护、当前 Head 的独立人工批准、候选/基线/合并树与有效证据，并要求对应交付授权。只有 `publish` 的自动合并路径要求 Auto-merge；人工审查及恢复不依赖它 |
 
@@ -244,7 +244,7 @@ internal/release/hotfix.sh <JIRA-KEY>
 
 ### 发布验证复用与合并后收尾
 
-`prepare` 先核验候选已包含固定 `main` 基线、版本占用及历史故事审查材料，再在隔离环境独立执行四项；结果保存于 `.local/release/`，测试原始日志保留在其中的私有运行目录。`submit-for-review`、`publish` 和 `recover` 只消费同一有效发布证据。`inspect` 和不带确认参数的 `recover` 不执行测试；缺证据时明确要求补验，不因查询或生成确认参数重复测试。
+`prepare` 先核验候选已包含固定 `main` 基线、版本占用及可信故事影响映射，再在隔离环境独立执行四项；本地 `prepare`/`verify` 不提前要求推送范围验收记录或人工批准，`submit-for-review`/`publish` 才沿现有 release 门禁核验这些推送材料。结果保存于 `.local/release/`，测试原始日志保留在其中的私有运行目录。`submit-for-review`、`publish` 和 `recover` 只消费同一有效发布证据。`inspect` 和不带确认参数的 `recover` 不执行测试；缺证据时明确要求补验，不因查询或生成确认参数重复测试。
 
 需要显式重验时使用 `internal/release/release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <PR编号>`。恢复使用 `inspect --version vX.Y --merged-pr <PR编号>` 核对事实，再按输出执行 `recover`；确认参数绑定版本、PR、候选及实际合并和 Tag 状态，有效授权不因分步命令重复索取。Hotfix 没有有效证据时在自身入口补一次独立验收，不使用正式版本 Tag。
 

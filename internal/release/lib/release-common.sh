@@ -441,6 +441,8 @@ release_verify_story_gate() {
   local base="$2"
   local head="$3"
   local allow_independent_review="${4:-false}"
+  # 本地准备/重验使用既有普通影响分析；远端入口默认执行 release 材料检查。
+  local gate_stage="${5-release}"
   local trusted_base_commit
   local range_base_commit
   local head_commit
@@ -616,7 +618,7 @@ release_verify_story_gate() {
     baseline_cli="$baseline_snapshot/internal/bin/story-gate"
     GIT_NO_REPLACE_OBJECTS=1 \
       AGENTIC_OPS_STORY_BRANCH="$story_branch" \
-      AGENTIC_OPS_STORY_GATE_STAGE=release \
+      AGENTIC_OPS_STORY_GATE_STAGE="$gate_stage" \
       PYTHONPYCACHEPREFIX="$temp_root/pycache" \
       "$baseline_cli" \
         --source-root "$candidate_snapshot" \
