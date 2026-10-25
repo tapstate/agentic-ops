@@ -55,6 +55,24 @@ class RecordTests(unittest.TestCase):
             pending = self.begin()
         self.assertEqual('awaiting_jira', pending['archive_result']['status'])
 
+    def test_archive_receipt_after_handoff_does_not_require_reclaim(self):
+        import os
+        from workflow import jira_coordination, execution
+        pending = self.begin()
+        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        with self.assertRaisesRegex(ValueError, '尚未核实'):
+            self.archive(op='new-archive-after-handoff')
+        with self.assertRaises(ValueError):
+            self.archive(dict(self.receipt(pending), body='错误正文'))
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: 'b' * 32}):
+            with self.assertRaisesRegex(ValueError, '已有执行接管者'):
+                self.archive(self.receipt(pending))
+        saved = self.archive(self.receipt(pending))
+        self.assertEqual('saved', saved['archive_result']['status'])
+        result = station_cleanup.execute(self.ws, self.task['issue_key'], self.task['run_id'],
+            self.task['_revision'], 'op-clean-after-archive-readback', self.cleanup_request())
+        self.assertTrue(result['cleanup_result']['complete'])
+
     def test_previous_null_payload_can_resume_before_any_jira_write(self):
         pending = self.begin()
         pending['archive_payload']['snapshot']['handoff'] = None

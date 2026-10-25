@@ -144,6 +144,51 @@ class CoordinationTests(unittest.TestCase):
         native=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000+0000')
         self.assertLess(abs(time.time()-c.timestamp(native)),2)
 
+    def test_new_session_recovers_unknown_write_without_borrowing_identity(self):
+        p=self.prepare()
+        self.comments.append({'id':'1','body':p['body'],'updated':datetime.now(timezone.utc).isoformat()})
+        os.environ[execution.SESSION_ENV]=B
+        with self.assertRaises(ValueError):c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'])
+        r=c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'],decision_ref='用户接续收尾',conflict_check_ref='旧会话已停止')
+        self.assertTrue(r['saved']);self.assertFalse(r['verified'])
+        with self.assertRaises(ValueError):self.prepare(operation='old-report',mode='report',claim_id=p['claim_id'])
+        e=self.prepare(operation='old-end',mode='end',claim_id=p['claim_id'],decision_ref='用户清理',conflict_check_ref='停写')
+        self.publish(e);self.assertEqual([],c.pending(self.ws))
+
+    def test_new_session_can_cancel_proven_unsent_intent(self):
+        p=self.prepare();os.environ[execution.SESSION_ENV]=B
+        with self.assertRaises(ValueError):c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='尚未发送')
+        c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='已核实尚未发送',conflict_check_ref='旧会话已停止')
+        self.assertEqual([],c.pending(self.ws))
+
+    def test_cancel_cannot_use_another_tasks_empty_comments(self):
+        p=self.prepare();s=self.snapshot();s['issue_id']='999';s['issue_key']='TAP-999'
+        with self.assertRaises(ValueError):c.run(self.ws,'cancel',s,claim_id=p['claim_id'],decision_ref='未发送')
+        self.assertTrue(c.pending(self.ws)[0]['pending'])
+
+    def test_unrelated_pending_intent_does_not_block_new_task(self):
+        p=self.prepare();self.publish(p)
+        # 原任务的报活还未发送，另一任务的完整回读不依赖该远端写入。
+        self.prepare(operation='old-report',mode='report',claim_id=p['claim_id'])
+        s=self.snapshot();s.update(issue_id='999',issue_key='TAP-999');s['pages'][0].update(total=0,comments=[])
+        v=c.run(self.ws,'check',s)
+        with self.assertRaises(ValueError):
+            c.run(self.ws,'prepare',s,p['claim_id'],executor='另一任务',expected_digest=v['digest'])
+        self.assertTrue(c.state(self.ws)['entries'][p['claim_id']]['pending'])
+        q=c.run(self.ws,'prepare',s,'other-task',executor='另一任务',expected_digest=v['digest'])
+        s['pages'][0].update(total=1,comments=[{'id':'2','body':q['body'],'updated':datetime.now(timezone.utc).isoformat()}])
+        self.assertTrue(c.run(self.ws,'complete',s,claim_id=q['claim_id'])['verified'])
+
+    def test_station_scoped_operation_ids_and_remote_reuse_rejected_before_write(self):
+        p=self.prepare();self.publish(p);os.environ[execution.SESSION_ENV]=B
+        q=self.prepare(self.other,conflict_check_ref='停写',decision_ref='交接')
+        self.assertTrue(self.publish(q,self.other)['verified'])
+        e=self.prepare(self.other,'end',mode='end',claim_id=q['claim_id']);self.publish(e,self.other)
+        self.prepare(self.other,'another-claim')  # 收敛已结束的本地回执。
+        c.run(self.other,'cancel',self.snapshot(),claim_id='another-claim',decision_ref='从未发送')
+        with self.assertRaises(ValueError):self.prepare(self.other)
+        self.assertEqual([],c.pending(self.other))
+
     def test_wrong_site_id_malformed_and_future_timestamp_rejected(self):
         p=self.prepare();self.publish(p)
         for field,value in [('site','https://other.atlassian.net'),('issue_id','999')]:

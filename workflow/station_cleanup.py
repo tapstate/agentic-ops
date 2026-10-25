@@ -228,7 +228,9 @@ def cancel(base, operation_id, decision_ref):
     """源码尚未开始删除时允许取消原清理，修正材料后重新预检；不恢复已停止资源。"""
     if not isinstance(decision_ref, str) or not decision_ref.strip():
         raise ValueError('取消清理需要用户决定来源')
-    with task_store.task_state_lock(base):
+    from workflow import execution
+    with task_store.task_state_lock(base, execution=False):
+        identity = execution.enter(base, coordination=False)
         operation = operations.read(base)
         if not operation or operation['operation_id'] != operation_id or operation['kind'] != 'clean':
             raise ValueError('没有匹配的清理操作')
@@ -243,4 +245,5 @@ def cancel(base, operation_id, decision_ref):
         operation['cancelled'] = {'decision_ref': decision_ref, 'boundary': '保留任务，已停止的资源不会自动启动'}
         operation['cleanup_result'] = {'released': False, 'complete': False, 'residuals': [], 'resources': []}
         operations.finish(base, operation)
+        execution.touch(base, identity)
         return operation

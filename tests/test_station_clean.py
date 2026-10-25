@@ -138,11 +138,31 @@ class CleanupTests(unittest.TestCase):
         (self.ws / 'source/tapdata/tapdata/file.txt').write_text('new work')
         result = self.run_clean(task, request)
         self.assertEqual('awaiting_cleanup', result['phase'])
+        # Jira 已交接，取消本地未开始删除的清理仍应能接续。
+        from workflow import jira_coordination
+        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
         cancelled = cleanup.cancel(self.ws, 'op-task-cleanup-test', '确认取消并重新盘点')
         self.assertEqual('done', cancelled['status'])
         self.assertIsNotNone(task_store.read_task(self.ws))
         result = self.run_clean(task, self.cleanup_request(materials='discard'), 'op-cleanup-replanned')
         self.assertTrue(result['cleanup_result']['complete'], result)
+
+    def test_external_cleanup_readback_after_handoff_is_narrowly_scoped(self):
+        from workflow import jira_coordination
+        task = self.takeover()
+        entry = {'kind': 'external', 'id': 'fixture-resource', 'producer': 'fixture',
+                 'action': 'delete', 'status': 'active', 'before': {'id': 'fixture-resource', 'protected': False}}
+        task_store._write_json_atomic(task_store.task_directory(self.ws, task['issue_key']) / 'resources.json',
+            {'schema_version': 1, 'run_id': task['run_id'], 'entries': [entry]})
+        request = self.cleanup_request()
+        pending = self.run_clean(task, request)
+        self.assertEqual('awaiting_resources', pending['phase'])
+        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        receipt = dict(entry, status='cleaned', readback_ref='fixture:已核实外部资源不存在')
+        with self.assertRaises(ValueError):
+            resources.register(self.ws, task['issue_key'], task['run_id'], [dict(receipt, id='other')], pending['operation_id'])
+        resources.register(self.ws, task['issue_key'], task['run_id'], [receipt], pending['operation_id'])
+        self.assertTrue(self.run_clean(task, request)['cleanup_result']['complete'])
 
     def test_takeover_interrupted_before_current_can_be_cleaned(self):
         from workflow import station_operation

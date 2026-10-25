@@ -144,10 +144,14 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
         raise ValueError('归档需要 Jira 持久接续材料 handoff')
     if archive_decision:
         raise ValueError('持久归档使用 Jira 回读；明确未发送才可沿 not_sent 取消')
-    from workflow import task_handoff
-    with task_store.task_state_lock(base, allow_product_lifecycle=allow_product_lifecycle):
+    from workflow import task_handoff, execution
+    with task_store.task_state_lock(base, execution=False, allow_product_lifecycle=allow_product_lifecycle):
         old = operations.read(base)
         same = old and old['operation_id'] == operation_id
+        # 仅沿已冻结正文核验原回执可独立收尾；新归档或重新生成正文仍需 Jira 接管。
+        receipt_only = (same and jira_readback is not None
+                        and old.get('archive_payload', {}).get('snapshot', {}).get('handoff') is not None)
+        identity = execution.enter(base, coordination=not receipt_only)
         candidate = None
         if same:
             if (old['kind'] != kind or old['request_digest'] != baseline.digest(request)
@@ -167,7 +171,9 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operation = operations.begin(base, kind, operation_id, revision, request, run_id)
             operation['exit_task'] = task
             operations.save(base, operation)
-        return _handoff_archive(base, task, operation, candidate, jira_readback)
+        result = _handoff_archive(base, task, operation, candidate, jira_readback)
+        execution.touch(base, identity)
+        return result
 
 
 def main(argv=None):

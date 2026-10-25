@@ -183,7 +183,16 @@ def registration_state(base, task, expected_operation_id=None):
 
 
 def register(base, issue, run_id, entries, expected_operation_id=None):
-    with store.task_state_lock(base):
+    from workflow import execution
+    with store.task_state_lock(base, execution=False):
+        operation = operations.read(base)
+        cleanup_readback = (operation and operation['kind'] == 'clean'
+                            and operation['status'] in ('running', 'failed')
+                            and operation['operation_id'] == expected_operation_id and operation['run_id'] == run_id
+                            and isinstance(entries, list) and bool(entries)
+                            and all(isinstance(e, dict) and e.get('kind') == 'external' for e in entries))
+        # 只放行原清理对象的回执；下面的身份比对仍拒绝新增或改变资源。
+        identity = execution.enter(base, coordination=not cleanup_readback)
         if store.read_task(base) is None:
             operation = operations.read(base)
             store.validate_run_id(issue, run_id)
@@ -208,6 +217,7 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
                 pending.remove(original)
                 operation.setdefault('resource_readbacks', []).append(entry)
             operations.save(base, operation)
+            execution.touch(base, identity)
             return
         task = store.check_expected_run(base, issue, run_id)
         closed, recovery = registration_state(base, task, expected_operation_id)
@@ -273,6 +283,7 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
             merged[key(entry)] = entry
         store._write_json_atomic(store.task_directory(base, issue) / "resources.json",
                                  {"schema_version": 1, "run_id": run_id, "entries": list(merged.values())})
+        execution.touch(base, identity)
 
 
 def main():

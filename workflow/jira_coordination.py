@@ -79,13 +79,14 @@ def save(base, value):
 
 def snapshot(base, supplied):
     """pages 使用原生 list comments 的完整分页；不把 filtered/截断结果当全量。"""
-    site = project_rules.load_profile(station=base)['jira']['site'].rstrip('/')
+    profile = project_rules.load_profile(station=base)
+    site = profile['jira']['site'].rstrip('/')
     if (not isinstance(supplied, dict) or supplied.get('site') != site
             or not isinstance(supplied.get('issue_id'), str) or not supplied['issue_id'].isdigit()
             or not text(supplied.get('source_ref')) or not isinstance(supplied.get('pages'), list) or not supplied['pages']):
         raise ValueError('需要 Jira site/issue_id/issue_key/source_ref 和完整 pages 回读')
     issue = task_store.validate_issue_key(supplied.get('issue_key'))
-    project_rules.validate_project_issue(project_rules.load_profile(station=base), issue)
+    project_rules.validate_project_issue(profile, issue)
     offset, total, seen, rows = 0, None, set(), []
     for index, page in enumerate(supplied['pages']):
         if (not isinstance(page, dict) or type(page.get('total')) is not int or page['total'] < 0
@@ -125,9 +126,10 @@ def snapshot(base, supplied):
     claims = set()
     for row in rows:
         packet = row['packet']
-        if packet['claim_id'] in claims or row['id'] in packet['supersedes'] or not set(packet['supersedes']) <= ids:
+        claim = (packet['station_id'], packet['claim_id'])
+        if claim in claims or row['id'] in packet['supersedes'] or not set(packet['supersedes']) <= ids:
             raise ValueError('协调接替引用缺失、自引用或接管编号重复')
-        claims.add(packet['claim_id'])
+        claims.add(claim)
         superseded.update(packet['supersedes'])
     links = {row['id']: row['packet']['supersedes'] for row in rows}
     remaining = set(links)
@@ -146,13 +148,17 @@ def own(base, packet):
             and packet['session_id'] == execution.session_id())
 
 
+def same_task(packet, view):
+    return (packet['site'], packet['issue_id']) == (view['site'], view['issue_id'])
+
+
 def observe(base, view, value):
     head = view['heads'][0] if len(view['heads']) == 1 else None
     value['proof'] = {key: view[key] for key in ('site', 'issue_id', 'issue_key', 'digest')}
     value['proof'].update(session_id=execution.session_id(), station_id=station_context.read_binding(base)['station_id'],
                           comment_id=head['id'] if head else '', valid=bool(head and own(base, head['packet'])))
     # 未核实写入仍不能因为观察到旧的有效记录而继续。
-    if any(e['pending'] and own(base, e['packet']) for e in value['entries'].values()):
+    if any(e['pending'] and same_task(e['packet'], view) for e in value['entries'].values()):
         value['proof']['valid'] = False
     save(base, value)
 
@@ -195,24 +201,27 @@ def run(base, action, supplied=None, operation_id=None, mode='claim', executor=N
                                  'session_id': r['packet']['session_id'], 'last_reported_epoch': r['updated'],
                                  'idle': time.time() - r['updated'] >= IDLE_SECONDS} for r in heads],
                     'boundary': '仅报告活动，不保证原生进程停止或全局互斥'}
-        if action == 'complete':
+        if action in ('complete', 'cancel'):
             entry = value['entries'].get(claim_id)
-            if not entry or entry['actor'] != execution.session_id():
-                raise ValueError('只能回读本会话原协调意图')
+            if (not entry or not same_task(entry['packet'], view)
+                    or entry['packet']['station_id'] != station_context.read_binding(base)['station_id']):
+                raise ValueError('回读或取消必须绑定本工位原意图的 Jira 站点和任务 ID')
+            if entry['actor'] != execution.session_id() and (not text(decision_ref) or not text(conflict_check_ref)):
+                raise ValueError('接续旧会话意图需要人工决定及停写核实；不继承旧接管权')
+        if action == 'complete':
             matches = [r for r in view['rows'] if r['body'] == body(entry['packet']) and (not entry['comment_id'] or r['id'] == entry['comment_id'])]
             if len(matches) != 1:
                 raise ValueError('原写入未唯一匹配，先核实 Jira，不能盲目重发')
-            entry.update(comment_id=matches[0]['id'], pending=False, before=None)
+            entry.update(comment_id=matches[0]['id'], pending=False, before=None, actor=execution.session_id())
             observe(base, view, value)
             return {'saved': True, 'comment_id': matches[0]['id'], 'verified': value['proof']['valid'], 'records': pending(base)}
         if action == 'cancel':
-            entry = value['entries'].get(claim_id)
-            if not entry or not entry['pending'] or entry['actor'] != execution.session_id() or not text(decision_ref):
-                raise ValueError('取消需要本会话待发送意图及明确尚未发送的决定；未知写入先回读')
+            if not entry['pending'] or not text(decision_ref):
+                raise ValueError('取消需要待发送意图及明确尚未发送的决定；未知写入先回读')
             if any(r['body'] == body(entry['packet']) for r in view['rows']):
                 raise ValueError('原写入已存在，应 complete 回读而非取消')
             if entry['before'] is not None:
-                entry.update(packet=entry['before'], pending=False, before=None)
+                entry.update(packet=entry['before'], pending=False, before=None, actor=execution.session_id())
             else:
                 del value['entries'][claim_id]
             observe(base, view, value)
@@ -221,15 +230,20 @@ def run(base, action, supplied=None, operation_id=None, mode='claim', executor=N
             raise ValueError('协调操作无效，需要稳定 operation-id')
         original = next((e for e in value['entries'].values() if e['packet']['update_id'] == operation_id), None)
         if original:
-            if original['actor'] != execution.session_id() or original['packet']['issue_id'] != view['issue_id'] or (mode == 'end') == original['packet']['active']:
+            if original['actor'] != execution.session_id() or not same_task(original['packet'], view) or (mode == 'end') == original['packet']['active']:
                 raise ValueError('协调操作编号已用于其它身份')
             return {'claim_id': original['packet']['claim_id'], 'comment_id': original['comment_id'], 'body': body(original['packet']),
                     'pending': original['pending'], 'guidance': '回读原写入；仅已证明未发送时发送原正文'}
-        if any(e['pending'] and e['packet']['issue_id'] == view['issue_id'] for e in value['entries'].values()):
+        if any(e['pending'] and same_task(e['packet'], view) for e in value['entries'].values()):
             raise ValueError('存在结果未确认的协调写入，先 complete 回读原意图')
         if expected_digest != view['digest']:
             raise ValueError('协调观察已变化，重新核对接管者及决定')
         if mode == 'claim':
+            if operation_id in value['entries']:
+                raise ValueError('接管编号仍用于本工位原记录；不能覆盖旧任务待办，使用新的 operation-id')
+            if any(r['packet']['station_id'] == station_context.read_binding(base)['station_id']
+                   and r['packet']['claim_id'] == operation_id for r in view['rows']):
+                raise ValueError('本工位接管编号已用于 Jira 历史记录；新接管使用新的 operation-id')
             if len(heads) == 1 and own(base, heads[0]['packet']):
                 raise ValueError('当前会话已经接管，使用 check 或 report 继续')
             if heads and not text(conflict_check_ref):
@@ -245,7 +259,7 @@ def run(base, action, supplied=None, operation_id=None, mode='claim', executor=N
             cid = ''
         else:
             entry = value['entries'].get(claim_id)
-            if not entry or entry['packet']['station_id'] != station_context.read_binding(base)['station_id'] or entry['packet']['issue_id'] != view['issue_id']:
+            if not entry or entry['packet']['station_id'] != station_context.read_binding(base)['station_id'] or not same_task(entry['packet'], view):
                 raise ValueError('只能更新本工位本任务的协调记录')
             if not own(base, entry['packet']) and (mode != 'end' or not text(decision_ref) or not text(conflict_check_ref)):
                 raise ValueError('结束本工位旧会话记录需要人工决定和停写核实；不能替旧会话报活')
