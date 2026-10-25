@@ -27,6 +27,8 @@ class ReleaseVerificationTests(unittest.TestCase):
         self.root.mkdir()
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
         self.env.pop('AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING', None)
+        # 嵌套发布验收必须使用夹具自己的根与操作锁，不能继承外层快照定位。
+        self.env.pop('AGENTIC_OPS_RELEASE_SNAPSHOT', None)
         self.env.pop('AO_CONNECTOR_MAVEN_TEST', None)
         self.env.pop('AO_JAR_MAVEN_TEST', None)
         self.git('init', '-q', '-b', 'main')
