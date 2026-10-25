@@ -1,5 +1,26 @@
 # 质量检查与证据
 
+## 质量材料格式修补
+
+当前源码提供 `quality.py repair`，只处理质量日志外层字段差异或可核实的格式缺项；不转换事件语义、不修改历史事件或批准、不绕过工位 epoch。诊断不要求质量日志已通过新版校验；任务身份或事件事实无法核实时保留现场并反馈，不由 AI 猜补。
+
+```sh
+python3 "$PRODUCT_ROOT/workflow/quality.py" repair --dir "$STATION"
+```
+
+Agent 根据返回的文件位置、原件摘要和当前合同，在工位状态目录外准备候选 JSON。原 `issue_key`、`run_id` 必须明确且与当前任务一致，全部事件和顺序必须保持不变；原事件数组可由 `--event-field` 指定实际字段名。仅支持这些身份、版本、计数及事件字段，未知其它内容不自动丢弃；已有 revision 与事件数矛盾时必须核实缺失记录。
+
+```sh
+python3 "$PRODUCT_ROOT/workflow/quality.py" repair --dir "$STATION" \
+  --input /path/to/quality-candidate.json --event-field events \
+  --expected-run-id <诊断返回的run> --expected-source-digest <诊断返回的摘要>
+python3 "$PRODUCT_ROOT/workflow/quality.py" status --dir "$STATION"
+```
+
+采用复用任务写入保护，核验原件未变、身份、完整事件及历史重放。原件以 `quality-*.json.before-repair-<摘要>.json` 保存在原证据目录，属于必要恢复证据，由既有归档采集（超限或脱敏影响恢复时须另行可靠保全）、随任务清理处理，不建立新台账。原子采用失败可重试；已采用只回读，新写入发生后拒绝旧请求。修补不推进阶段、不重新签发授权；当前质量结果通过正常 status 重新计算，不把结构合法当成 PASS。
+
+本能力已覆盖隔离夹具中的外层字段转换、缺项、拒绝篡改、采用中断和原 run 继续；不等于任意历史版本都能迁移。跨 epoch 产品切换及其它功能的数据采用仍遵循[工位合同](../architecture/single-task-station.md#10-升级与恢复)。
+
 ## 接管摘要发布与回读
 
 接管准备成功后，Agent 在本轮主动处理 `takeover_comment`，不等待 Q1 或方案确认。先保存 Jira 初始快照，从 `external_sync.py status` 读取当前 run 的稳定 id 与正文；基本信息来自已核验的任务号、任务摘要、接管时 Jira 负责人、任务类型、运行编号、工程 Profile、接管版本／主仓分支和源码准备结果，不填写未确认的修改仓、工作分支或验收结论。接管摘要不代表 Q1 或实施方案已确认。

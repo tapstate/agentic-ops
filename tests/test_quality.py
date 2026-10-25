@@ -123,6 +123,103 @@ class QualityTests(unittest.TestCase):
         self.save_task()
 
 
+    def test_quality_format_repair_preserves_events_and_continues_same_run(self):
+        from workflow import quality_repair
+        self.plan()
+        current = quality.load(self.base, self.task)
+        old = copy.deepcopy(current)
+        old['entries'] = old.pop('events')
+        old.pop('schema_version')
+        path = quality.state_path(self.base, self.task)
+        path.write_text(json.dumps(old))
+        before = task_store.read_current(self.base)
+        with self.assertRaisesRegex(ValueError, 'repair'):
+            quality.load(self.base, self.task)
+        cli = [sys.executable, str(product_cli(self.base, 'workflow/quality.py')), 'repair', '--dir', str(self.base)]
+        diagnosed = subprocess.run(cli, capture_output=True, text=True)
+        self.assertEqual(0, diagnosed.returncode, diagnosed.stderr)
+        packet = json.loads(diagnosed.stdout)
+        self.assertEqual('repair_required', packet['status'])
+        candidate = self.base / 'quality-candidate.json'
+        candidate.write_text(json.dumps(current))
+        adopted = subprocess.run(cli + ['--input', str(candidate), '--event-field', 'entries',
+            '--expected-run-id', self.task['run_id'], '--expected-source-digest', packet['source_digest']],
+            capture_output=True, text=True)
+        self.assertEqual(0, adopted.returncode, adopted.stderr)
+        result = json.loads(adopted.stdout)
+        self.assertEqual('repaired', result['status'])
+        self.assertEqual(old, json.loads(Path(result['backup']).read_text()))
+        from workflow import station_archive
+        archived = station_archive.prepare(self.base, self.task, {})['snapshot']['evidence']
+        self.assertEqual(old, archived[Path(result['backup']).name])
+        self.assertEqual(current, quality.load(self.base, self.task))
+        after = task_store.read_current(self.base)
+        self.assertEqual(before['current'], after['current'])
+        self.assertEqual(before['revision'], after['revision'])
+        self.assertEqual('already_applied', quality_repair.repair(self.base, 'TAP-123', self.task['run_id'],
+                         packet['source_digest'], candidate, 'entries')['status'])
+        self.assertFalse(self.view()['checkpoints']['q4-acceptance']['reviewed'])
+        self.plan('case-next')  # 正常写入口继续同一 run，不依赖手改控制状态。
+        self.assertIn('case-next', self.view()['items'])
+        with self.assertRaisesRegex(ValueError, '已变化'):
+            quality_repair.repair(self.base, 'TAP-123', self.task['run_id'], packet['source_digest'], candidate, 'entries')
+
+    def test_quality_format_repair_rejects_event_changes_identity_and_unknown_fields(self):
+        from workflow import quality_repair
+        self.plan()
+        current = quality.load(self.base, self.task)
+        path = quality.state_path(self.base, self.task)
+        original = copy.deepcopy(current)
+        original.pop('schema_version')
+        candidate = self.base / 'quality-candidate.json'
+        for kind in ('events', 'identity', 'unknown', 'revision'):
+            old, proposed = copy.deepcopy(original), copy.deepcopy(current)
+            if kind == 'events':
+                proposed['events'][0]['at'] = 'forged'
+            elif kind == 'identity':
+                old['run_id'] = 'other-run'
+            elif kind == 'unknown':
+                old['unexplained'] = 'keep'
+            else:
+                old['revision'] += 1
+            path.write_text(json.dumps(old))
+            raw = path.read_bytes()
+            packet = quality_repair.repair(self.base, 'TAP-123')
+            candidate.write_text(json.dumps(proposed))
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                quality_repair.repair(self.base, 'TAP-123', self.task['run_id'], packet['source_digest'], candidate)
+            self.assertEqual(raw, path.read_bytes())
+
+    def test_quality_repair_refuses_symlink_without_touching_target(self):
+        from workflow import quality_repair
+        self.plan()
+        path = quality.state_path(self.base, self.task)
+        target = self.base / 'preserved-quality.json'
+        path.rename(target)
+        original = target.read_bytes()
+        path.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, '普通文件'):
+            quality_repair.repair(self.base, 'TAP-123')
+        self.assertEqual(original, target.read_bytes())
+
+    def test_quality_format_repair_keeps_original_when_adoption_fails(self):
+        from workflow import quality_repair
+        self.plan()
+        current = quality.load(self.base, self.task)
+        path = quality.state_path(self.base, self.task)
+        old = copy.deepcopy(current); old.pop('schema_version')
+        path.write_text(json.dumps(old))
+        raw = path.read_bytes()
+        packet = quality_repair.repair(self.base, 'TAP-123')
+        candidate = self.base / 'quality-candidate.json'
+        candidate.write_text(json.dumps(current))
+        with mock.patch('workflow.quality_repair.task_store._write_json_atomic', side_effect=OSError('interrupted')):
+            with self.assertRaises(OSError):
+                quality_repair.repair(self.base, 'TAP-123', self.task['run_id'], packet['source_digest'], candidate)
+        self.assertEqual(raw, path.read_bytes())
+        self.assertEqual('repaired', quality_repair.repair(self.base, 'TAP-123', self.task['run_id'],
+                         packet['source_digest'], candidate)['status'])
+
     def test_production_integration_plan_required_for_feature_and_defect(self):
         from workflow import verification
         for name, fact in (("quality.json", "fix_plan"), ("quality-feature.json", "implementation_plan")):
