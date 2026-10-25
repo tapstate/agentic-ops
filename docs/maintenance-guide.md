@@ -220,14 +220,19 @@ internal/acceptance.sh --list
 
 epoch 只表示工位状态兼容性，不得为创建标签而提升 epoch，也不得为使用 Hotfix 而保留本应提升的 epoch。上述选择不豁免既有验证、发布授权或信任根变更的独立人工审查要求。
 
-正常发布：
+正式版本发布分为本地候选准备、独立人工审查和远端交付，复用同一固定候选与发布证据，不新增发布状态机：
 
-```sh
-internal/release/release.sh prepare --version vX.Y
-internal/release/release.sh publish --version vX.Y --confirm-release
-```
+| 阶段 | 入口与检查 | 边界 |
+|---|---|---|
+| 本地候选准备 | `release.sh prepare --version vX.Y`：核验 develop、固定 main 基线、版本占用、epoch、可信故事材料，独立完整验收并创建本地 release 分支 | 会读取远端引用及 fetch；不要求 Auto-merge 或 main 保护，不推送、不修改仓库设置。`delivery_checks=pending` 表示尚未核验交付条件 |
+| 独立人工审查 | 候选用 `release.sh submit-for-review --version vX.Y --confirm-release` 提交固定分支 PR，复用验证及绑定检查 | 默认 hard，也接受显式 soft；该确认仅授权推送候选和创建审查 PR，不授权合并或 Tag。保护尚未就绪可以先审查，不能因此合并 |
+| 远端交付 | 普通候选用 `publish`；独立人工 Merge commit 合并后用 `inspect`、`recover` | hard 交付核验 main 保护、当前 Head 的独立人工批准、候选/基线/合并树与有效证据，并要求对应交付授权。只有 `publish` 的自动合并路径要求 Auto-merge；人工审查及恢复不依赖它 |
 
-软门禁模式显式增加 `--allow-soft-gate`。版本及候选在合并前固定，发布版本使用 `v1.x`；同 epoch 的正式版本准备还须提供 `--jira <编号> --same-epoch-reason <已在 Jira 记录的理由>`。发布从固定实现快照执行，测试只读取固定 Git 候选，不自动提交、stash 或清理用户工作区；发布实现自身有未提交修改时停止，先审查实现。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。Hotfix 只能使用：
+普通候选也可选择同一人工审查路径，不因关闭 Auto-merge 自阻塞。信任根仍禁止自动发布；人工合并前必须由维护者核验受保护 main、独立审查及 GitHub 必需检查。`recover` 在 Tag 前再次核验保护与当前候选批准，不能用“已合并”代替独立审查。规则集检查接受不同名称、至少一人批准及更严格 Code Owner 要求；当前支持单个有效、无绕过、无排除且明确覆盖 main（或默认/全部分支）的规则集，不推断传统保护或多个规则集组合等价。规则要求 Merge commit、禁止删除及强推、撤销过期审批、最新推送由他人批准及讨论解决。
+
+软门禁交付仅为普通候选保留显式 `--allow-soft-gate`，不表示独立审查只能走 soft，也不能豁免信任根交付所需的 main 保护。发布命令不再接受 `--configure-workflow` 代为配置仓库；治理配置应单独审查和授权。版本及候选在合并前固定，发布版本使用 `v1.x`；同 epoch 的正式版本准备还须提供 `--jira <编号> --same-epoch-reason <已在 Jira 记录的理由>`。发布从固定实现快照执行，测试只读取固定 Git 候选，不自动提交、stash 或清理用户工作区；发布实现自身有未提交修改时停止，先审查实现。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。上述分阶段行为为当前源码能力，旧安装仍按其版本执行，不因本文自行绕过旧入口。
+
+Hotfix 只能使用：
 
 ```sh
 internal/release/hotfix.sh <JIRA-KEY>

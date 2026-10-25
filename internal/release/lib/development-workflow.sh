@@ -180,12 +180,23 @@ workflow_ruleset_id() {
 
 workflow_check_main_ruleset() {
   workflow_repository="$1"
-  workflow_id="$(workflow_ruleset_id "$workflow_repository")" || return 1
-  [ -n "$workflow_id" ] || return 1
-  workflow_status="$(workflow_gh_value \
-    "repos/$workflow_repository/rulesets/$workflow_id" \
-    '[.enforcement, .target, (.conditions.ref_name.include == ["refs/heads/main"]), (.conditions.ref_name.exclude == []), (.bypass_actors | length), (any(.rules[]; .type == "deletion")), (any(.rules[]; .type == "non_fast_forward")), (any(.rules[]; .type == "pull_request")), ((.rules[] | select(.type == "pull_request") | .parameters.allowed_merge_methods) == ["merge"]), (.rules[] | select(.type == "pull_request") | .parameters.required_approving_review_count), (.rules[] | select(.type == "pull_request") | .parameters.require_code_owner_review), (.rules[] | select(.type == "pull_request") | .parameters.dismiss_stale_reviews_on_push), (.rules[] | select(.type == "pull_request") | .parameters.require_last_push_approval), (.rules[] | select(.type == "pull_request") | .parameters.required_review_thread_resolution)] | @tsv' 2>/dev/null)" || return 1
-  [ "$workflow_status" = $'active\tbranch\ttrue\ttrue\t0\ttrue\ttrue\ttrue\ttrue\t1\tfalse\ttrue\ttrue\ttrue' ]
+  local ids id status
+  ids="$(workflow_gh_value "repos/$workflow_repository/rulesets?per_page=100" '.[] | select(.target == "branch" and .enforcement == "active") | .id' 2>/dev/null)" || return 1
+  for id in $ids; do
+    status="$(workflow_gh_value "repos/$workflow_repository/rulesets/$id" '
+      .enforcement == "active" and .target == "branch" and
+      (any(.conditions.ref_name.include[]; . == "refs/heads/main" or . == "~DEFAULT_BRANCH" or . == "~ALL")) and
+      (.conditions.ref_name.exclude == []) and (.bypass_actors | length == 0) and
+      (any(.rules[]; .type == "deletion")) and (any(.rules[]; .type == "non_fast_forward")) and
+      (any(.rules[]; .type == "pull_request" and
+        (.parameters.allowed_merge_methods == ["merge"]) and
+        (.parameters.required_approving_review_count >= 1) and
+        .parameters.dismiss_stale_reviews_on_push == true and
+        .parameters.require_last_push_approval == true and
+        .parameters.required_review_thread_resolution == true))' 2>/dev/null)" || return 1
+    [ "$status" != true ] || return 0
+  done
+  return 1
 }
 
 workflow_configure_repository_settings() {
@@ -368,4 +379,26 @@ workflow_check_or_configure() {
 
   printf '{"schema_version":"step-result/v2","ok":true,"operation":"development_workflow","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"研发流程已验证","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"development_workflow_verified","call":null},"repository":"%s","default_branch":"main","development_branch":"develop"}\n' \
     "$workflow_repository"
+}
+
+# 发布阶段只读检查；仓库初始化/配置仍由原有维护入口负责。
+workflow_check_delivery() {
+  local repository="$1" mode="$2"
+  workflow_check_default_main "$repository" && workflow_check_merge_commit "$repository" || {
+    workflow_fail release_repository_settings_required "远端交付要求默认 main 且允许 Merge commit" "请人工核查仓库设置；本地候选准备不受影响"
+    return 1
+  }
+  if [ "$mode" = hard ]; then
+    workflow_check_main_ruleset "$repository" || {
+      workflow_fail release_main_protection_required "远端交付缺少要求的 main 保护规则" "请独立审查并配置保护后重试；不得以 soft 绕过信任根审查"
+      return 1
+    }
+  fi
+}
+
+workflow_check_auto_merge() {
+  [ "$(workflow_gh_value "repos/$1" '.allow_auto_merge' 2>/dev/null)" = true ] || {
+    workflow_fail release_auto_merge_required "自动合并路径需要启用 Auto-merge" "可使用 submit-for-review 独立人工审查及合并，再用 recover 收尾；该路径不要求 Auto-merge"
+    return 1
+  }
 }

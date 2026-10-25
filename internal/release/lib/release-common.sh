@@ -328,20 +328,6 @@ release_require_synced_branch() {
   return 1
 }
 
-release_workflow_mode() {
-  local configure_workflow="$1"
-  local allow_soft_gate="${2:-false}"
-  if [ "$allow_soft_gate" = "true" ]; then
-    printf 'soft\n'
-  elif [ "$configure_workflow" = "true" ]; then
-    printf 'configure\n'
-  elif [ -t 0 ]; then
-    printf 'interactive\n'
-  else
-    printf 'check\n'
-  fi
-}
-
 release_require_version_tag_available() {
   local repo_root="$1"
   local version="$2"
@@ -675,7 +661,7 @@ release_verify_story_gate() {
   fi
 }
 
-release_submit_trust_root_review() {
+release_submit_review() {
   local repo_root="$1"
   local repository="$2"
   local version="$3"
@@ -685,12 +671,6 @@ release_submit_trust_root_review() {
   local confirmed="$7"
 
   release_verify_story_gate "$repo_root" origin/main "$head" true || return 1
-  if [ "$RELEASE_TRUST_ROOT_CHANGED" != "true" ]; then
-    release_fail "release_independent_review_not_required" "story_gate" \
-      "固定发布范围未修改发布信任根，应使用 publish 走常规发布流程" \
-      "请执行 release.sh publish，不要用独立审查提交通道"
-    return 1
-  fi
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1
   release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交独立审查 PR" || return 1
@@ -771,6 +751,19 @@ release_read_remote_tag() {
   RELEASE_REMOTE_TAG_COMMIT="${peeled:-$direct}"
   RELEASE_REMOTE_TAG_ANNOTATED="false"
   [ -z "$direct" ] || [ -z "$peeled" ] || RELEASE_REMOTE_TAG_ANNOTATED="true"
+}
+
+# 回读当前 Head 的独立批准，不以 PR 已合并或正文声明代替审查事实。
+release_check_independent_approval() {
+  local pr="$1" head="$2" author approved
+  author="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr" --repo tapstate/agentic-ops --json author --jq '.author.login' 2>/dev/null)" || return 1
+  [ -n "$author" ] || return 1
+  approved="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
+    --jq "add | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\" and .user.type == \"User\")" 2>/dev/null)" || return 1
+  [ "$approved" = true ] || {
+    release_fail release_independent_approval_required review "缺少当前候选 Head 的独立人工批准" "请在 GitHub 核实由 PR 作者以外的人员批准当前提交；不得用已合并状态代替审查"
+    return 1
+  }
 }
 
 release_read_merged_pr() {
@@ -857,13 +850,13 @@ release_inspect_state() {
     fi
   fi
   state=release_prepare_required
-  next_command="internal/release/release.sh prepare --version $version --allow-soft-gate"
+  next_command="internal/release/release.sh prepare --version $version"
   if [ "$pr_state" = MERGED ]; then
     RELEASE_BASE_COMMIT="$(git -C "$root" rev-parse "$merge^1")"
     release_validate_pr_binding "$url" "$version" "$head" || return 1
     release_verify_merge_commit "$root" "$head" "$merge" || return 1
     state=release_candidate_already_in_main
-    next_command="internal/release/release.sh recover --version $version --merged-pr $number --allow-soft-gate"
+    next_command="internal/release/release.sh recover --version $version --merged-pr $number"
     if [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
       if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != true ] || [ "$RELEASE_REMOTE_TAG_COMMIT" != "$merge" ]; then
         state=release_remote_tag_conflict; next_command=""
@@ -880,7 +873,7 @@ release_inspect_state() {
     fi
   elif [ "$pr_state" = OPEN ]; then
     state=release_waiting_manual_merge
-    next_command="internal/release/release.sh publish --version $version --allow-soft-gate --confirm-release"
+    next_command="" # 人工审查/保护/合并由研发处理，不能把等待审查引导成自动发布。
   elif [ "$pr_state" = CLOSED ]; then
     state=release_pr_closed; next_command=""
   elif [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
@@ -892,6 +885,8 @@ release_inspect_state() {
 
 release_recover_merged_candidate() {
   local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode="$6"
+  local soft_option=""
+  if [ "$protection_mode" = soft ]; then soft_option=" --allow-soft-gate"; fi
   local candidate merge_commit pr_url local_tag local_release remote_release develop_head material digest tagger tag_object old_ref zero_ref
   if ! printf '%s\n' "$pr_number" | grep -Eq '^[1-9][0-9]*$'; then
     release_fail "invalid_release_merged_pr" "recovery_validation" "恢复发布必须提供正整数 --merged-pr" "请先运行 release.sh inspect 确认关联的已合并 PR 编号"
@@ -923,12 +918,19 @@ release_recover_merged_candidate() {
     return 1
   fi
   release_run_full_verification "$repo_root" "$candidate" check || return 1
+  # 信任根交付始终需要受保护 main；普通历史 soft 恢复保留显式选择。
+  local delivery_mode="$protection_mode" trust_changes
+  trust_changes="$(release_story_gate_trust_root_changes "$repo_root" "$RELEASE_BASE_COMMIT" "$candidate")" || return 1
+  if [ -n "$trust_changes" ]; then delivery_mode=hard; soft_option=""; fi
+  protection_mode="$delivery_mode"
+  workflow_check_delivery tapstate/agentic-ops "$delivery_mode" || return 1
+  if [ "$delivery_mode" = hard ]; then release_check_independent_approval "$pr_number" "$candidate" || return 1; fi
   local_tag="$(git -C "$repo_root" rev-parse --verify "$version^{}" 2>/dev/null || true)"
-  material="$version|$pr_number|$candidate|$merge_commit|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
+  material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
   digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
   release_print_confirmation_bundle "$repo_root" "恢复已提前合入候选并发布不可变 Tag" "$version" "$candidate" "PR #$pr_number" main "候选已由独立 PR 合入；只创建缺失的正确 Tag，绝不覆盖已有 Tag。" "$pr_url" "$merge_commit"
   if [ "$confirmed" != "true" ]; then
-    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number --allow-soft-gate --confirm-release --confirm-recovery $digest"
+    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number$soft_option --confirm-release --confirm-recovery $digest"
     return 1
   fi
   if [ "$confirmation_digest" != "$digest" ]; then
@@ -1437,7 +1439,7 @@ release_resolve_prepared_fixed_branch() {
     return 0
   fi
   if [ -z "$local_head" ]; then
-    release_fail "release_prepare_required" "release_branch" "缺少已验证的固定发布分支 $branch" "请先执行 release.sh prepare --version ${branch#release/} --allow-soft-gate"
+    release_fail "release_prepare_required" "release_branch" "缺少已验证的固定发布分支 $branch" "请先执行 release.sh prepare --version ${branch#release/}"
     return 1
   fi
   RELEASE_FIXED_HEAD="$local_head"
