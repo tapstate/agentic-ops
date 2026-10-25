@@ -51,6 +51,8 @@ def takeover(base, request, operation_id, expected_revision):
             runtime = Path(base) / station_layout.station_name(base, "task-runtime")
             if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空；保留残留，尚未创建操作")
+        from workflow import jira_coordination
+        jira_coordination.require(base, issue)
         operation = operations.begin(base, "takeover", operation_id, expected_revision, request,
                                      before_create=lambda: source.refresh_shared_references(base))
         if operation["status"] == "done":

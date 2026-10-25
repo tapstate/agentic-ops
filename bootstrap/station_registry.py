@@ -255,6 +255,9 @@ def detach_preflight(product_root, station, purge=False, tree=None):
     current = task_store.read_current(station)
     if current["current"] is not None:
         raise ValueError("工位仍被任务占用，必须先归档并释放或清理，不能解绑")
+    from workflow import jira_coordination
+    if jira_coordination.pending(station):
+        raise ValueError("Jira 协调记录尚未结束回读；清理可完成，注销前先 coordination end/complete 收尾")
     operation_path = state_root / "operation.json"
     if operation_path.exists():
         if operation_path.is_symlink():
@@ -289,7 +292,7 @@ def remove_empty_parents(paths, tree):
 def detach(product_root, station, purge=False, allow_product_lifecycle=False):
     station = Path(station).resolve()
     lock = task_store.task_state_lock(
-        station, allow_product_lifecycle=allow_product_lifecycle
+        station, execution=False, allow_product_lifecycle=allow_product_lifecycle
     )
     with lock:
         with StationDirectory(station) as tree:
@@ -298,6 +301,9 @@ def detach(product_root, station, purge=False, allow_product_lifecycle=False):
             deletable, _ = detach_preflight(
                 product_root, station, purge=purge, tree=tree
             )
+            # 注销只收尾本地空闲工位，仍核验本地执行者，不重新取得 Jira 任务。
+            from workflow import execution
+            execution.enter(station, coordination=False)
             for relative in deletable:
                 tree.unlink(relative)
 

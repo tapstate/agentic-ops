@@ -66,6 +66,9 @@ class StationTests(unittest.TestCase):
         self.request = {"issue_key": "TAP-123", "task_class": "technical_task", "version": "develop", "profile": "full-application",
                         "explicit_branches": {name: "develop" for name in profile["repositories"]}}
 
+        from station_fixture import coordination_proof
+        coordination_proof(self.ws, self.request["issue_key"])
+
     def write(self, path, value):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value))
@@ -78,6 +81,8 @@ class StationTests(unittest.TestCase):
     def takeover(self, operation="op-takeover-one"):
         if not hasattr(self, "seed"):
             self.prepare_engineering()
+        from station_fixture import coordination_proof
+        coordination_proof(self.ws, self.request["issue_key"])
         revision = task_store.read_current(self.ws)["revision"]
         station.takeover(self.ws, self.request, operation, revision)
         task = task_store.read_task(self.ws)
@@ -295,6 +300,8 @@ class StationTests(unittest.TestCase):
                                continuations={'tapdata/tapdata': {
                                    'work_branch': 'fix/recovered', 'baseline_sha': old,
                                    'expected_head': head}})
+                from station_fixture import coordination_proof
+                coordination_proof(ws, request['issue_key'])
                 station.takeover(ws, request, 'op-recover-' + str(epoch), 0)
                 task = task_store.read_task(ws)
                 self.assertEqual(old, task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'])

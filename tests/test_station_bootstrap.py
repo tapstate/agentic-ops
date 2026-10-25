@@ -334,6 +334,30 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertFalse((self.station / '.agenticops').exists(),
                          'An in-flight cache refresh recreated state after successful purge')
 
+    def test_pending_jira_coordination_prevents_losing_receipt_on_detach(self):
+        from workflow import jira_coordination, project_rules
+        site = project_rules.load_profile(station=self.station)['jira']['site'].rstrip('/')
+        snapshot = {'site': site, 'issue_id': '123', 'issue_key': 'TAP-123',
+                    'source_ref': 'fixture:jira', 'pages': [
+                        {'startAt': 0, 'total': 0, 'isLast': True, 'comments': []}]}
+        view = jira_coordination.run(self.station, 'check', snapshot)
+        jira_coordination.run(self.station, 'prepare', snapshot, 'claim-before-purge',
+                              executor='fixture', expected_digest=view['digest'])
+        with self.assertRaisesRegex(ValueError, 'Jira 协调记录尚未结束'):
+            registry.detach(ROOT, self.station, purge=True)
+        self.assertTrue(jira_coordination.pending(self.station))
+        jira_coordination.run(self.station, 'cancel', snapshot, claim_id='claim-before-purge',
+                              decision_ref='fixture:从未发送')
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertFalse((self.station / '.agenticops/station.json').exists())
+
+    def test_purge_removes_empty_operation_data_before_reinitialization(self):
+        (self.station / '.agenticops/operation-data').mkdir()
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertFalse((self.station / '.agenticops').exists())
+        self.init()
+        self.assertEqual(0, self.render('--check').returncode)
+
     def test_active_task_and_pending_operation_prevent_detach(self):
         state = self.station / '.agenticops/current-task.json'
         original = state.read_bytes()

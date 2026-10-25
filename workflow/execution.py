@@ -9,7 +9,6 @@ import time
 from workflow import task_store
 
 SESSION_ENV = 'AGENTICOPS_EXECUTION_ID'
-IDLE_SECONDS = 8 * 3600
 
 
 def session_id():
@@ -44,11 +43,9 @@ def status(base):
     control = current.get('execution_control')
     validate(control)
     if control is None:
-        return {'status': 'unclaimed', 'idle_threshold_hours': 8, 'control_digest': digest(None)}
-    age = time.time() - control['last_activity_epoch']
-    return {'status': 'occupied', **control, 'idle_hours': max(0, age) / 3600,
-            'control_digest': digest(control), 'idle_threshold_hours': 8, 'idle': age >= IDLE_SECONDS,
-            'boundary': '闲置不证明原生进程已停；转移前核实原会话及在途操作，8 小时内另需用户决定'}
+        return {'status': 'unclaimed', 'control_digest': digest(None)}
+    return {'status': 'occupied', **control, 'control_digest': digest(control),
+            'boundary': '仅保护本地写入；8 小时提示统一由 Jira coordination 判定'}
 
 
 def _save(base, current, control):
@@ -57,12 +54,15 @@ def _save(base, current, control):
     task_store._write_json_atomic(task_store.current_path(base), current)
 
 
-def enter(base):
+def enter(base, coordination=True):
     """调用者持有工位锁；首次有效会话自动占用，其它会话须显式交接。"""
     identity = session_id()
     current = task_store.read_current(base)
     control = current.get('execution_control')
     validate(control)
+    if coordination and current['current'] is not None:
+        from workflow import jira_coordination
+        jira_coordination.require(base, current['current']['issue_key'])
     if control is None:
         control = {'session_id': identity, 'executor': os.environ.get('AGENTICOPS_EXECUTOR', 'Agent 会话'),
                    'last_activity_epoch': time.time(), 'handoff': None}
@@ -116,10 +116,7 @@ def claim(base, executor, expected_control_digest=None, conflict_check_ref=None,
         handoff = None
         if old:
             if not isinstance(conflict_check_ref, str) or not conflict_check_ref.strip():
-                raise ValueError('先核实原执行者已停写及在途操作，提供 conflict-check-ref；8 小时超时不能证明无冲突')
-            age = time.time() - old['last_activity_epoch']
-            if age < IDLE_SECONDS and (not isinstance(decision_ref, str) or not decision_ref.strip()):
-                raise ValueError('原会话在 8 小时内有活动，需要用户明确交接决定 decision-ref')
+                raise ValueError('先核实原执行者已停写及在途操作，提供 conflict-check-ref；本地转移不授予 Jira 任务接管')
             handoff = {'previous_session_id': old['session_id'], 'conflict_check_ref': conflict_check_ref,
                        'decision_ref': decision_ref, 'previous_activity_epoch': old['last_activity_epoch']}
         _save(base, current, {'session_id': identity, 'executor': executor.strip(),

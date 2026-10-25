@@ -111,6 +111,8 @@ def validate_current(document):
         raise ValueError("工位状态结构无效：%s" % error) from error
     from workflow import execution
     execution.validate(document.get("execution_control"))
+    from workflow import jira_coordination
+    jira_coordination.validate(document.get("jira_coordination"))
     current = document["current"]
     if current is None:
         return document
@@ -154,6 +156,8 @@ def compare_and_set(base, expected_revision, current):
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
     if "execution_control" in before:
         value["execution_control"] = copy.deepcopy(before["execution_control"])
+    if "jira_coordination" in before:
+        value["jira_coordination"] = copy.deepcopy(before["jira_coordination"])
     validate_current(value)
     _write_json_atomic(current_path(base), value)
     return value

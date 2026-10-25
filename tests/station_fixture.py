@@ -69,6 +69,7 @@ def save_task(base, task):
         current = task_store.compare_and_set(base, current["revision"], None)
     task["_revision"] = current["revision"]
     task_store.write_task(base, task)
+    coordination_proof(base, task["issue_key"])
     normalized = task_store.read_task(base, task["issue_key"])
     task["repositories"] = normalized["repositories"]
 
@@ -97,3 +98,18 @@ def task_state_snapshot(station):
     value = task_store.read_current(station)
     value.pop("execution_control", None)
     return value
+
+
+def coordination_proof(base, issue_key, identity=None):
+    """其它功能规则夹具的已核实协调事实；协调专项另测原生分页及实际意图回读。"""
+    import os
+    from workflow import project_rules, execution, station_context
+    current = task_store.read_current(base)
+    root, project = project_rules.station_context(base)
+    profile_path = Path(root) / 'projects' / project / 'profile.json'
+    profile = json.loads(profile_path.read_text()) if profile_path.exists() else {}
+    current['jira_coordination'] = {'entries': {}, 'proof': {
+        'site': profile.get('jira', {}).get('site', 'https://fixture.atlassian.net').rstrip('/'),
+        'issue_id': '123', 'issue_key': issue_key, 'session_id': identity or os.environ.get(execution.SESSION_ENV, 'a'*32),
+        'station_id': station_context.read_binding(base)['station_id'], 'comment_id': '123', 'digest': 'a'*64, 'valid': True}}
+    task_store._write_json_atomic(task_store.current_path(base), current)

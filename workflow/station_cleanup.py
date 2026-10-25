@@ -112,6 +112,9 @@ def finish(base, operation, identity):
         operation['cleanup_result']['residuals'] = residuals
         operations.save(base, operation)
         return operation
+    from workflow import jira_coordination
+    if jira_coordination.pending(base):
+        operation['cleanup_result']['coordination'] = jira_coordination.cleanup_notice(base)
     operation['cleanup_result']['complete'] = True
     operations.finish(base, operation)
     if not operation['cleanup_result']['complete']:
@@ -145,7 +148,7 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
             if task and (task['issue_key'] != issue or task['run_id'] != run_id):
                 raise ValueError('当前任务已变化')
         # 使用已有工位锁串行检查所有权；不通过嵌套写锁升级只读锁。
-        identity = execution.enter(base)
+        identity = execution.enter(base, coordination=False)
         if same:
             operation = old
             if operation['phase'] == 'finalizing':

@@ -15,6 +15,8 @@ metadata:
 
 ## 接管与恢复
 
+接管前、恢复及每个新工作段先按[任务级协调入口](../../../../docs/architecture/single-task-station.md#执行接管当前源码)回读 Jira 任务身份与完整评论分页，使用 coordination check/prepare/complete 核验接管。报活更新自己的专用评论，交接需要时核实停写并取得人工决定；不得仅凭本地 execution claim 或旧回读继续。清理后回读协调待办并 end/complete，只结束本工位记录，不夺回已交接任务。旧安装按其合同，不手改状态迁移。
+
 用户以 Jira key 要求继续已有任务、跨版本升级后接续，或升级前保全进展时，使用共享 [ao-task-resume](../../../../skills/shared/ao-task-resume/SKILL.md)。Jira/GitHub 保存有效设计、决定、真实历史基线与完整 Head、验证和剩余事项；缺项由 AI 核实并协助用户补齐。该技能只整理可信输入，接管、授权、质量和状态写入仍使用本 Skill 的现役入口，不解析旧 epoch 或复制旧 PASS。
 
 需要配置、部署、更新、检查、切换或卸载工位 Docker 开发环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，正常退出先由脚本处理已支持的运行资源，返回未完成容器时再由该 Skill 接力。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 IT为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。

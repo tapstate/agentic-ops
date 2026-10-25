@@ -71,9 +71,7 @@ class ExecutionTests(unittest.TestCase):
         os.environ[execution.SESSION_ENV] = B
         with self.assertRaisesRegex(ValueError, '已有执行接管者'):
             self.heartbeat()
-        with self.assertRaisesRegex(ValueError, '用户明确'):
-            self.transfer(decision=None)
-        self.transfer()
+        self.transfer(decision=None)
         self.heartbeat()
         os.environ[execution.SESSION_ENV] = A
         with self.assertRaisesRegex(ValueError, '已有执行接管者'):
@@ -85,7 +83,7 @@ class ExecutionTests(unittest.TestCase):
         os.environ[execution.SESSION_ENV] = B
         with mock.patch.object(execution.time, 'time', return_value=100+8*3600):
             observed = execution.status(self.ws)
-            self.assertTrue(observed['idle'])
+            self.assertNotIn('idle', observed)
             with self.assertRaisesRegex(ValueError, '已有执行接管者'):
                 self.heartbeat()
             with self.assertRaisesRegex(ValueError, 'conflict-check-ref'):

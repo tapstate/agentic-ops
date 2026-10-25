@@ -20,7 +20,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
-from station_fixture import product_cli, save_task as save_station_task, initialize_station
+from station_fixture import product_cli, save_task as save_station_task, initialize_station, coordination_proof
 from workflow import pr_body
 
 
@@ -2511,6 +2511,7 @@ class FeatureFlowTests(unittest.TestCase):
             self.apply("verification", self.local_material)
 
     def test_cli_intake_failure_recovery_upstream_merge_and_pr_ready(self):
+        coordination_proof(self.ws, "TAP-123")
         self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop")
         run = self.read()["run_id"]
         self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop", expected=2)

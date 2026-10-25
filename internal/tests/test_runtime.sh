@@ -63,6 +63,7 @@ run_product tests/test_station_archive_selection.py
 run_product tests/test_station_records.py
 run_product tests/test_task_handoff.py
 run_product tests/test_execution.py
+run_product tests/test_jira_coordination.py
 run_product tests/test_station_clean.py
 run_product tests/test_cleanup_tree.py
 run_product tests/test_source_preservation.py

@@ -7,6 +7,7 @@ import unittest
 from unittest import mock
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parent)]
 import test_station_records as records
+from station_fixture import coordination_proof
 from workflow import station, station_archive, station_operation, task_store, task_handoff
 
 
@@ -72,6 +73,8 @@ class HandoffTests(unittest.TestCase):
         self.request = {
             'issue_key': 'TAP-123', 'task_class': 'technical_task', 'version': 'develop',
             'profile': 'full-application', 'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation}
+        # 归档不携带接管权；本测试单独提供新工位已核实交接的夹具。
+        coordination_proof(self.ws, 'TAP-123')
         station.takeover(self.ws, self.request, 'op-new-handoff-run', 0)
         recovered = task_store.read_task(self.ws)
         row = continuation['tapdata/tapdata']
