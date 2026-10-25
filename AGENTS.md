@@ -76,7 +76,7 @@ bash internal/tests/test_release.sh
 
 - 默认分支是 `main`，日常开发分支是 `develop`；`main` 禁止直接提交和普通直推。
 - 发布与 Hotfix 执行前读取[维护指引](docs/maintenance-guide.md#6-发布与-hotfix)，使用既有发布脚本；`main` 仅以 Merge commit 合入，Tag 绑定实际合并提交。
-- 发布方式按候选与目标 `main` 的 `station_state_epoch` 选择：未跨 epoch 默认使用 Hotfix，尽量不创建新版本标签；跨 epoch 必须正式发布并创建新版本标签。具体判定与例外遵循维护指引，不改变发布授权和独立人工审查要求。
+- 发布方式按交付需要选择：正式版本使用版本 Tag，Hotfix 不创建 Tag；epoch 只说明工位数据兼容性，不决定发布方式。具体行为遵循维护指引，不改变发布授权和独立人工审查要求。
 - 候选涉及信任根（Hook、Adapter Runtime/分类策略、故事门禁、注册表、锁文件或发布脚本）时，自动发布失败关闭，须经受保护 `main` 的独立人工审查 PR。
 
 ## 提交与授权

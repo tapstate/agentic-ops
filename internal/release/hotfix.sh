@@ -72,11 +72,6 @@ release_hotfix_candidate() {
     exit 0
   fi
   release_preflight_candidate "$repo_root" "$head" || exit 1
-  epoch_mode="$(release_verification epoch --root "$repo_root" --base "$RELEASE_BASE_COMMIT" --head "$head")" || exit 1
-  if [ "$epoch_mode" != same ]; then
-    release_fail hotfix_epoch_changed preflight "跨 epoch 变更必须正式发布并创建版本 Tag" "使用 release.sh prepare --version vX.Y，不得用无标签 Hotfix"
-    exit 1
-  fi
   release_verify_story_gate "$repo_root" origin/main "$head" true || exit 1
   release_run_full_verification "$repo_root" "$head" ensure || exit 1
   release_check_base_unchanged "$repo_root" || exit 1

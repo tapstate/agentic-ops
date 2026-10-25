@@ -381,12 +381,12 @@ else: sys.exit(2)
         self.assertEqual(commit, self.git('rev-parse', 'develop', root=bare))
         self.assertEqual(4, self.count())
 
-    def test_cross_epoch_hotfix_rejected_before_release_tests(self):
+    def test_cross_epoch_hotfix_preserves_independent_review(self):
         bare, _ = self.hotfix_fixture(cross_epoch=True)
         result = self.hotfix_call()
         self.assertNotEqual(0, result.returncode)
-        self.assertIn('hotfix_epoch_changed', result.stderr)
-        self.assertEqual(0, self.count())
+        self.assertIn('waiting_for_manual_merge', result.stdout)
+        self.assertEqual(4, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
 
     def test_same_epoch_ordinary_hotfix_atomically_publishes_without_pr(self):
@@ -535,8 +535,37 @@ else: sys.exit(2)
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual(4, self.count())
 
+    def test_local_candidate_replacement_retains_old_commit_and_refuses_remote_review(self):
+        bare, state = self.hotfix_fixture()
+        self.git('branch', 'release/v1.4', self.base)
+        gh = self.area / 'candidate-gh'
+        gh.write_text('#!/bin/sh\nprintf "%s\\n" "${TEST_PR_COUNT:-0}"\n')
+        gh.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
+        command = f'RELEASE_REPLACE_CANDIDATE={self.base}\nrelease_prepare_fixed_branch "$PWD" release/v1.4 {self.head}'
+        missing = self.shell(f'release_prepare_fixed_branch "$PWD" release/v1.4 {self.head}', check=False)
+        self.assertIn('release_fixed_branch_conflict', missing.stderr)
+        self.env['TEST_PR_COUNT'] = '1'
+        refused = self.shell(command, check=False)
+        self.assertIn('release_candidate_review_exists', refused.stderr)
+        self.assertEqual(self.base, self.git('rev-parse', 'release/v1.4'))
+        self.env['TEST_PR_COUNT'] = '0'
+        self.git('push', '-q', 'origin', 'release/v1.4')
+        refused = self.shell(command, check=False)
+        self.assertIn('release_fixed_branch_conflict', refused.stderr)
+        self.git('push', '-q', 'origin', ':release/v1.4')
+        worktree = self.area / 'candidate-worktree'
+        self.git('worktree', 'add', '-q', str(worktree), 'release/v1.4')
+        refused = self.shell(command, check=False)
+        self.assertIn('release_candidate_checked_out', refused.stderr)
+        self.git('worktree', 'remove', str(worktree))
+        self.shell(command)
+        self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
+        self.assertEqual(self.base, self.git('rev-parse', 'codex/superseded-release-v1.4-' + self.base))
+        self.assertEqual(0, self.count())
+
     def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
-        bare, state = self.hotfix_fixture(cross_epoch=True)
+        bare, state = self.hotfix_fixture(cross_epoch=False)
         shutil.rmtree(self.root / '.local/story-gate')
         unrelated = self.area / 'unrelated-history'
         unrelated.mkdir()

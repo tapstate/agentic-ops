@@ -1411,8 +1411,20 @@ release_check_fixed_branch() {
     return 0
   fi
   if [ -n "$local_head" ] && [ "$local_head" != "$candidate_head" ]; then
-    release_fail "release_fixed_branch_conflict" "release_branch" "本地 $branch 不是本次已验证的固定 HEAD" "请人工核查固定发布分支，禁止移动"
-    return 1
+    if [ "${RELEASE_REPLACE_CANDIDATE:-}" != "$local_head" ]; then
+      release_fail release_fixed_branch_conflict release_branch "本地 $branch 已有其它候选" "核对范围后用 prepare --version ${branch#release/} --replace-candidate $local_head 重新准备；旧提交与证据保留"
+      return 1
+    fi
+    if git -C "$repo_root" worktree list --porcelain | grep -Fxq "branch refs/heads/$branch"; then
+      release_fail release_candidate_checked_out release_branch "候选分支仍在工位中检出" "先保全该工位并切换其它分支，再重新准备"
+      return 1
+    fi
+    local prs
+    prs="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --head "$branch" --state all --json number --jq 'length')" || return 1
+    if [ "$prs" != 0 ]; then
+      release_fail release_candidate_review_exists release_branch "旧候选已有 PR 或无法确认 PR 状态" "保留现有候选，先核实原审查；本地替换仅适用于未提交审查的候选"
+      return 1
+    fi
   fi
   RELEASE_FIXED_HEAD="$candidate_head"
 }
@@ -1420,7 +1432,15 @@ release_check_fixed_branch() {
 release_prepare_fixed_branch() {
   local repo_root="$1" branch="$2" candidate_head="$3"
   release_check_fixed_branch "$repo_root" "$branch" "$candidate_head" || return 1
-  if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
+  local old_head backup
+  old_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
+  if [ -n "$old_head" ] && [ "$old_head" != "$candidate_head" ]; then
+    backup="refs/heads/codex/superseded-${branch//\//-}-$old_head"
+    # 旧引用同时成为保留分支；CAS 防止验收期间候选被其它会话改变。
+    printf 'start\ncreate %s %s\nupdate refs/heads/%s %s %s\nprepare\ncommit\n' \
+      "$backup" "$old_head" "$branch" "$candidate_head" "$old_head" |
+      git -C "$repo_root" update-ref --stdin || return 1
+  elif [ -z "$old_head" ]; then
     git -C "$repo_root" branch "$branch" "$candidate_head" || {
       release_fail release_fixed_branch_create_failed release_branch "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
       return 1

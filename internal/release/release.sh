@@ -25,7 +25,7 @@ wait_for_merge="true"
 merged_pr=""
 confirm_recovery=""
 RELEASE_JIRA_ID=""
-same_epoch_reason=""
+RELEASE_REPLACE_CANDIDATE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jira)
@@ -34,9 +34,9 @@ while [ "$#" -gt 0 ]; do
       release_validate_jira_id "$RELEASE_JIRA_ID" || exit 1
       shift 2
       ;;
-    --same-epoch-reason)
+    --replace-candidate)
       [ "$#" -ge 2 ] || exit 1
-      same_epoch_reason="$2"
+      RELEASE_REPLACE_CANDIDATE="$2"
       shift 2
       ;;
     --version)
@@ -91,6 +91,11 @@ if [ "$wait_for_merge" = "false" ] && { [ "$command_name" != "publish" ] || [ "$
   exit 1
 fi
 
+if [ -n "$RELEASE_REPLACE_CANDIDATE" ] && [ "$command_name" != prepare ]; then
+  release_fail invalid_release_argument argument_parsing "--replace-candidate 只用于本地 prepare" "重试 prepare 并指定旧候选完整 SHA"
+  exit 1
+fi
+
 RELEASE_IDENTITY="$version"
 RELEASE_BASE_COMMIT=""
 if [ "$command_name" != inspect ]; then release_lock_operation "$repo_root" || exit 1; fi
@@ -125,11 +130,6 @@ case "$command_name" in
     release_require_version_tag_available "$repo_root" "$version" || exit 1
     release_check_fixed_branch "$repo_root" "release/$version" "$prepare_head" || exit 1
     release_preflight_candidate "$repo_root" "$prepare_head" || exit 1
-    epoch_mode="$(release_verification epoch --root "$repo_root" --base "$RELEASE_BASE_COMMIT" --head "$prepare_head")" || exit 1
-    if [ "$epoch_mode" = same ] && { [ -z "$same_epoch_reason" ] || [ -z "$RELEASE_JIRA_ID" ]; }; then
-      release_fail release_same_epoch_reason_required preflight "同 epoch 默认 Hotfix" "正式版本需 --jira 与 --same-epoch-reason，说明已在 Jira 记录的版本发布理由及授权"
-      exit 1
-    fi
     release_verify_story_gate "$repo_root" origin/main "$prepare_head" true "" || exit 1
     release_run_full_verification "$repo_root" "$prepare_head" || exit 1
     release_branch="release/$version"

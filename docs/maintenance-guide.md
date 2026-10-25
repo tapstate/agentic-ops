@@ -213,12 +213,7 @@ internal/acceptance.sh --list
 
 ## 6. 发布与 Hotfix
 
-发布前比较候选与目标 `main` 的 `contracts/station-state-compatibility.json` 中 `station_state_epoch`，选择发布方式：
-
-- 未跨 epoch：默认使用 Hotfix，尽量不创建新版本标签。确有独立版本发布需要时，在 Jira 说明理由，并取得针对该候选的正式发布与 Tag 授权。
-- 跨 epoch：必须使用正式发布流程并创建新版本标签，不得以无标签 Hotfix 代替。Tag 绑定实际 Merge commit；工位升级仍遵循[更新与回退](usage/update-and-rollback.md)的原版本退出、归档、purge 与重建要求。
-
-epoch 只表示工位状态兼容性，不得为创建标签而提升 epoch，也不得为使用 Hotfix 而保留本应提升的 epoch。上述选择不豁免既有验证、发布授权或信任根变更的独立人工审查要求。
+发布方式按交付需要选择：需要可识别的版本时使用正式发布和 Tag，快速补丁可用 Hotfix。`station_state_epoch` 只说明工位状态兼容风险，不决定发布方式；同 epoch 发布无需额外理由，跨 epoch 不禁止 Hotfix。升级操作仍遵循[更新与回退](usage/update-and-rollback.md)，发布方式不能豁免工位兼容检查或成果保全。Tag 绑定实际 Merge commit。
 
 正式版本发布分为本地候选准备、独立人工审查和远端交付，复用同一固定候选与发布证据，不新增发布状态机：
 
@@ -230,7 +225,7 @@ epoch 只表示工位状态兼容性，不得为创建标签而提升 epoch，�
 
 普通候选也可选择同一人工审查路径，不因关闭 Auto-merge 自阻塞。信任根仍禁止自动发布；人工合并前必须由维护者核验受保护 main、独立审查及 GitHub 必需检查。`recover` 在 Tag 前再次核验保护与当前候选批准，并拒绝尚未解除的要求修改审查，不能用“已合并”代替独立审查。规则集检查接受不同名称、至少一人批准及更严格 Code Owner 要求；当前支持单个有效、无绕过、无排除且明确覆盖 main（或默认/全部分支）的规则集，不推断传统保护或多个规则集组合等价。规则要求 Merge commit、禁止删除及强推、撤销过期审批、最新推送由他人批准及讨论解决。
 
-软门禁交付仅为普通候选保留显式 `--allow-soft-gate`，不表示独立审查只能走 soft，也不能豁免信任根交付所需的 main 保护。发布命令不再接受 `--configure-workflow` 代为配置仓库；治理配置应单独审查和授权。版本及候选在合并前固定，发布版本使用 `v1.x`；同 epoch 的正式版本准备还须提供 `--jira <编号> --same-epoch-reason <已在 Jira 记录的理由>`。发布从固定实现快照执行，测试只读取固定 Git 候选，不自动提交、stash 或清理用户工作区；发布实现自身有未提交修改时停止，先审查实现。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。上述分阶段行为为当前源码能力，旧安装仍按其版本执行，不因本文自行绕过旧入口。
+软门禁交付仅为普通候选保留显式 `--allow-soft-gate`，不表示独立审查只能走 soft，也不能豁免信任根交付所需的 main 保护。发布命令不再接受 `--configure-workflow` 代为配置仓库；治理配置应单独审查和授权。发布版本使用 `v1.x`；提交审查和交付时核对实际候选，候选变化后旧批准失效。发布从固定实现快照执行，测试只读取固定 Git 候选，不自动提交、stash 或清理用户工作区；发布实现自身有未提交修改时停止，先审查实现。`publish`、合并和 Tag 需要针对实际候选范围的明确授权。上述分阶段行为为当前源码能力，旧安装仍按其版本执行，不因本文自行绕过旧入口。
 
 Hotfix 只能使用：
 
@@ -238,13 +233,13 @@ Hotfix 只能使用：
 internal/release/hotfix.sh <JIRA-KEY>
 ```
 
-明确调用该 Hotfix 入口是快速修复授权。同 epoch 普通变更在固定验收后原子更新 `main` 与 `develop`；同 epoch 信任根变更仍由此入口编排独立人工 PR，禁止自动直推 `main`，合并后重新调用同一命令完成无标签收尾。跨 epoch 拒绝 Hotfix，必须使用正式版本流程。冲突、分叉或回读不明时停止受影响动作。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
+明确调用该 Hotfix 入口是快速修复授权。普通变更在固定验收后原子更新 `main` 与 `develop`；信任根变更仍由此入口编排独立人工 PR，禁止自动直推 `main`，合并后重新调用同一命令完成无标签收尾。冲突、分叉或回读不明时停止受影响动作。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
 详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。
 
 ### 发布验证复用与合并后收尾
 
-`prepare` 先核验候选已包含固定 `main` 基线、版本占用及可信故事影响映射，再在隔离环境独立执行四项；正式版本各入口使用可信 main 的普通影响分析核验故事映射，并按原规则识别信任根；`submit-for-review`/`publish` 复用同一有效发布证据及本次明确操作确认，不再要求额外的开发范围验收或批准记录。普通开发分支的提交/推送门禁及 Hotfix 材料检查保持原规则，不将发布证据写成开发证据或 GitHub 独立批准。结果保存于 `.local/release/`，测试原始日志保留在其中的私有运行目录。`submit-for-review`、`publish` 和 `recover` 只消费同一有效发布证据。固定发布分支冲突在完整验收前检查，创建分支前再次回读；不移动已有固定分支。`inspect` 发现本地固定候选后引导提交审查，由该入口检查证据和操作确认，不引导用新的 develop 重做准备。`inspect` 和不带确认参数的 `recover` 不执行测试；缺证据时明确要求补验，不因查询或生成确认参数重复测试。
+`prepare` 先核验候选已包含固定 `main` 基线、版本占用及可信故事影响映射，再在隔离环境独立执行四项；正式版本各入口使用可信 main 的普通影响分析核验故事映射，并按原规则识别信任根；`submit-for-review`/`publish` 复用同一有效发布证据及本次明确操作确认，不再要求额外的开发范围验收或批准记录。普通开发分支的提交/推送门禁及 Hotfix 材料检查保持原规则，不将发布证据写成开发证据或 GitHub 独立批准。结果保存于 `.local/release/`，测试原始日志保留在其中的私有运行目录。`submit-for-review`、`publish` 和 `recover` 只消费同一有效发布证据。固定发布分支冲突在完整验收前检查。纯本地候选可用 `prepare --version vX.Y --replace-candidate <旧完整SHA>` 重新准备同一版本，不消耗新版本号；必须确认无远端发布分支、PR 或 Tag，且候选未在其它工作树检出。验收完成后复查，并原子保留旧提交到 `codex/superseded-*`、更新候选；旧证据保留，但不作为新候选证据。已进入远端审查的候选不由本地 prepare 覆盖。只撤销本地候选可保留提交和证据后用 Git 删除本地 release 分支，不删除远端分支或已发布 Tag；旧安装的 Hook 尚不支持时不绕过。`inspect` 发现本地固定候选后引导提交审查，由该入口检查证据和操作确认，不引导用新的 develop 重做准备。`inspect` 和不带确认参数的 `recover` 不执行测试；缺证据时明确要求补验，不因查询或生成确认参数重复测试。
 
 需要显式重验时使用 `internal/release/release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <PR编号>`。恢复使用 `inspect --version vX.Y --merged-pr <PR编号>` 核对事实，再按输出执行 `recover`；确认参数绑定版本、PR、候选及实际合并和 Tag 状态，有效授权不因分步命令重复索取。Hotfix 没有有效证据时在自身入口补一次独立验收，不使用正式版本 Tag。
 
