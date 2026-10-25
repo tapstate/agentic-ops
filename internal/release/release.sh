@@ -123,6 +123,7 @@ case "$command_name" in
     protection_mode="hard"
     if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
     release_require_version_tag_available "$repo_root" "$version" || exit 1
+    release_check_fixed_branch "$repo_root" "release/$version" "$prepare_head" || exit 1
     release_preflight_candidate "$repo_root" "$prepare_head" || exit 1
     epoch_mode="$(release_verification epoch --root "$repo_root" --base "$RELEASE_BASE_COMMIT" --head "$prepare_head")" || exit 1
     if [ "$epoch_mode" = same ] && { [ -z "$same_epoch_reason" ] || [ -z "$RELEASE_JIRA_ID" ]; }; then
@@ -160,7 +161,7 @@ case "$command_name" in
     fi
     release_require_version_tag_available "$repo_root" "$version" || exit 1
     release_preflight_candidate "$repo_root" "$release_head" || exit 1
-    release_verify_story_gate "$repo_root" origin/main "$release_head" || exit 1
+    release_verify_story_gate "$repo_root" origin/main "$release_head" false "" || exit 1
     release_run_full_verification "$repo_root" "$release_head" check || exit 1
     workflow_check_delivery tapstate/agentic-ops "$protection_mode" || exit 1
     if [ "$protection_mode" = hard ]; then workflow_check_auto_merge tapstate/agentic-ops || exit 1; fi

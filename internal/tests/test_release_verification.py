@@ -513,6 +513,9 @@ else: sys.exit(2)
 
     def test_formal_trust_review_keeps_jira_and_reuses_release_evidence(self):
         self.hotfix_fixture()
+        automatic = self.shell(f'release_verify_story_gate "$PWD" origin/main {self.head} false ""', check=False)
+        self.assertIn('release_story_gate_trust_root_changed', automatic.stderr)
+        self.assertEqual(0, self.count())
         self.verifier().execute('ensure')
         result = self.shell(f'RELEASE_IDENTITY=v1.4\nRELEASE_JIRA_ID=AO-262\nRELEASE_BASE_COMMIT={self.base}\n'
                             + f'release_submit_review "$PWD" tapstate/agentic-ops v1.4 release/v1.4 {self.head} hard true')
@@ -534,9 +537,11 @@ else: sys.exit(2)
 
     def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
         bare, state = self.hotfix_fixture(cross_epoch=True)
-        history = self.area / 'history'
-        shutil.copytree(self.root / '.local/story-gate', history)
         shutil.rmtree(self.root / '.local/story-gate')
+        unrelated = self.area / 'unrelated-history'
+        unrelated.mkdir()
+        (self.root / '.local/story-gate').symlink_to(unrelated, target_is_directory=True)
+        # 正式版本不消费开发台账，甚至不应沿无关链接读取或写入。
         # 本地准备没有范围验收或人工批准历史，也应执行自己的独立验收。
         # 隔离远端使用真实 bare 仓库；仅映射传输身份，不替换发布判定。
         bin_dir = self.area / 'bin'
@@ -557,6 +562,12 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
                                       cwd=self.root, env=self.env, capture_output=True, text=True)
             self.assertIn('release_configuration_separate', rejected.stderr)
             self.assertFalse(state.exists())
+        self.git('branch', 'release/v1.4', self.base)
+        conflict = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
+                                  cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertIn('release_fixed_branch_conflict', conflict.stderr)
+        self.assertEqual(0, self.count())
+        self.git('branch', '-D', 'release/v1.4')
         result = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -565,17 +576,30 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
         self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
         self.assertEqual(4, self.count())
+        inspected = subprocess.run(['bash', 'internal/release/release.sh', 'inspect', '--version', 'v1.4'],
+                                   cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, inspected.returncode, inspected.stderr)
+        self.assertIn('submit-for-review', json.loads(inspected.stdout)['next_command'])
+        self.assertEqual(4, self.count())
         verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--version', 'v1.4'],
                                   cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
         self.assertEqual(8, self.count())
-        blocked = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--confirm-release'],
+        blocked = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4'],
                                  cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertNotEqual(0, blocked.returncode)
-        self.assertIn('release_story_gate_blocked', blocked.stderr)
+        self.assertIn('release_confirmation_required', blocked.stderr)
         self.assertFalse(state.exists())
         self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
-        shutil.copytree(history, self.root / '.local/story-gate', dirs_exist_ok=True)
+        record = self.verifier().path
+        saved = record.read_text()
+        record.unlink()
+        missing = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--confirm-release'],
+                                 cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertIn('release_verification_required', missing.stderr)
+        self.assertFalse(state.exists())
+        self.assertEqual(8, self.count())
+        record.write_text(saved)
         result = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--jira', 'AO-262', '--confirm-release'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -583,6 +607,7 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         self.assertEqual('OPEN', json.loads(state.read_text())['state'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual('', self.git('tag', root=bare))
+        self.assertEqual([], list(unrelated.iterdir()))
         self.assertEqual(8, self.count())
 
     def governance_gh(self):
@@ -632,8 +657,13 @@ sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(
                        dict(user=dict(login='bot', type='Bot')), dict(state='DISMISSED')):
             self.reviews.write_text(json.dumps([[dict(review, **change)]]))
             self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, user=dict(login='second', type='User'), state='CHANGES_REQUESTED')]]))
+        self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
         self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED')]]))
         self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED'), dict(review, id=3), dict(review, id=4, state='COMMENTED')]]))
+        self.shell(call)
+
 
     def test_hard_recovery_checks_protection_and_approval_before_tag_without_auto_merge(self):
         self.write('.githooks/pre-commit', '# trust-root candidate\n')

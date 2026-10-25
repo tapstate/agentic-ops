@@ -441,7 +441,7 @@ release_verify_story_gate() {
   local base="$2"
   local head="$3"
   local allow_independent_review="${4:-false}"
-  # 本地准备/重验使用既有普通影响分析；远端入口默认执行 release 材料检查。
+  # 正式版本使用普通影响分析及发布证据；未传阶段的 Hotfix 保留开发材料检查。
   local gate_stage="${5-release}"
   local trusted_base_commit
   local range_base_commit
@@ -502,7 +502,7 @@ release_verify_story_gate() {
       "请从当前开发历史重新准备发布分支"
     return 1
   fi
-  if ! release_story_validate_record_source "$repo_root"; then
+  if [ "$gate_stage" = release ] && ! release_story_validate_record_source "$repo_root"; then
     release_fail "release_story_gate_local_state_unsafe" "story_gate" \
       "$RELEASE_STORY_STATE_ERROR" \
       "请移除 .local/story-gate 故事记录路径中的符号链接或特殊文件后重试"
@@ -589,20 +589,21 @@ release_verify_story_gate() {
     return 1
   fi
 
-  # 本地记录不进入 Git。只复制普通 JSON 文件，由 origin/main Runtime 在
-  # 固定 candidate 快照中重新验证 impact_id、人工确认和验收内容。
-  for record_kind in approvals evidence; do
-    if ! release_story_copy_record_kind \
-      "$repo_root" "$candidate_snapshot" "$record_kind"; then
-      git -C "$repo_root" worktree remove --force "$candidate_snapshot" >/dev/null 2>&1 || true
-      git -C "$repo_root" worktree remove --force "$baseline_snapshot" >/dev/null 2>&1 || true
-      rm -rf -- "$temp_root"
-      release_fail "release_story_gate_local_state_unsafe" "story_gate" \
-        "$RELEASE_STORY_STATE_ERROR" \
-        "请移除故事记录源或候选路径中的符号链接或特殊文件后重试"
-      return 1
-    fi
-  done
+  # 只有消费开发材料的入口才读取这些记录，正式版本不依赖无关本地台账。
+  if [ "$gate_stage" = release ]; then
+    for record_kind in approvals evidence; do
+      if ! release_story_copy_record_kind \
+        "$repo_root" "$candidate_snapshot" "$record_kind"; then
+        git -C "$repo_root" worktree remove --force "$candidate_snapshot" >/dev/null 2>&1 || true
+        git -C "$repo_root" worktree remove --force "$baseline_snapshot" >/dev/null 2>&1 || true
+        rm -rf -- "$temp_root"
+        release_fail "release_story_gate_local_state_unsafe" "story_gate" \
+          "$RELEASE_STORY_STATE_ERROR" \
+          "请移除故事记录源或候选路径中的符号链接或特殊文件后重试"
+        return 1
+      fi
+    done
+  fi
 
   if [ -z "$uv_bin" ]; then
     uv_bin="$(command -v uv 2>/dev/null || true)"
@@ -672,7 +673,7 @@ release_submit_review() {
   local protection_mode="$6"
   local confirmed="$7"
 
-  release_verify_story_gate "$repo_root" origin/main "$head" true || return 1
+  release_verify_story_gate "$repo_root" origin/main "$head" true "" || return 1
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1
   release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交独立审查 PR" || return 1
@@ -694,7 +695,7 @@ release_confirm_publish() {
   printf '即将%s AgenticOps %s\n' "$action_label" "$version" >&2
   printf '仓库：%s\n' "tapstate/agentic-ops" >&2
   printf '发布 HEAD：%s\n' "$head" >&2
-  printf '合并方向：%s -> %s\n' "$source_branch" "$target_branch" >&2
+  printf '目标分支：%s -> %s\n' "$source_branch" "$target_branch" >&2
   printf '完整验证：通过（%s）\n' "$RELEASE_VERIFIED_AT" >&2
   printf '待发布提交：\n' >&2
   git -C "$repo_root" log --format='  %h %s' "refs/remotes/origin/main..$head" >&2 || true
@@ -706,7 +707,7 @@ release_confirm_publish() {
     release_fail "release_confirmation_required" "confirmation" "非交互发布缺少最终确认" "确认展示内容后显式传入 --confirm-release"
     return 1
   fi
-  printf '确认执行 %s -> %s 合并？[y/N] ' "$source_branch" "$target_branch" >&2
+  printf '确认%s（%s -> %s）？[y/N] ' "$action_label" "$source_branch" "$target_branch" >&2
   if ! IFS= read -r answer; then
     answer=""
   fi
@@ -715,7 +716,7 @@ release_confirm_publish() {
       return 0
       ;;
     *)
-      release_fail "release_confirmation_rejected" "confirmation" "研发工程师取消了本次发布" "确认发布内容后重新执行 publish"
+      release_fail "release_confirmation_rejected" "confirmation" "研发工程师取消了本次操作" "确认操作范围后重试原命令"
       return 1
       ;;
   esac
@@ -761,9 +762,9 @@ release_check_independent_approval() {
   author="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr" --repo tapstate/agentic-ops --json author --jq '.author.login' 2>/dev/null)" || return 1
   [ -n "$author" ] || return 1
   approved="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
-    --jq "add | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\" and .user.type == \"User\")" 2>/dev/null)" || return 1
+    --jq "add | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | (all(.[]; .state != \"CHANGES_REQUESTED\")) and any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\" and .user.type == \"User\")" 2>/dev/null)" || return 1
   [ "$approved" = true ] || {
-    release_fail release_independent_approval_required review "缺少当前候选 Head 的独立人工批准" "请在 GitHub 核实由 PR 作者以外的人员批准当前提交；不得用已合并状态代替审查"
+    release_fail release_independent_approval_required review "缺少当前候选 Head 的独立人工批准或仍有要求修改的审查" "请在 GitHub 核实由 PR 作者以外的人员批准当前提交；不得用已合并状态代替审查"
     return 1
   }
 }
@@ -880,6 +881,9 @@ release_inspect_state() {
     state=release_pr_closed; next_command=""
   elif [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
     state=release_merged_pr_missing; next_command=""
+  elif git -C "$root" show-ref --verify --quiet "refs/heads/release/$version"; then
+    state=release_candidate_present
+    next_command="internal/release/release.sh submit-for-review --version $version"
   fi
   printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","delivery_status":"%s","develop_sync_status":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","next_command":"%s"}\n' \
     "$version" "$state" "$delivery" "$sync" "$develop_head" "$main_head" "$local_tag" "${RELEASE_REMOTE_TAG_COMMIT:-}" "$number" "$url" "$head" "$merge" "$next_command"
@@ -1384,7 +1388,7 @@ release_verify_merge_commit() {
   }
 }
 
-release_prepare_fixed_branch() {
+release_check_fixed_branch() {
   local repo_root="$1"
   local branch="$2"
   local candidate_head="$3"
@@ -1410,13 +1414,18 @@ release_prepare_fixed_branch() {
     release_fail "release_fixed_branch_conflict" "release_branch" "本地 $branch 不是本次已验证的固定 HEAD" "请人工核查固定发布分支，禁止移动"
     return 1
   fi
-  if [ -z "$local_head" ]; then
+  RELEASE_FIXED_HEAD="$candidate_head"
+}
+
+release_prepare_fixed_branch() {
+  local repo_root="$1" branch="$2" candidate_head="$3"
+  release_check_fixed_branch "$repo_root" "$branch" "$candidate_head" || return 1
+  if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
     git -C "$repo_root" branch "$branch" "$candidate_head" || {
-      release_fail "release_fixed_branch_create_failed" "release_branch" "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
+      release_fail release_fixed_branch_create_failed release_branch "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
       return 1
     }
   fi
-  RELEASE_FIXED_HEAD="$candidate_head"
 }
 
 release_resolve_prepared_fixed_branch() {
