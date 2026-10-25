@@ -18,7 +18,7 @@
 
 ## 提示旧 Hook 或工位代际不兼容
 
-新工位不生成通用 Agent Hook。先区分工位代际：跨 epoch 必须按[更新与回退](update-and-rollback.md)由原版本结束任务、归档释放或清理，再显式 purge 后切换重建；不能使用下面的命令在线采用旧状态。
+新工位不生成通用 Agent Hook。先区分工位代际：跨 epoch 必须按[更新与回退](update-and-rollback.md)由原版本按其合同保存材料并退出任务，再显式 purge 后切换重建；不能使用下面的命令在线采用旧状态。
 
 仅在同 epoch 的工位中，检测到托管旧 Hook 时，start、普通 repair 和 doctor 会报告迁移范围并保留文件。核对归属及调用不再逐次受检的边界后，从该工位执行：
 
@@ -36,11 +36,11 @@
 
 ## 完成时写入失败或会话中断
 
-恢复原 issue/run/op 与原请求，先查看 operation 的已完成步骤和回执。release/clean 中断不解除占用；completed 不回退，正式档案不重写。退出成功后才允许下一任务，不能手改 current 或换操作编号绕过恢复。
+恢复原 issue/run/op 与原请求，按[原清理操作的恢复](task-authorization.md#原清理操作的恢复)回读已完成步骤和残留。任务可能已解绑但仍在 finalizing 收尾，须待清理完成并释放执行占用后再接下一任务；不能仅凭 current 为空推定成功。completed 不回退，不手改状态或换操作编号绕过恢复。
 
 ## 再次接管已接管任务
 
-不要覆盖当前任务。先回读 current/op，恢复同一 run 和未完成操作；不继续时明确归档清理，再接新任务。已完成任务由研发释放；任务 clean 不修改 Jira，station purge 不能替代任务退出。
+不要覆盖当前任务。先回读 current/op，恢复同一 run 和未完成操作；不继续时先核实材料保全或明确放弃，再按已确认范围清理。需要持久保存进度时独立[归档](task-archive-and-resume.md#持久接续点操作)，归档不是清理的强制前置。任务清理不修改 Jira，station purge 不能替代任务退出。
 
 ## 完整工程准备失败
 
