@@ -1,6 +1,6 @@
 # 工位源码与持久材料
 
-本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义完整目标；持久归档与[执行接管](../architecture/single-task-station.md#执行接管当前源码)已进入当前源码，两个清理操作仍待实现，不能当作旧安装已有能力。源码保留仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义完整目标；持久归档与[执行接管](../architecture/single-task-station.md#执行接管当前源码)已进入当前源码，两个清理范围也已进入当前源码；旧安装是否具备这些能力须核实实际版本。源码保留仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
 
 ## 查看工位基本信息
 
