@@ -410,6 +410,16 @@ os.execv(path,[path]+args)
         self.assertEqual(4, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
 
+    def test_protected_main_ordinary_hotfix_uses_review_pr(self):
+        bare, state = self.hotfix_fixture(trust=False)
+        result = self.shell('source ' + shlex.quote(str(ROOT / 'internal/release/hotfix.sh')) +
+                            '\nworkflow_check_main_ruleset() { return 0; }\nrelease_hotfix_candidate "$PWD" AO-262', check=False)
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual('waiting_for_manual_merge', json.loads(result.stdout.splitlines()[-1])['status'])
+        self.assertTrue(state.exists())
+        self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
+        self.assertEqual('', self.git('tag', root=bare))
+
     def test_same_epoch_ordinary_hotfix_atomically_publishes_without_pr(self):
         bare, state = self.hotfix_fixture(trust=False)
         result = self.hotfix_call()

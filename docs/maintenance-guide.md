@@ -233,7 +233,7 @@ Hotfix 只能使用：
 internal/release/hotfix.sh <JIRA-KEY>
 ```
 
-明确调用该 Hotfix 入口是快速修复授权。普通变更在固定验收后原子更新 `main` 与 `develop`；信任根变更仍由此入口编排独立人工 PR，禁止自动直推 `main`，合并后重新调用同一命令，复用远端交付检查核验 main 保护及当前 Head 的独立批准，再完成无标签收尾；已合并不代表审查通过。冲突、分叉或回读不明时停止受影响动作。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
+明确调用该 Hotfix 入口是快速修复授权。未配置本规范 main 保护的普通变更在固定验收后原子更新 `main` 与 `develop`；已配置 main 保护或涉及信任根的变更由此入口编排独立人工 PR，禁止自动直推 `main`，合并后重新调用同一命令，复用远端交付检查核验 main 保护及当前 Head 的独立批准，再完成无标签收尾；已合并不代表审查通过。冲突、分叉或回读不明时停止受影响动作。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
 详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。
 

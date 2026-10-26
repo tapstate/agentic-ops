@@ -208,7 +208,7 @@ def prepare(root, args):
         automatic_protocol(root, original)
         automatic_protocol(root, target)
     if args.mode == 'recover-install' and before != after:
-        raise ValueError('原版本维护恢复必须同 epoch（当前=%s，目标=%s）；请选择与原安装同 epoch 的维护补丁。跨 epoch 升级须先使用原版本退出并 purge 全部工位，再执行 update' % (before, after))
+        raise ValueError('原版本维护恢复必须同 epoch（当前=%s，目标=%s）；请选择与原安装同 epoch 的维护补丁。跨 epoch 升级请使用 update，按目标兼容模式核实在途操作和停写；旧模式目标才要求退出并 purge' % (before, after))
     station_compatibility.check_upgrade(root, original, target)
     stations = station_compatibility.load_station_registry(root, required=args.mode == 'recover-install' or before != after)
     if getattr(args, 'automatic', False):
@@ -265,11 +265,13 @@ def probe(root):
         ancestor(root, original, target)
         prepare_materials(root, original, target)
         before = station_compatibility.manifest_at_ref(root, original)['station_state_epoch']
-        after = station_compatibility.manifest_at_ref(root, target)['station_state_epoch']
-        packet.update(original_epoch=before, target_epoch=after, compatible=before == after)
+        target_manifest = station_compatibility.manifest_at_ref(root, target)
+        after = target_manifest['station_state_epoch']
+        packet.update(original_epoch=before, target_epoch=after,
+                      compatible=before == after or target_manifest.get('validation') == 'feature')
     except (ValueError, OSError) as error:
         return dict(packet, status='target_unknown', reason=str(error))
-    if before != after:
+    if not packet['compatible']:
         packet['blockers'].append('incompatible_epoch')
     if stations:
         packet['blockers'].append('unmanaged_sessions_unverified')
