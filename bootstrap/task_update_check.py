@@ -24,15 +24,23 @@ def inspect(station, current_ref=None, target_ref=None, check_resume=False):
         raise ValueError('入口产品根与工位绑定不一致')
     station_context.require_epoch(station, ROOT)
     with task_store.task_state_lock(station, execution=False):
-        current = task_store.read_current(station)
-        operation = station_operation.read(station)
-        resuming = current['current'] is not None or bool(operation and operation['status'] != 'done')
+        state_problem = None
+        try:
+            current = task_store.read_current(station)
+            operation = station_operation.read(station)
+            resuming = current['current'] is not None or bool(operation and operation['status'] != 'done')
+        except (ValueError, OSError) as error:
+            if not check_resume:
+                raise  # 新接管仍由原功能严格核验，不能把异常现场当空闲。
+            resuming = True
+            state_problem = str(error)
         if resuming and not check_resume:
             return {'status': 'resume', 'product_root': str(ROOT)}
     document = product_state.load(ROOT)
     if document['mode'] == 'source':
-        return {'status': 'source', 'product_root': str(ROOT)}
+        return {'status': 'source', 'product_root': str(ROOT), 'state_requires_repair': state_problem}
     packet = installation_update.probe(ROOT)
+    packet['state_requires_repair'] = state_problem
     packet['resume_existing'] = resuming
     packet['station'] = str(station)
     packet['station_id'] = binding['station_id']

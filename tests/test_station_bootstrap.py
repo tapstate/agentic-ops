@@ -421,7 +421,7 @@ class StationBootstrapTests(unittest.TestCase):
         self.init('--reuse-materials', success=False)
         self.assertEqual((outside / 'sentinel').read_text(), 'keep')
 
-    def test_old_epoch_repair_and_purge_do_not_modify_old_state(self):
+    def test_feature_wiring_refresh_preserves_legacy_state_and_purge_still_rejects(self):
         state = self.station / '.agenticops'
         init = state / 'init.json'
         document = json.loads(init.read_text())
@@ -431,16 +431,18 @@ class StationBootstrapTests(unittest.TestCase):
         old.mkdir()
         sentinel = old / 'index.json'
         sentinel.write_text('old-format')
-        before = init.read_bytes()
+        before = task_store.current_path(self.station).read_bytes()
         with self.assertRaisesRegex(ValueError, '受控解绑并重建'):
             registry.detach(ROOT, self.station, purge=True)
         result = subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
             '--install-home', str(ROOT), '--station', str(self.station), '--refresh'],
             capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('受控解绑并重建', result.stderr)
-        self.assertEqual(init.read_bytes(), before)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(init.read_text())['station_state_epoch'], 2)
+        self.assertEqual(task_store.current_path(self.station).read_bytes(), before)
         self.assertEqual(sentinel.read_text(), 'old-format')
+        with self.assertRaisesRegex(ValueError, '受控解绑并重建'):
+            task_store.read_current(self.station)
 
     def test_unknown_unbound_state_prevents_generation(self):
         registry.detach(ROOT, self.station, purge=True)

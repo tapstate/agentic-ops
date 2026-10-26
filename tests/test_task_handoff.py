@@ -86,7 +86,9 @@ class HandoffTests(unittest.TestCase):
         self.assertFalse(task_store.authorization_path(self.ws, 'TAP-123').exists())
 
     def test_latest_archive_recovers_without_old_station_product_or_cache_and_cleans(self):
-        path = self.prepare_task()
+        self.verify_independent_resume_and_cleanup(self.prepare_task())
+
+    def verify_independent_resume_and_cleanup(self, path):
         first = self.archive()
         self.archive(receipt=self.readback(first))
         first_packet = first['archive_payload']['snapshot']['handoff']['packet']
@@ -165,6 +167,15 @@ class HandoffTests(unittest.TestCase):
         self.assertTrue(result['cleanup_result']['complete'])
         self.assertEqual('new station configuration', (self.ws / 'config/new-input').read_text())
         self.assertIsNone(task_store.read_task(self.ws))
+        station_request = {'scope': 'station', 'materials': 'discard', 'decision_ref': '测试明确丢弃全部工位用户材料',
+            'expected_plan_digest': station_cleanup.plan(self.ws, 'station')['digest']}
+        result = station_cleanup.execute(self.ws, None, task['run_id'], task_store.read_current(self.ws)['revision'],
+            'op-clean-recovered-station', station_request)
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertFalse((self.ws / 'config/new-input').exists())
+        coordination_proof(self.ws, packet['issue_key'])
+        station.takeover(self.ws, request, 'op-retake-after-both-cleanups', task_store.read_current(self.ws)['revision'])
+        self.assertEqual(packet['issue_key'], task_store.read_task(self.ws)['issue_key'])
 
     def test_required_evidence_is_read_and_must_match_on_restore(self):
         self.prepare_task()

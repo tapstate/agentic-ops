@@ -273,7 +273,7 @@ case "$command_name" in
     trap 'ao_status=$?; printf "[AgenticOps][修复][失败] %s（退出码=%s）\n" "$ao_stage" "$ao_status" >&2; exit "$ao_status"' ERR
     printf '[AgenticOps][修复][进行] %s\n' "$ao_stage" >&2
     python3 "$product_root/bootstrap/render.py" "${repair_args[@]}"
-    ao_stage="登记工位并核验任务状态"
+    ao_stage="登记工位"
     printf '[AgenticOps][修复][进行] %s\n' "$ao_stage" >&2
     python3 "$product_root/bootstrap/station_registry.py" \
       --product-root "$product_root" --lifecycle-held register --station "$station"
@@ -283,17 +283,9 @@ case "$command_name" in
       python3 "$product_root/bootstrap/station_registry.py" \
         --product-root "$product_root" ensure-wiki --station "$station"
     fi
-    python3 - "$product_root" "$station" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[1])
-from workflow import task_store
-try:
-    task_store.read_current(sys.argv[2])
-except (ValueError, OSError) as error:
-    print("[AgenticOps][修复][失败] 核验任务状态：%s（退出码=2）" % error, file=sys.stderr)
-    raise SystemExit(2)
-print("[AgenticOps][修复][完成] 工位修复完成\n  工位：%s" % sys.argv[2])
-PY
+    printf '[AgenticOps][修复][完成] 工位接线修复完成；任务数据由所属功能核验与修补
+  工位：%s
+' "$station"
     exit $?
     ;;
   start)

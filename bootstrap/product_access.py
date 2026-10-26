@@ -233,6 +233,8 @@ def before_task(root, args, startup=False):
     if current_ref and not apply_update:
         command += ['--current-ref', current_ref, '--target-ref', target_ref]
     packet = _run_product(root, command, capture=True)
+    if packet.get('state_requires_repair'):
+        print('[AgenticOps][任务数据] 会话可启动以分析修补；任务推进仍须原功能复查：' + packet['state_requires_repair'], file=sys.stderr)
     status = packet['status']
     if apply_update and (packet.get('original_ref') != current_ref or packet.get('target_ref') != target_ref):
         raise ValueError('更新确认与当前原/目标提交不一致；重新检查并确认，不沿用旧决定')

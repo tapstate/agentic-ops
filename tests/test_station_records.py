@@ -47,6 +47,9 @@ class RecordTests(unittest.TestCase):
         self.assertEqual('pending', candidate['status'])
         self.assertIsNone(task_store.read_task(self.ws))
         next_task = self.takeover('op-new-after-correction')
+        with self.assertRaisesRegex(ValueError, '待外部回读的旧操作'):
+            station_cleanup.execute(self.ws, next_task['issue_key'], next_task['run_id'], next_task['_revision'],
+                'op-clean-progress-correction', self.cleanup_request())
         again = station_cleanup.execute(self.ws, next_task['issue_key'], next_task['run_id'], next_task['_revision'],
             'op-clean-with-previous-correction', self.cleanup_request())
         self.assertTrue(again['cleanup_result']['complete'])

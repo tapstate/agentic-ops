@@ -89,6 +89,9 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None, bef
         return previous
     if previous and previous["status"] != "done":
         raise ValueError("存在未完成工位操作，只能恢复原操作")
+    if previous and any(row.get('operation_id') == operation_id and row.get('result', {}).get('pending_external')
+                        for row in previous.get('retained_results', [])):
+        raise ValueError('操作编号仍属于待外部回读的旧操作，请为新操作使用新编号')
     current = task_store.read_current(base)
     if current["revision"] != expected_revision:
         raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, current["revision"]))

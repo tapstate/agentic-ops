@@ -66,6 +66,64 @@ class TaskUpdateTests(unittest.TestCase):
         packet = json.loads(self.run_cmd(str(self.install/'agenticops'), 'update', '--check', '--probe').stdout)
         return self.start('--writers-stopped', '--apply-update', '--update-current-ref', packet['original_ref'], '--update-target-ref', packet['target_ref'], '--expected-stations', json.dumps(packet['stations']))
 
+    def test_upgrade_repair_multiarchive_independent_restore_and_both_cleanups(self):
+        # 真实本地 Git 与安装切换；Agent/Jira 使用显式夹具，不冒充线上服务验收。
+        sys.path.insert(0, str(ROOT / 'tests'))
+        import test_task_handoff
+        from workflow import task_store
+        from unittest import mock
+        flow = test_task_handoff.HandoffTests()
+        flow.root = self.root / 'business-fixture'
+        flow.root.mkdir()
+        flow.ws = self.station
+        flow.product = self.seed
+        cleanup = json.loads((self.seed / 'projects/tapdata/station-clean.json').read_text())
+        cleanup['resources'] = []
+        (self.seed / 'projects/tapdata/station-clean.json').write_text(json.dumps(cleanup))
+        flow.prepare_engineering()
+        self.advance()
+        self.approved_start()
+        flow.product = self.install
+        with mock.patch("workflow.station_source.refresh_shared_references"):
+            source_path = flow.prepare_task()
+        original = task_store.read_current(self.station)
+        legacy = json.loads(json.dumps(original))
+        legacy['schema_version'] = 2
+        legacy['current']['old_phase'] = legacy['current'].pop('stage')
+        # 明确模拟旧生产者格式；产品修补不直接手改控制或业务事实。
+        task_store.current_path(self.station).write_text(json.dumps(legacy))
+        before = task_store.current_path(self.station).read_bytes()
+        operation_before = (self.station / '.agenticops/operation.json').read_bytes()
+        rejected = self.run_cmd(sys.executable, str(self.install / 'workflow/task.py'), 'takeover', '--dir', str(self.station), check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn('状态结构无效', rejected.stderr)
+        self.assertEqual(operation_before, (self.station / '.agenticops/operation.json').read_bytes())
+        target = self.advance(incompatible=True)
+        self.approved_start()
+        self.assertEqual(target, self.state()['current_ref'])
+        self.assertEqual(before, task_store.current_path(self.station).read_bytes())
+        report = task_store.inspect_data(self.station)
+        request = {'source_digest': report['source_digest'], 'renames': {'old_phase': 'stage'},
+                   'analysis_ref': '夹具原合同与项目事实核实字段语义不变'}
+        preview = task_store.preview_data_repair(self.station, request)
+        task_store.apply_data_repair(self.station, request, preview['proposal_digest'], '测试研发确认差异', True)
+        self.assertEqual(original, task_store.read_current(self.station))
+        flow.task = task_store.read_task(self.station)
+        shutil.rmtree(self.root / "pool")
+        with mock.patch("workflow.station_source.refresh_shared_references"):
+            flow.verify_independent_resume_and_cleanup(source_path)
+
+    def test_invalid_operation_allows_diagnostic_session_without_overwriting_it(self):
+        operation = self.station / '.agenticops/operation.json'
+        operation.write_text('invalid historical operation')
+        result = self.start()
+        self.assertIn('session-ready', result.stdout)
+        self.assertIn('会话可启动以分析修补', result.stderr)
+        self.assertEqual('invalid historical operation', operation.read_text())
+        rejected = self.run_cmd(sys.executable, str(self.install / 'workflow/task.py'), 'takeover', '--dir', str(self.station), check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertEqual('invalid historical operation', operation.read_text())
+
     def test_safe_start_updates_repairs_and_starts_new_session(self):
         second=self.root/'second'
         self.run_cmd(str(self.install/'agenticops'),'station','init','--station',str(second),'--project','tapdata','--agent','codex')
