@@ -176,11 +176,11 @@ def covered(relative, roots):
     return any(relative == root or relative.startswith(root + "/") for root in roots)
 
 
-def _walk(fd, device, delete=False):
+def _walk(fd, device, delete=False, allow_git=False):
     """所有递归操作基于目录 FD，不跟随子链接，不跨设备，不删除特殊对象。"""
     for name in os.listdir(fd):
         info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        if name == ".git" or info.st_dev != device:
+        if (name == ".git" and not allow_git) or info.st_dev != device:
             raise ValueError("受管目录含嵌套 Git 或挂载对象")
         if stat.S_ISDIR(info.st_mode):
             child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -188,7 +188,7 @@ def _walk(fd, device, delete=False):
                 opened = os.fstat(child)
                 if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
                     raise ValueError("生成目录在遍历时被替换")
-                _walk(child, device, delete)
+                _walk(child, device, delete, allow_git=allow_git)
                 after = os.stat(name, dir_fd=fd, follow_symlinks=False)
                 if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
                     raise ValueError("生成目录在删除时被替换")

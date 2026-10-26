@@ -133,6 +133,8 @@ start_agent() {
   ao_stage="进入工位并启动 Agent"
   cd "$station"
   printf '[AgenticOps][启动][进行] 启动 Agent：%s\n' "$agent_name" >&2
+  export AGENTICOPS_EXECUTION_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+  export AGENTICOPS_EXECUTOR="$agent_name"
   exec "$agent_command" ${default_arguments[@]+"${default_arguments[@]}"} ${forwarded[@]+"${forwarded[@]}"}
 }
 

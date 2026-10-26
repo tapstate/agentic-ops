@@ -255,6 +255,9 @@ def detach_preflight(product_root, station, purge=False, tree=None):
     current = task_store.read_current(station)
     if current["current"] is not None:
         raise ValueError("工位仍被任务占用，必须先归档并释放或清理，不能解绑")
+    from workflow import jira_coordination
+    if jira_coordination.pending(station):
+        raise ValueError("Jira 协调记录尚未结束回读；清理可完成，注销前先 coordination end/complete 收尾")
     operation_path = state_root / "operation.json"
     if operation_path.exists():
         if operation_path.is_symlink():
@@ -289,7 +292,7 @@ def remove_empty_parents(paths, tree):
 def detach(product_root, station, purge=False, allow_product_lifecycle=False):
     station = Path(station).resolve()
     lock = task_store.task_state_lock(
-        station, allow_product_lifecycle=allow_product_lifecycle
+        station, execution=False, allow_product_lifecycle=allow_product_lifecycle
     )
     with lock:
         with StationDirectory(station) as tree:
@@ -298,6 +301,9 @@ def detach(product_root, station, purge=False, allow_product_lifecycle=False):
             deletable, _ = detach_preflight(
                 product_root, station, purge=purge, tree=tree
             )
+            # 注销只收尾本地空闲工位，仍核验本地执行者，不重新取得 Jira 任务。
+            from workflow import execution
+            execution.enter(station, coordination=False)
             for relative in deletable:
                 tree.unlink(relative)
 
@@ -433,35 +439,14 @@ def command_detach(args, product_root, purge=False):
     for station in targets:
         require_tracked(product_root, station)
         require_station_can_adopt(product_root, station)
-        details[str(station)] = "由本版本脚本退出当前任务，再移除接线和绑定；保留 source/config 和未知残留"
+        details[str(station)] = "任务清理完成后移除接线和绑定；注销不代替清理，也不删除 source/config"
     show_targets("purge" if purge else "detach", targets, details)
     confirm(args)
-    from workflow import station_clean
-    import uuid
     for station in targets:
         task = task_store.read_task(station)
         previous = station_operation.read(station)
-        resumed = False
-        if previous and previous['status'] != 'done' and previous['kind'] in ('clean', 'release', 'work-clean'):
-            result = station_clean.execute(station, previous['kind'], (task or previous.get('exit_task') or {}).get('issue_key'),
-                                  previous['run_id'], previous['expected_revision'], previous['operation_id'], previous['request'],
-                                  allow_product_lifecycle=args.lifecycle_held)
-            if result.get('archive_result', {}).get('status') == 'awaiting_decision':
-                from workflow.station_clean_view import emit
-                emit({'station': str(station), 'operation_id': result['operation_id'],
-                      'cleanup': result.get('cleanup_result'), 'archive': result['archive_result']})
-                raise ValueError('归档待用户决定，请用 station-clean.py 恢复原操作后再注销')
-            task = task_store.read_task(station)
-            resumed = True
-        if task or not resumed:
-            operation = station_clean.execute(station, 'release' if task else 'work-clean', task['issue_key'] if task else None,
-                task['run_id'] if task else 'run-' + station_context.read_binding(station)['station_id'],
-                task_store.read_current(station)['revision'], 'op-' + uuid.uuid4().hex,
-                {'clear_config': getattr(args, 'clear_config', [])}, allow_product_lifecycle=args.lifecycle_held)
-            from workflow.station_clean_view import emit
-            emit({'station': str(station), 'cleanup': operation.get('cleanup_result'), 'archive': operation.get('archive_result')})
-            if operation.get('archive_result', {}).get('status') == 'awaiting_decision':
-                raise ValueError('归档待用户决定，请用 station-clean.py 恢复原操作后再注销')
+        if task or previous and previous['status'] != 'done':
+            raise ValueError('工位仍有任务或未完成操作；先沿原操作完成归档/清理，再注销，不自动扩大源码删除范围')
         # 注销之前展示仍被保留的实际对象，归档缺项不影响解绑。
         deletable, _ = detach_preflight(product_root, station, purge=purge)
         owned = owned_artifacts(station)
@@ -520,7 +505,12 @@ def configured_git_name():
 def command_identity(args, product_root):
     station = Path(args.station).resolve()
     require_tracked(product_root, station)
-    with task_store.task_state_lock(station):
+    with task_store.task_state_lock(station, execution=False):
+        identity = None
+        envelope = task_store.read_current(station)
+        if envelope["current"] is not None or envelope.get("execution_control") is not None:
+            from workflow import execution
+            identity = execution.enter(station)
         current = task_store.read_task(station)
         if current and current.get("task_repositories"):
             raise ValueError("当前任务已登记修改仓库，不能变更 git_name")
@@ -538,6 +528,8 @@ def command_identity(args, product_root):
             "source": source,
         }
         task_store._write_json_atomic(path, document)
+        if identity is not None:
+            execution.touch(station, identity)
     print("[AgenticOps][身份配置][完成] 工位 git_name 已配置：%s" % name)
 
 
@@ -566,8 +558,6 @@ def parser():
         target.add_argument("--station")
         target.add_argument("--all", action="store_true")
         command.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
-        if name == "purge":
-            command.add_argument("--clear-config", action="append", default=[], help="显式选择配置相对路径；默认保留")
         if name == "repair":
             command.add_argument("--ensure-wiki", action="store_true", help="显式准备项目共享 Wiki；不在初始化或接管时自动执行")
     wiki = commands.add_parser("ensure-wiki")

@@ -23,6 +23,11 @@ class StationTests(unittest.TestCase):
         self.ws = self.root / "ws"
         self.product = self.root / "product"
         shutil.copytree(ROOT / "projects", self.product / "projects")
+        # 普通任务夹具不启用外部环境；Docker 专项用例另行声明并模拟驱动。
+        cleanup_path = self.product / 'projects/tapdata/station-clean.json'
+        cleanup = json.loads(cleanup_path.read_text())
+        cleanup['resources'] = []
+        cleanup_path.write_text(json.dumps(cleanup))
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
         shutil.copytree(ROOT / "policies", self.product / "policies")
         (self.ws / ".agenticops").mkdir(parents=True)
@@ -61,6 +66,9 @@ class StationTests(unittest.TestCase):
         self.request = {"issue_key": "TAP-123", "task_class": "technical_task", "version": "develop", "profile": "full-application",
                         "explicit_branches": {name: "develop" for name in profile["repositories"]}}
 
+        from station_fixture import coordination_proof
+        coordination_proof(self.ws, self.request["issue_key"])
+
     def write(self, path, value):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(value))
@@ -73,10 +81,35 @@ class StationTests(unittest.TestCase):
     def takeover(self, operation="op-takeover-one"):
         if not hasattr(self, "seed"):
             self.prepare_engineering()
+        from station_fixture import coordination_proof
+        coordination_proof(self.ws, self.request["issue_key"])
         revision = task_store.read_current(self.ws)["revision"]
         station.takeover(self.ws, self.request, operation, revision)
         task = task_store.read_task(self.ws)
         return task
+
+    def test_reference_refresh_precedes_run_and_skips_operation_replay(self):
+        self.prepare_engineering()
+        def refresh(base):
+            self.assertIsNone(station_operation.read(base))
+            self.assertIsNone(task_store.read_current(base)['current'])
+            self.assertFalse((self.product / '.archive').exists())
+        with mock.patch.object(station.source, 'refresh_shared_references', side_effect=refresh) as update:
+            self.takeover()
+            station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            self.assertEqual(update.call_count, 1)
+
+    def test_reference_refresh_skips_invalid_revision_and_resumed_failure(self):
+        self.prepare_engineering()
+        with mock.patch.object(station.source, 'refresh_shared_references') as update:
+            with self.assertRaisesRegex(ValueError, 'revision'):
+                station.takeover(self.ws, self.request, 'op-takeover-one', 99)
+            update.assert_not_called()
+            with mock.patch.object(station.source, 'prepare_repositories', side_effect=ValueError('offline')):
+                with self.assertRaisesRegex(ValueError, 'offline'):
+                    station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+            self.assertEqual(update.call_count, 1)
 
     def test_takeover_does_not_require_obsolete_reset_branch(self):
         self.prepare_engineering()
@@ -267,6 +300,8 @@ class StationTests(unittest.TestCase):
                                continuations={'tapdata/tapdata': {
                                    'work_branch': 'fix/recovered', 'baseline_sha': old,
                                    'expected_head': head}})
+                from station_fixture import coordination_proof
+                coordination_proof(ws, request['issue_key'])
                 station.takeover(ws, request, 'op-recover-' + str(epoch), 0)
                 task = task_store.read_task(ws)
                 self.assertEqual(old, task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'])

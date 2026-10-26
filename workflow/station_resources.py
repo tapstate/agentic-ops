@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import stat
 import sys
 
@@ -107,13 +108,14 @@ def preflight(base, task):
 
 
 def require_cleanup_version(version):
-    if version != 7:
-        raise ValueError("仅支持清理计划版本 7；旧工位由原版本退出")
+    if version != 8:
+        raise ValueError("仅支持清理计划版本 8；旧工位由原版本退出")
 
 
 def plan(base, task, version=None, **options):
-    require_cleanup_version(7 if version is None else version)
-    return station_clean_rules.plan(base, task, options)
+    require_cleanup_version(8 if version is None else version)
+    from workflow import station_cleanup
+    return station_cleanup.plan(base, options.get('scope', 'task'))
 
 
 def export_plan(base, task, decisions_override=None, **unused):
@@ -181,7 +183,16 @@ def registration_state(base, task, expected_operation_id=None):
 
 
 def register(base, issue, run_id, entries, expected_operation_id=None):
-    with store.task_state_lock(base):
+    from workflow import execution
+    with store.task_state_lock(base, execution=False):
+        operation = operations.read(base)
+        cleanup_readback = (operation and operation['kind'] == 'clean'
+                            and operation['status'] in ('running', 'failed')
+                            and operation['operation_id'] == expected_operation_id and operation['run_id'] == run_id
+                            and isinstance(entries, list) and bool(entries)
+                            and all(isinstance(e, dict) and e.get('kind') == 'external' for e in entries))
+        # 只放行原清理对象的回执；下面的身份比对仍拒绝新增或改变资源。
+        identity = execution.enter(base, coordination=not cleanup_readback)
         if store.read_task(base) is None:
             operation = operations.read(base)
             store.validate_run_id(issue, run_id)
@@ -206,6 +217,7 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
                 pending.remove(original)
                 operation.setdefault('resource_readbacks', []).append(entry)
             operations.save(base, operation)
+            execution.touch(base, identity)
             return
         task = store.check_expected_run(base, issue, run_id)
         closed, recovery = registration_state(base, task, expected_operation_id)
@@ -271,6 +283,7 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
             merged[key(entry)] = entry
         store._write_json_atomic(store.task_directory(base, issue) / "resources.json",
                                  {"schema_version": 1, "run_id": run_id, "entries": list(merged.values())})
+        execution.touch(base, identity)
 
 
 def main():
@@ -304,17 +317,34 @@ def cleanup_declared(base, config, operation, observe_only=False):
         step_name = 'docker:' + baseline.digest(spec)
         try:
             path = resource_path(base, spec['path'])
-            if not path.exists() and step_name not in operation['steps']:
+            # 缺失 runtime 不能证明外部对象不存在；可用驱动始终按工位标签发现。
+            # 从未配置环境、也没有本机 Docker 的空工位无需安装可选驱动。
+            configured = Path(base) / station_layout.station_name(base, 'configuration') / 'environments'
+            if (not path.exists() and not path.is_symlink() and not configured.exists()
+                    and not configured.is_symlink() and step_name not in operation['steps']
+                    and shutil.which('docker') is None):
                 continue
             ids = call(['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
             networks = call(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project]).split()
             rows = []
             for kind, identifiers in (('container', ids), ('network', networks)):
                 for identifier in identifiers:
-                    info = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))[0]
-                    labels = info.get('Config', {}).get('Labels', {}) if kind == 'container' else info.get('Labels', {})
-                    if labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
+                    observation = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))
+                    if (not isinstance(observation, list) or len(observation) != 1
+                            or not isinstance(observation[0], dict)
+                            or not isinstance(observation[0].get('Id'), str)
+                            or not observation[0]['Id'].startswith(identifier)):
+                        raise ValueError('Docker 对象回读结构或身份无效，先由 Agent 核实原对象')
+                    info = observation[0]
+                    config_value = info.get('Config', {}) if kind == 'container' else info
+                    labels = config_value.get('Labels') if isinstance(config_value, dict) else None
+                    if not isinstance(labels, dict) or labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
                         raise ValueError('Docker 对象身份标签不符，保留')
+                    mounts = info.get('Mounts', []) if kind == 'container' else []
+                    if not isinstance(mounts, list) or any(not isinstance(mount, dict) for mount in mounts):
+                        raise ValueError('容器挂载信息格式无效，先由 Agent 核实，保留原对象')
+                    if any(mount.get('Type') == 'volume' for mount in mounts):
+                        raise ValueError('容器关联数据卷，先由 Agent 核实保全与独占/共享关系，保留容器定位线索：' + info['Id'])
                     rows.append({'kind': kind, 'id': info['Id']})
             if observe_only:
                 if rows:
@@ -340,8 +370,7 @@ def cleanup_declared(base, config, operation, observe_only=False):
                 operations.receipt(base, operation, step_name, {'status': 'removed'})
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             pending.append({'resource': spec, 'reason': str(error)})
-            if step_name in operation['steps'] and operation['steps'][step_name]['receipt'] is None:
-                operations.receipt(base, operation, step_name, {'status': 'retained', 'reason': str(error)})
+            # 未完成保留空回执，原操作重试继续回读和收尾，不能固化为已完成。
     return pending
 
 

@@ -17,11 +17,13 @@ def redact_evidence(rules, value, key=''):
     return value
 
 
-def prepare(base, task, request, operation=None):
+def prepare(base, task, request, operation=None, handoff=None):
     """冻结已有材料；重试不得用清理后的现场替换失败快照。"""
-    rules = project_rules.load_admission(station=base)
     record = {'schema_version': 2, 'run_id': task['run_id'], 'issue_key': task['issue_key'],
               'station_id': station_context.read_binding(base)['station_id']}
+    if handoff is not None:
+        return {'record': record, 'snapshot': {'handoff': handoff}}
+    rules = project_rules.load_admission(station=base)
     snapshot = {'operation_id': (operation or {}).get('operation_id'),
                 'task': {key: value for key, value in task.items() if key not in ('_revision', 'repositories')},
                 'summary': request.get('summary', ''), 'reason': request.get('reason', ''),

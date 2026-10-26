@@ -1,6 +1,10 @@
 # AgenticOps v1 工程架构
 
-本文描述单任务工位产品架构。身份、退出职责及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。旧版本状态只由原版本清理；新版本不提供旧 Runtime。本文不代替真实应用启动与发布验收。
+脚本与 LLM 的执行职责及失败接续见[统一开发原则](../maintenance-guide.md#确定性执行与-ai-接续原则)。此原则由现有 Workflow、Policy、原生工具与 Agent 协作落实，不增加调度器、异常中心、万能状态导入器或新的架构层。
+
+数据归属与生成、归档、恢复、清理责任统一见[数据生命周期开发规范](../development-data-lifecycle.md)；目标操作见[工位合同](single-task-station.md#任务生命周期目标合同)。两者不新增架构层；清理、归档和执行接管等实现与目标差异由合同集中说明。
+
+本文描述单任务工位产品架构。身份、退出职责及恢复细则见[工位合同](single-task-station.md)，方向以[项目目标](../strategy/project-goals.md)为准。现役升级边界见[工位合同](single-task-station.md#10-升级与恢复)；本文单独标明待实现的功能依赖检查目标，不提供旧 Runtime。本文不代替真实应用启动与发布验收。
 
 ## 1. 核心决策
 
@@ -36,6 +40,16 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 缺陷修复策略属于通用方案调优，不是 Gate 或质量门禁。通用目录位于 `policies/defect-repair-strategies.json`，项目可在 `projects/<project>/planning.json` 只覆盖默认选择；Workflow 容错解析后由 `task.py checklist/next` 向 Agent 提供 Q2 方案指导。它仅适用于规范化 `defect_fix`，配置不可用、Agent 未应用或方案偏离均只产生警告，不改变阶段推进、质量问题或授权判定。健康配置默认使用“最小充分修复”：完整消除已确认根因并保持架构稳定性、兼容性和容错性，同时限制无关扩散；它不等于追求最少代码行。
 
+### 功能内聚的依赖检查目标设计
+
+本节为待实现目标，开发要求只在[维护规范](../maintenance-guide.md#外部依赖检查与修补继续)定义。兼容工作归入各功能的正常入口，不新增架构层：Bootstrap 管受管接线和程序切换，Workflow 管任务状态及操作结果，Project 管项目配置与环境要求；Adapter 保持无状态，Internal 仍负责本仓库审查与发布，不承载业务兼容。
+
+检查和必要的采用能力复用所属功能的现有模块，不要求统一接口或每个功能新增入口。无法解析的旧材料只作为诊断数据，不执行其内容或据此继续副作用；入口应能在安全路径和基础身份可核验时返回诊断，而非先被全局代际检查遮蔽。
+
+产品切换仍由 Bootstrap 保证代码版本一致和调用互斥，采用新版指引仍须核验会话生效；它不读取并转换业务任务。各功能满足当前条件后继续任务，状态采用细则见[工位合同](single-task-station.md#修补后继续现有任务的目标设计)。复杂度约束沿用维护规范，不在本层增加兼容编排。
+
+新版 validation: feature 将依赖校验交回所属功能，支持范围与旧在途操作限制只在工位合同维护。本文后续涉及跨 epoch 退出和重新接管的描述适用于未声明该模式的旧客户端或回退目标；新模式不删除或转换任务，当前缺项仍由现有功能入口处理。
+
 ## 3. 通用 Agent 适配
 
 公共入口不维护 Agent 枚举。`bootstrap/agent_registry.py` 从 `adapters/agents/*/manifest.json` 发现 Agent。每个 Manifest 声明生成接线与 `retired_artifacts`。退役列表只用于核验并迁移以前托管的文件，不按平台名称在 Bootstrap 写特例。Manifest v3 不含 `entrypoint`、`hook` 或 `capabilities`，注册器拒绝旧版或未声明字段。每个 Manifest 声明：
@@ -56,9 +70,9 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 - `.local/product.json` 记录仓库、跟踪分支、生命周期同步提交及 `source_pool`；`.local/gate/events.jsonl` 只记录直接在安装目录执行且无法归属任务的门禁事件，避免把产品状态误写成项目工位状态；
 - 安装目录不包含 `internal/` 或仅供产品维护的 Skill。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于明确共享安装影响范围；旧模式跨 epoch 另要求全部解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
-安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
+安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 负责准备、快进更新和本地核验；Workflow 在新接管预检通过后、创建 run 之前按 Project Profile 的 `wiki_update_before_takeover` 配置复用该能力。TapData 启用新接管前自动准备并更新 Wiki，原 run 和在途操作恢复跳过；初始化和查询不自动刷新。更新失败明确提示，仅暂停依赖 Wiki 的工作，不增加任务门禁。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
 ## 5. 单任务工位
 
@@ -68,17 +82,19 @@ Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` �
 
 完整工程基线保存 Profile、版本解析输入、每仓 origin/ref/SHA 与摘要；任务修改仓另存分支、目标、范围、验证和交付事实，引用冻结基线。上下文通过 task.py repository context 返回已核验路径，Agent 在同一工位会话使用原生工具操作，不另建会话状态或复制中央规则。
 
-## 6. 四操作与恢复
+## 6. 生命周期与恢复
 
-takeover 先完成只读预检，再登记操作与任务并准备独立源码；已有副作用的失败恢复同 run/op。工作清理保持当前任务；任务清理撤销授权并解绑；archive 尽力记录已有结果，不冻结开发或阻断退出；release 组合 archive 和任务清理，覆盖处理中途退出和完成后退出。业务完成验收独立执行。
+清理、恢复和环境维护的开发要求统一引用[生命周期协作规范](../maintenance-guide.md#生命周期协作规范)。资源专属的收尾能力归创建功能、退出流程复用该能力是目标职责；当前 Docker 公共清理处理器尚未收敛，不能据此假定已有统一接口。状态语义仍由工位合同维护，不扩展 Bootstrap 为编译、部署或任务恢复中心。
+
+takeover 先完成只读预检，再登记操作与任务并准备独立源码；已有副作用的失败恢复同 run/op。archive 建立持久接续点，不冻结开发、不释放任务。clean 的 task/station 两个范围复用同一执行链，先核验成果处置和资源停写，再删除对应区域，最后释放任务与执行占用。业务完成验收独立执行。
 
 状态由工位锁串行，写请求绑定 run/revision，副作用由原操作及逐对象回执恢复。未知对象、路径漂移和未停止写入者使受影响对象保留，独立步骤继续；解绑结果必须回读。具体清单、保护与异常接力规则只在[工位合同](single-task-station.md)维护。
 
 ## 7. 生成、清理与升级分层
 
-Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 编排本版统一退出后移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
+Bootstrap 生成可再生接线、稳定绑定、空 current、工位清单和 config/source/runtime；repair 修复同代际接线。station purge 要求当前任务和原操作先结束，再移除受管接线、绑定和状态；修改过的接线及未知对象保留，源码和未选择配置保持原样，Product Root `.archive/` 不在清理范围。原路径重建非空持久材料需明确 --reuse-materials；新 station_id 不继承旧 run 授权。
 
-同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：兼容性以[工位合同](single-task-station.md#10-升级与恢复)的 epoch 保证为准。升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。删除工具 Hook 的执行依赖会改变旧接线的读用语义，因此退役版本提升 epoch；旧客户端通过已有 epoch 检查在切换前停止，不能用新版检查器的行为替代旧客户端回归。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
+同版本生成→任务闭环→purge→生成先独立验收。当前升级器只编排产品切换，不解释旧任务；epoch 判定、登记及原版退出要求统一见[工位合同](single-task-station.md#10-升级与恢复)，当前操作见[更新与回退](../usage/update-and-rollback.md)。支持范围与局部未完成能力以该合同为准，不将安装成功等同于任务通过。
 
 安装采用 `blob:none` 部分克隆，安装更新必须依次执行“显式补齐材料→本地核验→切换版本”。Bootstrap 先核验产品记录、来源远端和原/目标提交归属，再从 Git 树枚举两端安装范围并集的文件对象（包含两端兼容清单），向已核验的 `origin` 显式请求缺失对象，并本地回读确认。cone 安装包含根文件、所选目录的祖先文件；范围刷新先作用于当前版本，故只补目标文件或只补两端兼容清单均不足。排除的维护目录不整树下载，不改变部分克隆过滤器；获取失败不自动换远端或重试，不检出、不更新版本记录或工位。版本快进显式禁用 Git 的整仓 diffstat：该显示统计会读取排除目录的文件对象，不能为了输出统计而下载维护源码。该边界同样适用于定点更新与维护恢复；它不在线迁移任务，也不改变工位 epoch。
 
@@ -108,7 +124,7 @@ Agent 会话可能在两次工具调用之间使用已加载规则。由 station
 
 ## 8. 连续性与安全
 
-任务接续区分同版本运行恢复与从 Jira/GitHub 成果重新接管。后者由 Agent 原生读取、理解和补齐外部材料，Workflow 只接收本版输入并核验；Bootstrap 不解析旧任务或实现 epoch 转换。共享任务接续 Skill 负责协作，阶段评论从既有仓库绑定派生工作分支、目标分支、历史基线与源码版本，不增加本地账本。详见[从任务事实接续](single-task-station.md)。
+当前实现的任务接续区分同版本运行恢复与从 Jira/GitHub 成果重新接管。后者由 Agent 原生读取、理解和补齐外部材料，Workflow 只接收本版输入并核验；Bootstrap 不解析旧任务或实现 epoch 转换。共享任务接续 Skill 负责协作，阶段评论从既有仓库绑定派生工作分支、目标分支、历史基线与源码版本，不增加本地账本。详见[从任务事实接续](single-task-station.md)。
 
 未迁移的辅助能力优先由 Agent 原生能力完成；没有安全自动路径时，只暂停当前副作用并输出人工接力。事实不可信、权限不足、高风险操作或外部写入结果不明必须停止。
 

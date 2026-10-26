@@ -6,6 +6,7 @@
   },
   "profile_id": "tapdata",
   "wiki_repository": "tapstate/wiki",
+  "wiki_update_before_takeover": true,
   "jira": {
     "site": "https://tapdata.atlassian.net",
     "project_key": "TAP",

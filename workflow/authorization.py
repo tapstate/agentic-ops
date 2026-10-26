@@ -116,9 +116,9 @@ def cmd_renew(args):
     q1_digest, q2_digest = record.get("approved_q1_digest"), record.get("approved_q2_digest")
     if not isinstance(q1_digest, str) or not q1_digest or not isinstance(q2_digest, str) or not q2_digest:
         raise ValueError("旧授权缺少有效 Q1/Q2 方案确认摘要；可在原有效期内继续，但续签前必须重新确认方案")
-    expiry = record.get("expires_at_epoch")
-    if type(expiry) not in (int, float) or not math.isfinite(expiry):
-        raise ValueError("原授权有效期无效，拒绝续签")
+    expiry = engine.authorization_expiration(record)
+    if expiry is None:
+        raise ValueError("原授权不固定到期，无需续签；可继续原范围任务")
     # 只忽略已经到期这一项，其余既有授权约束继续核验。
     valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
                                                 engine.load_policy(), now=expiry)
@@ -166,9 +166,9 @@ def cmd_reconfirm(args):
         raise ValueError("原授权无法读取，拒绝重新绑定") from error
     if not isinstance(record, dict) or record_digest(record) != args.expected_authorization_digest:
         raise ValueError("原授权已变化，重新核对确认对象")
-    expiry = record.get("expires_at_epoch")
-    if type(expiry) not in (int, float) or not math.isfinite(expiry):
-        raise ValueError("原授权有效期无效")
+    expiry = engine.authorization_expiration(record)
+    if expiry is None and renew_ttl is not None:
+        raise ValueError("原授权不固定到期，无需续签；仅重新确认时省略 renew-ttl-hours")
     valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
                                                 engine.load_policy(), now=expiry if renew_ttl is not None else None)
     if not valid:
@@ -215,7 +215,7 @@ def cmd_reconfirm(args):
 
 @task_store.task_mutation
 def cmd_grant(args):
-    if not math.isfinite(args.ttl_hours) or args.ttl_hours <= 0:
+    if args.ttl_hours is not None and (not math.isfinite(args.ttl_hours) or args.ttl_hours <= 0):
         raise ValueError("签发 ttl-hours 必须为有限正数")
     issue = task_store.validate_issue_key(args.issue_key)
     if issue not in task_store.registered_issues(args.dir, statuses=("active",)):
@@ -273,8 +273,8 @@ def cmd_grant(args):
     from workflow import station_source
     readiness_digest = station_source.require_readiness(args.dir, task)
     now = time.time()
-    expires = now + args.ttl_hours * 3600
-    if not math.isfinite(expires) or expires <= now:
+    expires = None if args.ttl_hours is None else now + args.ttl_hours * 3600
+    if expires is not None and (not math.isfinite(expires) or expires <= now):
         raise ValueError("签发有效期必须是有限的未来时间")
     record = {
         "scope": "task_execution",
@@ -289,8 +289,9 @@ def cmd_grant(args):
         "approved_q2_digest": approved_q2_digest,
         "repositories": repository_bindings(repositories),
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "expires_at_epoch": expires,
     }
+    if expires is not None:
+        record["expires_at_epoch"] = expires
     if readiness_digest:
         record["source_readiness_digest"] = readiness_digest
     task_store._write_json_atomic(path, record)
@@ -335,7 +336,7 @@ def main():
     p_grant.add_argument("--expected-run-id", required=True)
     p_grant.add_argument("--agent-id", required=True)
     p_grant.add_argument("--plan-version", required=True)
-    p_grant.add_argument("--ttl-hours", type=float, default=8)
+    p_grant.add_argument("--ttl-hours", type=float, help="仅在用户明确限定期限时指定；默认不固定到期")
     p_grant.add_argument("--dir", default=".")
     p_grant.set_defaults(func=cmd_grant)
 

@@ -71,12 +71,12 @@ class StationContextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "符号链接"):
             context.read_binding(self.station)
 
-    def test_runtime_rechecks_epoch_after_initial_read(self):
+    def test_runtime_rechecks_origin_after_initial_read(self):
         context.read_binding(self.station)
-        (self.state / "init.json").write_text(json.dumps({"station_state_epoch": self.epoch["station_state_epoch"] - 1}))
+        (self.state / "init.json").write_text(json.dumps({"station_state_epoch": True}))
         with self.assertRaisesRegex(ValueError, "代际"):
             with task_store.task_state_lock(self.station):
-                self.fail("旧代际不能进入写入步骤")
+                self.fail("无效来源不能进入写入步骤")
 
 
 if __name__ == "__main__":

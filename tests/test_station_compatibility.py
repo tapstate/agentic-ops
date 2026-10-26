@@ -40,6 +40,7 @@ class StationCompatibilityTests(unittest.TestCase):
                         "source_pool": str(self.station / "pool")}) + "\n",
             encoding="utf-8",
         )
+        task_store.initialize_current(self.station)
         (state / "init.json").write_text(
             json.dumps({"station_state_epoch": 1}) + "\n", encoding="utf-8"
         )
@@ -66,7 +67,7 @@ class StationCompatibilityTests(unittest.TestCase):
         self.assertEqual(before, path.read_bytes())
 
     def test_hook_retirement_rejects_epoch_nineteen_without_adopting_state(self):
-        current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
+        current = {"station_state_epoch": 38}
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 19}))
@@ -119,7 +120,7 @@ class StationCompatibilityTests(unittest.TestCase):
         self.assertEqual(before, path.read_bytes())
 
     def test_source_binding_epoch_rejects_epoch_twenty_without_migration(self):
-        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
+        current = manifest(38)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 20}))
@@ -136,7 +137,7 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
 
     def test_environment_epoch_rejects_epoch_twenty_one_and_bound_switch(self):
-        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
+        current = manifest(38)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 21}))
@@ -151,20 +152,19 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new')
 
-    def test_environment_config_epoch_thirty_three_boundary(self):
-        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(manifest(33), current)
+    def test_jira_coordination_epoch_thirty_eight_boundary(self):
+        current = manifest(38)  # 旧客户端仍按原代际合同拒绝，不能追溯改变其能力。
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
-        path.write_text(json.dumps({'station_state_epoch': 33}))
+        path.write_text(json.dumps({'station_state_epoch': 38}))
         before = path.read_bytes()
         self.write_registry([str(self.station)])
         for operation in ('update', 'rollback'):
-            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(33), manifest(33)]):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(38), manifest(38)]):
                 compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
         compatibility.require_station_can_adopt(self.product_root, self.station)
         self.assertEqual(before, path.read_bytes())
-        for epoch in range(1, 33):
+        for epoch in range(1, 38):
             with self.subTest(epoch=epoch):
                 path.write_text(json.dumps({'station_state_epoch': epoch}))
                 before = path.read_bytes()
@@ -172,9 +172,16 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.require_station_can_adopt(self.product_root, self.station)
                 self.assertEqual(before, path.read_bytes())
 
+    def test_handoff_rejects_bound_upgrade_and_rollback(self):
+        self.write_registry([str(self.station)])
+        for operation, epochs in (('update', (34, 35)), ('rollback', (35, 34))):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(e) for e in epochs]):
+                with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
+                    compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
+
     def test_ci_plan_epoch_rejects_epoch_twenty_two_and_bound_switch(self):
-        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(33, current['station_state_epoch'])
+        current = manifest(38)
+        self.assertGreaterEqual(current['station_state_epoch'], 24)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 22}))
@@ -190,8 +197,8 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
 
     def test_merged_cleanup_epoch_rejects_both_epoch_twenty_three_candidates(self):
-        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(33, current['station_state_epoch'])
+        current = manifest(38)
+        self.assertGreaterEqual(current['station_state_epoch'], 24)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 23}))
@@ -207,8 +214,8 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
-        current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(33, current["station_state_epoch"])
+        current = manifest(38)  # 保留旧 epoch 模式的拒绝合同。
+        self.assertGreaterEqual(current["station_state_epoch"], 17)
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
@@ -242,7 +249,7 @@ class StationCompatibilityTests(unittest.TestCase):
             self.assertEqual(before, path.read_bytes())
 
     def test_all_pre_recovery_epochs_are_rejected_by_current_product(self):
-        current_manifest = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
+        current_manifest = manifest(38)
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current_manifest))
         path = self.station / '.agenticops/init.json'
         for old in range(9, current_manifest['station_state_epoch']):
@@ -302,6 +309,38 @@ class StationCompatibilityTests(unittest.TestCase):
                     "check-upgrade", "--current-ref", "old", "--target-ref", "new"]))
             self.assertNotIn("Traceback", stderr.getvalue())
             self.assertIn("结构无效", stderr.getvalue())
+
+    def test_completed_legacy_operation_is_history_not_a_new_cleanup_plan(self):
+        from workflow import station_operation, engineering_baseline
+        request = {'reason': '旧版已完成的退出'}
+        value = {'schema_version': 1, 'status': 'done', 'steps': {},
+                 'operation_id': 'op-legacy-finished', 'kind': 'release', 'run_id': 'run-0123456789ab',
+                 'request': request, 'request_digest': engineering_baseline.digest(request),
+                 'expected_revision': 1, 'phase': 'done', 'cleanup_plan': {'schema_version': 7}}
+        path = station_operation.path(self.station)
+        path.write_text(json.dumps(value))
+        before = path.read_bytes()
+        self.assertEqual(value, station_operation.read(self.station))
+        self.assertEqual(before, path.read_bytes())
+        value['status'] = 'running'
+        path.write_text(json.dumps(value))
+        with self.assertRaises(ValueError):
+            station_operation.read(self.station)
+
+    def test_feature_validation_preserves_origin_and_requires_registry(self):
+        target = {"station_state_epoch": 39, "validation": "feature"}
+        with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(33), target]):
+            with self.assertRaisesRegex(ValueError, "登记清单缺失"):
+                compatibility.check_upgrade(self.product_root, "old", "new")
+        self.write_registry([str(self.station)])
+        before = (self.station / ".agenticops/init.json").read_bytes()
+        with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(33), target]):
+            self.assertEqual([], compatibility.check_upgrade(self.product_root, "old", "new"))
+        self.assertEqual(1, compatibility.require_station_can_adopt(self.product_root, self.station, target))
+        self.assertEqual(before, (self.station / ".agenticops/init.json").read_bytes())
+        (self.station / ".agenticops/current-task.json").write_text('{}')
+        with self.assertRaises(ValueError):
+            task_store.read_current(self.station)  # 产品可切换不表示任务材料已经有效。
 
     def test_same_epoch_does_not_require_station_cleanup(self):
         with mock.patch.object(

@@ -56,15 +56,19 @@ python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件>
 
 编辑已有 PR 前保留最新原文，与拟修改正文比较，保留其他人的更改；写前再次回读确认原文未变，变化时重新整理，不能覆盖。普通 CLI 编辑不提供原子条件更新保证，短窗口内并发仍可能发生；已知有同时编辑者时先协调，写后核对并披露冲突，不声称消除了并发风险。
 
-正文回读不匹配时，只暂停相关描述发布/修正及“描述已核验”的结论，不阻塞无依赖编码、测试或 CI 观察；PR 存在、正文匹配、代码与 CI 通过分别报告。调用超时或结果未知先定位原 PR 并回读，不重建 PR 或盲目重发。它不是 PR Ready 新门禁，不增加工位字段、事件或 epoch，也不认证快照来源；旧状态读取和原门禁保持不变。
+正文回读不匹配时，只暂停相关描述发布/修正及“描述已核验”的结论，不阻塞无依赖编码、测试或 CI 观察；PR 存在、正文匹配、代码与 CI 通过分别报告。调用超时或结果未知先定位原 PR 并回读，不重建 PR 或盲目重发。通用正文传输比较不认证快照来源；TapData 的测试总结、版本标识和补测关联另按下述项目合同进入 PR Ready 预检，不能以传输成功替代质量核验。
 
 ## 共同验证材料
 
 使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定源码版本与仓库登记；不是新任务类型或执行引擎。新 source_sync 仅绑定所属仓，local/ci/review 仍绑定全部任务仓。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
-TapData 功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tests` 写入 `implementation_plan` 或 `fix_plan`，不增加确认轮次。每项给出 repository、scope（稳定的模块/行为范围）、level（本次从 Wiki 判断的级别，可有多级）、knowledge_ref（文章路径）、rationale（结合源码的判定依据）、case_strategy（复用/新增/修改的具体用例与理由）、execution_plan（入口、环境、定向调试、模块回归、CI 触发与报告验证安排）。每个任务仓库至少一项；同仓库的 scope 不重复。无法适用或框架不支持也要明确理由和未覆盖范围，不能删除该仓记录。级别定义及具体编写流程由 [tapdata-ci-test](../../projects/tapdata/skills/tapdata-ci-test/SKILL.md)查询 Wiki 并用任务源码核验，工具不判断语义或固化 Wiki 分级。
+TapData 的 [IT（Integration Test）](../glossary.md) 指 TapData 集成测试。功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tests` 写入 `implementation_plan` 或 `fix_plan`，不增加确认轮次。每项给出 repository、scope（稳定的模块/行为范围）、level（从 Wiki 和源码判断的单一级别，如 `L1`；不适用写 `N/A`）、knowledge_ref（文章路径）、rationale（源码判定依据）、case_strategy（该场景的覆盖思路）、cases（逐用例计划）和 execution_plan（入口、环境、定向调试、模块回归、CI 触发与报告验证安排）。每个任务仓库至少一项；同仓库同 scope 涉及多个级别时拆行，`repository + scope + level` 不重复，不再填写 `L1,L2`。级别定义查询 Wiki 并用任务源码核验，工具不判断语义或固化 Wiki 分级。
 
-项目 `verification_plan` 配置选择方案事实、字段、方式、材料种类及字段形状。Workflow 复用该配置核对完整性与范围：TapData 的 CI 材料必须逐项覆盖上述 scope，对应 results 标记 `method=integration`；普通单元测试或 lint 的 PASS 不能充当集成测试结果。scope 的模块/场景内容就是既有应测清单，不新增编号台账；具体用例仍复用 item/execute。本地验证继续使用既有 required_scope 与所选用例合同，不因计划要求的某级测试只适合 CI 或完整部署而再增加一轮本地免测确认。方案内容变化使旧 CI 材料及缺口决定失效；源码版本或 CI 观察变化仍按既有绑定失效；报告内容变化须重新分析登记，工具不凭引用自动检测远端报告变化。维护 schema 只约束材料完整性，是否覆盖真实行为仍需 Agent 审查。
+每行的 `cases` 列出 `id`、`change`（reuse/modify/new，分别表示复用/修改/新增）、`reason`；复用与修改还提供 `baseline_ref`，引用原用例位置、版本及断言依据。用例 id 复用既有引用或质量 item 标识，在该场景/级别内唯一，不建立另一套编号台账。同一级别允许混合三类用例，不能只用一段文字把整个任务归为“新增测试”。适用级别必须列出用例；`N/A` 使用空 cases 并说明不适用依据，框架不支持不能写成不适用。
+
+项目 `verification_plan` 配置选择方案事实、字段、方式、材料种类及字段形状。TapData 的 CI 材料按 scope/level 精确对应方案，每个结果标记 `method=integration` 和单一 `level`；一个级别 PASS 不替代另一级别，普通单元测试或 lint 不充当 IT 结果。`required_scope` 仍是去重的场景列表；同一 scope 下的多个 results 按 level 区分，不需要拼接或制造新场景名。实际验收继续复用 item/execute，逐用例材料引用其结果或原始报告。本地验证沿用既有合同，不因某级测试只适合 CI 或完整部署而增加本地免测确认。
+
+方案内容（含用例分类与清单）变化使旧 CI 材料及缺口决定失效；源码版本或 CI 观察变化仍按既有绑定失效；报告内容变化须重新分析登记，工具不凭引用自动检测远端报告变化。维护 schema 约束材料完整性，真实行为覆盖仍需 Agent 审查。
 
 所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
@@ -75,13 +79,41 @@ TapData 功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tes
 | source_sync | source_branch（登记的检出来源）、source_revision（刚回读的来源 SHA）、before_merge_revision、observed_at、impact_analysis_ref；sync 由工具实际生成，用户输入不能代替 Git 核对 |
 | review | complete=true 表示已完整分页回读；items 逐项记录 id、source_ref、reason、status（fixed/not_applicable/accepted_gap/pending），fixed 必须有 verification_ref；无意见使用空列表并保留回读来源 |
 
-results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。不能用一项决定覆盖其它范围。review 的 accepted_gap 也提供这组明确处置。
+results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。TapData IT 的执行决定还须提供 `level`，精确等于该行级别；不能借用其它场景或级别的确认。review 的 accepted_gap 也提供这组明确处置。
 
 没有 CI 运行时，CI 材料使用 `run_status=not_triggered`、当前完整 `head_revision`，`source_ref` 引用 PR/触发配置的真实回读，所有 results 保持 `NOT_RUN`，不得填写 run_ref、attempt、checkout_ref。已有运行但未执行集成测试仍使用该运行的真实信息；未触发、跳过、零用例、缺报告分别写入 report_ref 引用的缺口分析，使用 NOT_RUN/SKIPPED/UNKNOWN，不能借其它 Checks 成功填写 PASS。完全未触发时仍需记录真实观察；是否提审按下述 PR Ready 具体 Checks 例外决定，不能改写为 PASS。
 
-发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。确认框架不支持时，先检索已有跟进事项，再询问是否创建或关联 Jira；建票决定和本次缺口处置分别记录，Jira 链接不充当 `proof.source=user_message`。
+发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。编写缺口与执行缺口分别处理，按下述统一规则创建或复用 GitHub Issue；Issue 链接不充当 `proof.source=user_message`。
 
-本次方案及验证语义调整提升工位 epoch；历史事件继续按事件中原规则重放，但不补造新分级、覆盖或确认。升级/回退必须先按原版结束任务并归档释放或清理、purge，再切换版本，不能在线迁移活动任务。
+### 测试编写缺口与 PR 总结
+
+TapData 统一规则：判断需要编写但尚未编写的测试，必须由研发显式确认处置；其中 L1 及以上，或因框架尚不支持而无法编写的缺口，必须说明原因，在对应 GitHub 仓库创建或复用 Issue，并与 PR 双向关联。同一缺口只维护一个 Issue。判断来自 Wiki 和任务源码；`case_coverage.issue_min_level=1` 与 `issue_when_unsupported=true` 由项目质量配置声明，Workflow 只核对结构和确定性条件，不判定测试语义。
+
+复用每项 CI `results` 的 `case_coverage`：`status` 为 `covered`（所有计划用例已完成）、`missing`（存在应写未写）或 `not_applicable`；`reason` 说明编写情况及覆盖依据，`framework_supported` 为布尔值。`cases` 与该行计划的用例 id 精确对应，不能遗漏、重复或借用其它级别用例；不再使用不区分类别的 case_refs 列表。
+
+| 逐用例实绩字段 | 核验方式 |
+|---|---|
+| id | 对应本场景/级别计划中的用例；复用、修改、新增从计划读取，不重复登记分类 |
+| status | written 表示本次所需内容已完成；missing 表示尚未完成，不能以原文件存在代替修改完成 |
+| case_ref | written 必填，引用实际用例位置与版本 |
+| change_ref | 修改或新增且 written 时必填，引用已完成差异或对应提交；仅有计划不算完成 |
+| result、report_ref | 逐用例真实执行结果及报告定位，未运行引用缺失原因；missing 只能是 NOT_RUN |
+
+级别 PASS 要求本级所有用例均已完成且 PASS，并有有效报告计数；部分通过不能将本级写为 PASS。covered 只表示用例已完成，不证明执行成功。not_applicable 对应 `N/A` 和空 cases，不能登记 PASS。missing 的编写 `decision` 使用 reason/uncovered/level/follow_up/proof，精确绑定场景和级别；执行缺口仍在结果的独立 decision 中处置。识别缺口立即展示场景、级别、未完成用例及风险，复用既有确认环节取得研发决定；无决定可先保存原始材料，但不能作为已处置证据。
+
+例如同一行为的 L1 用例已完成且通过、L2 新增用例尚未编写，应保存两行：L1 为 covered/PASS，L2 为 missing/NOT_RUN。L2 单独记录编写及执行处置、所需 Issue；即使研发接受延期，L2 仍不是 PASS。L1 内可以同时包含复用正常路径、修改边界断言和新增异常路径，三条用例分别提供完成与执行证据。
+
+满足统一规则的 missing 另提供 `issue={"repository":"owner/repo","url":"https://github.com/owner/repo/issues/123"}`。先检索、优先复用；Issue 记录所需测试或框架能力、具体未覆盖场景、级别、原因、风险与后续安排，创建到承载补测代码或所缺框架能力的仓库。跨仓只引用对应实际仓库，不为每个 PR 重复建票。PR 和 Issue 正文互放完整普通链接，不使用 Closes/Fixes 等自动关闭关联，原功能合并不能提前关闭补测工作。外部创建或更新结果未知先回读原操作，不重复创建。
+
+已写但未运行沿用执行结果及其 decision，不要求仅因环境故障创建编写缺口 Issue；已有充分用例覆盖也不因未新增用例而建票。建票不等于研发接受缺测，接受缺测不等于 PASS，不豁免既有失败修复、选定用例验收或 PR Checks。
+
+PR 创建和每次更新正文都包含可见的 `AgenticOps 版本 XXX`。版本通过 `python3 <agenticops-root>/bootstrap/product_version.py --product-root <绑定的安装根>` 读取，不使用业务版本、接管时旧版本或人工猜值。安装版本无法核实时保留待同步，不填占位版本冒充完成。
+
+PR Ready 复用 `interactions/pr-ready-input.json`：`pull_requests` 每条回读增加 `body`，保留 repository、number、url、headRefOid、state、isDraft、source_ref、observed_at；允许 Draft 通过预检，真正 ready 仍要求原生退出 Draft。顶层 `issues` 保存去重后的 Issue 回读，每条包含 repository、url、body、source_ref、observed_at（带时区时间）。由 Agent 通过原生 GitHub 读取并保留来源，不把自行拼造的正文当回读。
+
+`pr_ready.py` 的 `required_pr_summaries` 返回逐仓基于当前 CI 材料生成的可见 Markdown 总结，包含完整 Head、各级别与依据、逐用例复用/修改/新增及完成证据、各级别和逐用例执行结果、缺口决定及 Issue 链接。将对应片段原样放入 PR 正文，保留其它人工内容，沿上述正文发布流程写入并回读，再更新同一个提审输入。没有完整材料的 Draft 先披露待办，最终提审前补齐；不得将总结藏在注释或代码块中。预检核对当前版本、总结和 Issue 反向 PR 链接；Head、方案或 CI 观察变化沿既有绑定使旧材料失效，重新核对受影响决定和总结，不重新运行未受影响的测试。摘要比较不认证外部真实性或语义，Agent 仍须核实来源、新鲜度、对应仓库及实际覆盖。
+
+本次增加单一级别独立验收、逐用例计划与实绩、编写材料及提审条件，将工位 epoch 提升为 34。历史质量事件仍按记录时规则重放，不补造编写确认或 Issue；旧工位先按原版结束任务、归档释放或清理并显式 purge，再切换版本重建，不在线迁移活动任务。
 
 跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
 

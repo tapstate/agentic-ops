@@ -65,6 +65,12 @@ def require_epoch(station, product_root, target=None):
         Path(product_root) / "contracts/station-state-compatibility.json", "工位兼容性清单"))
     init = read_object(Path(station) / ".agenticops/init.json", "工位初始化标记")
     epoch = init.get("station_state_epoch")
+    if target.get("validation") == "feature":
+        # 代际只用于诊断；任务、质量、操作和授权由所属入口校验，不伪造采用标记。
+        read_binding(station)
+        if type(epoch) is not int or epoch < 1:
+            raise ValueError("工位初始化来源代际无效；保留 init.json，核实原初始化记录后再修复接线")
+        return epoch
     if type(epoch) is not int or epoch != target["station_state_epoch"]:
         raise ValueError("工位状态代际 %s 与当前产品不兼容；请使用原版本保存材料、受控解绑并重建；repair 不执行跨代际采用" % epoch)
     return epoch

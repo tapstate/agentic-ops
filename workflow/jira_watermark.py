@@ -274,7 +274,7 @@ def main():
     try:
         task_store.station_project(args.dir)
         issue_key = task_store.resolve_issue(args.dir, args.issue_key)
-        with task_store.task_run_lock(args.dir, issue_key):
+        with task_store.task_run_lock(args.dir, issue_key, execution=args.command != "status"):
             task = task_store.read_task(args.dir, issue_key)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue_key, args.expected_run_id)

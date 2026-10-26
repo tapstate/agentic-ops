@@ -1,10 +1,12 @@
 # 工位源码与持久材料
 
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义完整目标；持久归档与[执行接管](../architecture/single-task-station.md#执行接管当前源码)已进入当前源码，两个清理范围也已进入当前源码；旧安装是否具备这些能力须核实实际版本。源码保留仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+
 ## 查看工位基本信息
 
 在工位目录执行 `./agenticops station status`，查看工位路径与标识、绑定应用目录、应用版本、项目、Agent、源码池、状态代际、登记状态和当前任务的运行、状态与阶段。跨目录使用 `<product-root>/agenticops station status --station <工位目录>`，需要机器可读结果时追加 `--json`。
 
-命令只读取当前绑定和已校验任务摘要，不展开任务事实、授权或秘密，不刷新接线、登记或推进任务。空闲工位明确显示无当前任务；绑定不匹配、状态损坏或 epoch 不兼容时失败并保留现场，不读取旧代际任务。应用版本允许显示 `-dirty`，查询不代表 doctor 检查通过或任务已验收。
+命令只读取当前绑定和已校验任务摘要，不展开任务事实、授权或秘密，不刷新接线、登记或推进任务。空闲工位明确显示无当前任务；绑定不匹配、状态损坏或旧模式 epoch 不兼容时失败并保留现场；新版功能校验模式按当前材料合同读取。应用版本允许显示 `-dirty`，查询不代表 doctor 检查通过或任务已验收。
 
 源码池是安装目录保存的可选配置，默认位于 `~/.agentic-ops-repos`。初始化工位时，显式 `--source-pool` 优先；未指定时使用安装目录配置。它只用于工位下载加速：`repositories/<owner>/<repo>.git` 是 bare 缓存，接管时先下载缺失仓库或刷新已有缓存，再通过本地传输在 `source/<owner>/<repo>` 创建或更新独立 Git 仓库并冻结完整基线；活动修改仓另行登记。
 
@@ -29,12 +31,12 @@ agenticops station repair --station <工位目录> --ensure-wiki
 底层共享仓库也可由维护者直接操作（脚本默认使用自身所在 Product Root，也可通过 `--product-root` 指定）：
 
 ```sh
-python3 <product-root>/bootstrap/shared_repositories.py ensure --repository tapstate/wiki
-python3 <product-root>/bootstrap/shared_repositories.py update --repository tapstate/wiki
-python3 <product-root>/bootstrap/shared_repositories.py status --repository tapstate/wiki
+python3 <product-root>/bootstrap/shared_repositories.py ensure --repository tapstate/wiki --source-pool <station.source_pool>
+python3 <product-root>/bootstrap/shared_repositories.py update --repository tapstate/wiki --source-pool <station.source_pool>
+python3 <product-root>/bootstrap/shared_repositories.py status --repository tapstate/wiki --source-pool <station.source_pool>
 ```
 
-ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验；update 才联网刷新并仅快进 main；status 只检查本地状态。初始化、接管、任务开始和技能查询均不自动准备或更新。已有未知目录不会自动采用；本地修改、身份错误、分叉或未完成 Git 操作需要研发处理，不自动 reset、stash 或强制覆盖。管理并发时拒绝忙碌仓库；查询一次固定一个临时提交读取，避免混读更新前后内容，不保存任务 Wiki SHA。
+ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验；update 才联网刷新并仅快进 main；status 只检查本地状态。TapData 的 Profile 启用 `wiki_update_before_takeover`：每次新接管在既有 AgenticOps 版本检查及接管预检通过后、创建 operation/run 和下载业务源码前，自动 ensure 后 update，缺失时准备、已有时快进到本次获取的远端 main。原 run、在途操作恢复及已完成请求重放跳过；其它项目未启用时保持原行为。初始化、会话启动和技能查询不单独触发 Wiki 更新。更新成功显示本次核验提交，失败明确报告未更新到最新并保留现场，继续不依赖 Wiki 的工作；使用 Wiki 前仍须通过 status 核验，不将失败解释为旧副本可用。已有未知目录不会自动采用；本地修改、身份错误、分叉或未完成 Git 操作需要研发处理，不自动 reset、stash 或强制覆盖。管理并发时拒绝忙碌仓库；查询一次固定一个临时提交读取，避免混读更新前后内容，不保存任务 Wiki SHA。
 
 准备使用临时目录核验后发布。更新失败不等于工作树仍可用：fetch 失败通常保留原 HEAD，checkout 中断必须先经 status 核验并由研发修复。管理器不自动清理共享材料、不运行 Wiki init、脚本或 Hook；不提供操作系统级只读隔离。
 

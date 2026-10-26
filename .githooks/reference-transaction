@@ -11,8 +11,8 @@ zero_sha="0000000000000000000000000000000000000000"
 while read -r old_sha new_sha ref_name; do
   [ "$new_sha" = "$zero_sha" ] || continue
   case "$ref_name" in
-    refs/heads/main|refs/heads/develop|refs/heads/release/*)
-      printf 'branch_deletion_prohibited: main、develop 和 release/* 分支不可删除\n' >&2
+    refs/heads/main|refs/heads/develop)
+      printf 'branch_deletion_prohibited: main 和 develop 分支不可删除\n' >&2
       exit 1
       ;;
   esac

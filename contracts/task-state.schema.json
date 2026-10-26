@@ -8,6 +8,8 @@
   "properties": {
     "schema_version": {"const": 1},
     "revision": {"type": "integer", "minimum": 0},
+    "execution_control": {"type": "object", "description": "工位执行会话占用；结构由 workflow.execution.validate 核验，与任务 revision 独立。"},
+    "jira_coordination": {"type": "object", "description": "Jira 协调意图与回读；由 workflow.jira_coordination.validate 核验，保留远端收尾线索。"},
     "current": {
       "type": ["object", "null"],
       "additionalProperties": false,

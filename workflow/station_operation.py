@@ -42,23 +42,26 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean")
+            or (value["kind"] not in ("takeover", "archive", "clean", "scope_change", "replan")
+                and not (value["status"] == "done" and value["kind"] in ("release", "work-clean")))
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
             or not isinstance(value["phase"], str) or not value["phase"]):
         raise ValueError("工位操作日志身份或请求摘要无效")
-    from workflow.station_clean_rules import validate_snapshot
-    if "cleanup_plan" in value:
-        validate_snapshot(value["cleanup_plan"])
-    if "cleanup_plan" in value.get("handoff", {}):
-        validate_snapshot(value["handoff"]["cleanup_plan"])
-    for revision in value.get("plan_revisions", []):
-        validate_snapshot(revision["plan"])
+    # 已完成操作只供历史查阅；未完成计划才要求满足当前执行合同。
+    if value["status"] != "done":
+        from workflow.station_clean_rules import validate_snapshot
+        if "cleanup_plan" in value:
+            validate_snapshot(value["cleanup_plan"])
+        if "cleanup_plan" in value.get("handoff", {}):
+            validate_snapshot(value["handoff"]["cleanup_plan"])
+        for revision in value.get("plan_revisions", []):
+            validate_snapshot(revision["plan"])
     for name, step in value["steps"].items():
         if not isinstance(name, str) or not isinstance(step, dict) or not {"before", "expected", "receipt"} <= set(step):
             raise ValueError("工位操作步骤结构无效")
-        if step.get("superseded_by"):
+        if step.get("superseded_by") and value["status"] != "done":
             _verify_superseded(value, name, step)
         if value["status"] == "done" and step["receipt"] is None and not step.get("superseded_by"):
             raise ValueError("已完成操作仍有未核验步骤")
@@ -69,8 +72,8 @@ def _verify_superseded(operation, name, step):
     raise ValueError("旧清理修订记录必须由原版本退出")
 
 
-def begin(base, kind, operation_id, expected_revision, request, run_id=None):
-    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan", "work-clean"):
+def begin(base, kind, operation_id, expected_revision, request, run_id=None, before_create=None):
+    if kind not in ("takeover", "archive", "clean", "scope_change", "replan"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
         raise ValueError("operation_id 必须为 op- 前缀的稳定操作编号")
@@ -93,6 +96,8 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
+        if before_create is not None:
+            before_create()
         from workflow import archive_store
         for attempt in range(2):
             run_id = task_store.new_run_id(issue_key)
@@ -106,7 +111,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
                 raise ValueError(
                     "执行编号 %s 已存在；等待 2 秒自动重试一次仍冲突，请核验后稍后重试" % run_id
                 ) from error
-    elif kind != "work-clean" and (current["current"] is None or current["current"]["run_id"] != run_id):
+    elif not (kind == "clean" and request.get("scope") in ("task", "station") and current["current"] is None) and (current["current"] is None or current["current"]["run_id"] != run_id):
         raise ValueError("工位 run 已变化")
     value = {
         "schema_version": 1, "operation_id": operation_id, "kind": kind,
@@ -166,6 +171,8 @@ def save(base, operation):
 def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, kind="clean"):
     """先在原任务操作记录固化完整交接，再替换；任何中断点都有唯一后继。"""
     previous = read(base)
+    if previous and previous.get('request', {}).get('handoff') is not None and not previous.get('handoff_readback'):
+        raise ValueError('接续点 Jira 写入尚未核实；先回读，明确尚未发送才可取消，不能直接清理')
     if previous and previous.get('archive_result', {}).get('status') == 'awaiting_decision':
         raise ValueError('归档仍待用户决定，先恢复原操作处理归档，不能以 clean 绕过')
     if previous is None or previous["kind"] not in ("takeover", "scope_change", "replan", "archive") or previous["status"] == "done":
@@ -173,7 +180,8 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, k
     if not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id) or operation_id == previous["operation_id"]:
         raise ValueError("清理交接需要新的有效操作编号")
     current = task_store.read_current(base)
-    if not current["current"] or current["current"]["run_id"] != run_id or previous["run_id"] != run_id:
+    initial_takeover = current["current"] is None and previous["kind"] == "takeover"
+    if previous["run_id"] != run_id or not initial_takeover and (not current["current"] or current["current"]["run_id"] != run_id):
         raise ValueError("清理交接 run 已变化")
     target = {"operation_id": operation_id, "kind": kind, "expected_revision": revision,
               "request": copy.deepcopy(request), "request_digest": engineering_baseline.digest(request),

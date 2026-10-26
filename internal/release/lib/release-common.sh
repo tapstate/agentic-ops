@@ -328,20 +328,6 @@ release_require_synced_branch() {
   return 1
 }
 
-release_workflow_mode() {
-  local configure_workflow="$1"
-  local allow_soft_gate="${2:-false}"
-  if [ "$allow_soft_gate" = "true" ]; then
-    printf 'soft\n'
-  elif [ "$configure_workflow" = "true" ]; then
-    printf 'configure\n'
-  elif [ -t 0 ]; then
-    printf 'interactive\n'
-  else
-    printf 'check\n'
-  fi
-}
-
 release_require_version_tag_available() {
   local repo_root="$1"
   local version="$2"
@@ -455,6 +441,8 @@ release_verify_story_gate() {
   local base="$2"
   local head="$3"
   local allow_independent_review="${4:-false}"
+  # 正式版本使用普通影响分析及发布证据；未传阶段的 Hotfix 保留开发材料检查。
+  local gate_stage="${5-release}"
   local trusted_base_commit
   local range_base_commit
   local head_commit
@@ -514,7 +502,7 @@ release_verify_story_gate() {
       "请从当前开发历史重新准备发布分支"
     return 1
   fi
-  if ! release_story_validate_record_source "$repo_root"; then
+  if [ "$gate_stage" = release ] && ! release_story_validate_record_source "$repo_root"; then
     release_fail "release_story_gate_local_state_unsafe" "story_gate" \
       "$RELEASE_STORY_STATE_ERROR" \
       "请移除 .local/story-gate 故事记录路径中的符号链接或特殊文件后重试"
@@ -601,20 +589,21 @@ release_verify_story_gate() {
     return 1
   fi
 
-  # 本地记录不进入 Git。只复制普通 JSON 文件，由 origin/main Runtime 在
-  # 固定 candidate 快照中重新验证 impact_id、人工确认和验收内容。
-  for record_kind in approvals evidence; do
-    if ! release_story_copy_record_kind \
-      "$repo_root" "$candidate_snapshot" "$record_kind"; then
-      git -C "$repo_root" worktree remove --force "$candidate_snapshot" >/dev/null 2>&1 || true
-      git -C "$repo_root" worktree remove --force "$baseline_snapshot" >/dev/null 2>&1 || true
-      rm -rf -- "$temp_root"
-      release_fail "release_story_gate_local_state_unsafe" "story_gate" \
-        "$RELEASE_STORY_STATE_ERROR" \
-        "请移除故事记录源或候选路径中的符号链接或特殊文件后重试"
-      return 1
-    fi
-  done
+  # 只有消费开发材料的入口才读取这些记录，正式版本不依赖无关本地台账。
+  if [ "$gate_stage" = release ]; then
+    for record_kind in approvals evidence; do
+      if ! release_story_copy_record_kind \
+        "$repo_root" "$candidate_snapshot" "$record_kind"; then
+        git -C "$repo_root" worktree remove --force "$candidate_snapshot" >/dev/null 2>&1 || true
+        git -C "$repo_root" worktree remove --force "$baseline_snapshot" >/dev/null 2>&1 || true
+        rm -rf -- "$temp_root"
+        release_fail "release_story_gate_local_state_unsafe" "story_gate" \
+          "$RELEASE_STORY_STATE_ERROR" \
+          "请移除故事记录源或候选路径中的符号链接或特殊文件后重试"
+        return 1
+      fi
+    done
+  fi
 
   if [ -z "$uv_bin" ]; then
     uv_bin="$(command -v uv 2>/dev/null || true)"
@@ -630,7 +619,7 @@ release_verify_story_gate() {
     baseline_cli="$baseline_snapshot/internal/bin/story-gate"
     GIT_NO_REPLACE_OBJECTS=1 \
       AGENTIC_OPS_STORY_BRANCH="$story_branch" \
-      AGENTIC_OPS_STORY_GATE_STAGE=release \
+      AGENTIC_OPS_STORY_GATE_STAGE="$gate_stage" \
       PYTHONPYCACHEPREFIX="$temp_root/pycache" \
       "$baseline_cli" \
         --source-root "$candidate_snapshot" \
@@ -675,7 +664,7 @@ release_verify_story_gate() {
   fi
 }
 
-release_submit_trust_root_review() {
+release_submit_review() {
   local repo_root="$1"
   local repository="$2"
   local version="$3"
@@ -684,13 +673,7 @@ release_submit_trust_root_review() {
   local protection_mode="$6"
   local confirmed="$7"
 
-  release_verify_story_gate "$repo_root" origin/main "$head" true || return 1
-  if [ "$RELEASE_TRUST_ROOT_CHANGED" != "true" ]; then
-    release_fail "release_independent_review_not_required" "story_gate" \
-      "固定发布范围未修改发布信任根，应使用 publish 走常规发布流程" \
-      "请执行 release.sh publish，不要用独立审查提交通道"
-    return 1
-  fi
+  release_verify_story_gate "$repo_root" origin/main "$head" true "" || return 1
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1
   release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交独立审查 PR" || return 1
@@ -712,7 +695,7 @@ release_confirm_publish() {
   printf '即将%s AgenticOps %s\n' "$action_label" "$version" >&2
   printf '仓库：%s\n' "tapstate/agentic-ops" >&2
   printf '发布 HEAD：%s\n' "$head" >&2
-  printf '合并方向：%s -> %s\n' "$source_branch" "$target_branch" >&2
+  printf '目标分支：%s -> %s\n' "$source_branch" "$target_branch" >&2
   printf '完整验证：通过（%s）\n' "$RELEASE_VERIFIED_AT" >&2
   printf '待发布提交：\n' >&2
   git -C "$repo_root" log --format='  %h %s' "refs/remotes/origin/main..$head" >&2 || true
@@ -724,7 +707,7 @@ release_confirm_publish() {
     release_fail "release_confirmation_required" "confirmation" "非交互发布缺少最终确认" "确认展示内容后显式传入 --confirm-release"
     return 1
   fi
-  printf '确认执行 %s -> %s 合并？[y/N] ' "$source_branch" "$target_branch" >&2
+  printf '确认%s（%s -> %s）？[y/N] ' "$action_label" "$source_branch" "$target_branch" >&2
   if ! IFS= read -r answer; then
     answer=""
   fi
@@ -733,7 +716,7 @@ release_confirm_publish() {
       return 0
       ;;
     *)
-      release_fail "release_confirmation_rejected" "confirmation" "研发工程师取消了本次发布" "确认发布内容后重新执行 publish"
+      release_fail "release_confirmation_rejected" "confirmation" "研发工程师取消了本次操作" "确认操作范围后重试原命令"
       return 1
       ;;
   esac
@@ -771,6 +754,19 @@ release_read_remote_tag() {
   RELEASE_REMOTE_TAG_COMMIT="${peeled:-$direct}"
   RELEASE_REMOTE_TAG_ANNOTATED="false"
   [ -z "$direct" ] || [ -z "$peeled" ] || RELEASE_REMOTE_TAG_ANNOTATED="true"
+}
+
+# 回读当前 Head 的独立批准，不以 PR 已合并或正文声明代替审查事实。
+release_check_independent_approval() {
+  local pr="$1" head="$2" author approved
+  author="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr" --repo tapstate/agentic-ops --json author --jq '.author.login' 2>/dev/null)" || return 1
+  [ -n "$author" ] || return 1
+  approved="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
+    --jq "add | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | (all(.[]; .state != \"CHANGES_REQUESTED\")) and any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\" and .user.type == \"User\")" 2>/dev/null)" || return 1
+  [ "$approved" = true ] || {
+    release_fail release_independent_approval_required review "缺少当前候选 Head 的独立人工批准或仍有要求修改的审查" "请在 GitHub 核实由 PR 作者以外的人员批准当前提交；不得用已合并状态代替审查"
+    return 1
+  }
 }
 
 release_read_merged_pr() {
@@ -857,13 +853,13 @@ release_inspect_state() {
     fi
   fi
   state=release_prepare_required
-  next_command="internal/release/release.sh prepare --version $version --allow-soft-gate"
+  next_command="internal/release/release.sh prepare --version $version"
   if [ "$pr_state" = MERGED ]; then
     RELEASE_BASE_COMMIT="$(git -C "$root" rev-parse "$merge^1")"
     release_validate_pr_binding "$url" "$version" "$head" || return 1
     release_verify_merge_commit "$root" "$head" "$merge" || return 1
     state=release_candidate_already_in_main
-    next_command="internal/release/release.sh recover --version $version --merged-pr $number --allow-soft-gate"
+    next_command="internal/release/release.sh recover --version $version --merged-pr $number"
     if [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
       if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != true ] || [ "$RELEASE_REMOTE_TAG_COMMIT" != "$merge" ]; then
         state=release_remote_tag_conflict; next_command=""
@@ -880,11 +876,14 @@ release_inspect_state() {
     fi
   elif [ "$pr_state" = OPEN ]; then
     state=release_waiting_manual_merge
-    next_command="internal/release/release.sh publish --version $version --allow-soft-gate --confirm-release"
+    next_command="" # 人工审查/保护/合并由研发处理，不能把等待审查引导成自动发布。
   elif [ "$pr_state" = CLOSED ]; then
     state=release_pr_closed; next_command=""
   elif [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
     state=release_merged_pr_missing; next_command=""
+  elif git -C "$root" show-ref --verify --quiet "refs/heads/release/$version"; then
+    state=release_candidate_present
+    next_command="internal/release/release.sh submit-for-review --version $version"
   fi
   printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","delivery_status":"%s","develop_sync_status":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","next_command":"%s"}\n' \
     "$version" "$state" "$delivery" "$sync" "$develop_head" "$main_head" "$local_tag" "${RELEASE_REMOTE_TAG_COMMIT:-}" "$number" "$url" "$head" "$merge" "$next_command"
@@ -892,6 +891,8 @@ release_inspect_state() {
 
 release_recover_merged_candidate() {
   local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode="$6"
+  local soft_option=""
+  if [ "$protection_mode" = soft ]; then soft_option=" --allow-soft-gate"; fi
   local candidate merge_commit pr_url local_tag local_release remote_release develop_head material digest tagger tag_object old_ref zero_ref
   if ! printf '%s\n' "$pr_number" | grep -Eq '^[1-9][0-9]*$'; then
     release_fail "invalid_release_merged_pr" "recovery_validation" "恢复发布必须提供正整数 --merged-pr" "请先运行 release.sh inspect 确认关联的已合并 PR 编号"
@@ -923,12 +924,19 @@ release_recover_merged_candidate() {
     return 1
   fi
   release_run_full_verification "$repo_root" "$candidate" check || return 1
+  # 信任根交付始终需要受保护 main；普通历史 soft 恢复保留显式选择。
+  local delivery_mode="$protection_mode" trust_changes
+  trust_changes="$(release_story_gate_trust_root_changes "$repo_root" "$RELEASE_BASE_COMMIT" "$candidate")" || return 1
+  if [ -n "$trust_changes" ]; then delivery_mode=hard; soft_option=""; fi
+  protection_mode="$delivery_mode"
+  workflow_check_delivery tapstate/agentic-ops "$delivery_mode" || return 1
+  if [ "$delivery_mode" = hard ]; then release_check_independent_approval "$pr_number" "$candidate" || return 1; fi
   local_tag="$(git -C "$repo_root" rev-parse --verify "$version^{}" 2>/dev/null || true)"
-  material="$version|$pr_number|$candidate|$merge_commit|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
+  material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
   digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
   release_print_confirmation_bundle "$repo_root" "恢复已提前合入候选并发布不可变 Tag" "$version" "$candidate" "PR #$pr_number" main "候选已由独立 PR 合入；只创建缺失的正确 Tag，绝不覆盖已有 Tag。" "$pr_url" "$merge_commit"
   if [ "$confirmed" != "true" ]; then
-    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number --allow-soft-gate --confirm-release --confirm-recovery $digest"
+    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number$soft_option --confirm-release --confirm-recovery $digest"
     return 1
   fi
   if [ "$confirmation_digest" != "$digest" ]; then
@@ -1380,7 +1388,7 @@ release_verify_merge_commit() {
   }
 }
 
-release_prepare_fixed_branch() {
+release_check_fixed_branch() {
   local repo_root="$1"
   local branch="$2"
   local candidate_head="$3"
@@ -1388,6 +1396,7 @@ release_prepare_fixed_branch() {
   local remote_head
 
   local_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
+  RELEASE_CHECKED_LOCAL_HEAD="$local_head"
   remote_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null)" || return 1
   remote_head="${remote_head%%[[:space:]]*}"
   if [ -n "$remote_head" ]; then
@@ -1403,16 +1412,41 @@ release_prepare_fixed_branch() {
     return 0
   fi
   if [ -n "$local_head" ] && [ "$local_head" != "$candidate_head" ]; then
-    release_fail "release_fixed_branch_conflict" "release_branch" "本地 $branch 不是本次已验证的固定 HEAD" "请人工核查固定发布分支，禁止移动"
-    return 1
+    if [ "${RELEASE_REPLACE_CANDIDATE:-}" != "$local_head" ]; then
+      release_fail release_fixed_branch_conflict release_branch "本地 $branch 已有其它候选" "核对范围后用 prepare --version ${branch#release/} --replace-candidate $local_head 重新准备；旧提交与证据保留"
+      return 1
+    fi
+    if git -C "$repo_root" worktree list --porcelain | grep -Fxq "branch refs/heads/$branch"; then
+      release_fail release_candidate_checked_out release_branch "候选分支仍在工位中检出" "先保全该工位并切换其它分支，再重新准备"
+      return 1
+    fi
+    local prs
+    prs="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --head "$branch" --state all --json number --jq 'length')" || return 1
+    if [ "$prs" != 0 ]; then
+      release_fail release_candidate_review_exists release_branch "旧候选已有 PR 或无法确认 PR 状态" "保留现有候选，先核实原审查；本地替换仅适用于未提交审查的候选"
+      return 1
+    fi
   fi
-  if [ -z "$local_head" ]; then
+  RELEASE_FIXED_HEAD="$candidate_head"
+}
+
+release_prepare_fixed_branch() {
+  local repo_root="$1" branch="$2" candidate_head="$3"
+  release_check_fixed_branch "$repo_root" "$branch" "$candidate_head" || return 1
+  local old_head backup
+  old_head="$RELEASE_CHECKED_LOCAL_HEAD"
+  if [ -n "$old_head" ] && [ "$old_head" != "$candidate_head" ]; then
+    backup="refs/heads/codex/superseded-${branch//\//-}-$old_head"
+    # 旧引用同时成为保留分支；CAS 防止验收期间候选被其它会话改变。
+    printf 'start\ncreate %s %s\nupdate refs/heads/%s %s %s\nprepare\ncommit\n' \
+      "$backup" "$old_head" "$branch" "$candidate_head" "$old_head" |
+      git -C "$repo_root" update-ref --stdin || return 1
+  elif [ -z "$old_head" ]; then
     git -C "$repo_root" branch "$branch" "$candidate_head" || {
-      release_fail "release_fixed_branch_create_failed" "release_branch" "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
+      release_fail release_fixed_branch_create_failed release_branch "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
       return 1
     }
   fi
-  RELEASE_FIXED_HEAD="$candidate_head"
 }
 
 release_resolve_prepared_fixed_branch() {
@@ -1437,7 +1471,7 @@ release_resolve_prepared_fixed_branch() {
     return 0
   fi
   if [ -z "$local_head" ]; then
-    release_fail "release_prepare_required" "release_branch" "缺少已验证的固定发布分支 $branch" "请先执行 release.sh prepare --version ${branch#release/} --allow-soft-gate"
+    release_fail "release_prepare_required" "release_branch" "缺少已验证的固定发布分支 $branch" "请先执行 release.sh prepare --version ${branch#release/}"
     return 1
   fi
   RELEASE_FIXED_HEAD="$local_head"

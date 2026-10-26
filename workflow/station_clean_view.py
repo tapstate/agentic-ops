@@ -4,12 +4,6 @@ import os
 from pathlib import Path
 
 
-def safe_describe(base, task=None, plan=None, operation=None, problems=None):
-    result = (operation or {}).get("cleanup_result", {})
-    return {"released": result.get("released", False), "complete": result.get("complete", False),
-            "residuals": result.get("residuals", (plan or {}).get("residuals", [])), "problems": problems or []}
-
-
 def emit(value, details=False, output=None, base=None):
     if output:
         path = Path(output)
@@ -24,7 +18,11 @@ def emit(value, details=False, output=None, base=None):
                 result = {}
                 for key, child in item.items():
                     if key == 'cleanup_plan':
-                        result['object_count'] = len(child.get('objects', []))
+                        if child.get('schema_version') == 8:
+                            result['cleanup_plan'] = {'scope': child['scope'], 'digest': child['digest'],
+                                'paths': [row['path'] for row in child['targets']], 'source': bounded(child['source'])}
+                        else:
+                            result['object_count'] = len(child.get('objects', []))
                     elif isinstance(child, list):
                         result[key + '_count'] = len(child)
                         result[key] = [bounded(row) for row in child[:50]]

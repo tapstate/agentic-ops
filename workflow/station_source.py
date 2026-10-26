@@ -17,6 +17,27 @@ GIT_NETWORK_TIMEOUT = 1800
 GIT_PROGRESS_INTERVAL = 10
 
 
+def refresh_shared_references(base):
+    """新接管的辅助材料准备；不保存任务状态，不阻塞无依赖工作。"""
+    profile = project_rules.load_profile(station=base)
+    if profile.get("wiki_update_before_takeover") is not True:
+        return
+    from bootstrap import shared_repositories
+    from workflow import station_context
+    binding = station_context.read_binding(base)
+    name = profile.get("wiki_repository")
+    print("[station-source] 正在更新中央 Wiki：%s" % name, file=sys.stderr, flush=True)
+    try:
+        for action in ("ensure", "update"):
+            result = shared_repositories.run(binding["product_root"], name, action, binding["source_pool"])
+    except (OSError, ValueError) as error:
+        print("[station-source] Wiki 未能更新到最新：%s；保留现场，使用前先 status 核验，继续不依赖 Wiki 的工作" % error,
+              file=sys.stderr, flush=True)
+        return
+    print("[station-source] Wiki 已更新至本次远端核验提交：%s %s %s" % (name, result["branch"], result["head"]),
+          file=sys.stderr, flush=True)
+
+
 def git(path, *arguments, check=True):
     environment = git_environment(read_only=arguments[0] == "status")
     command = ["git", "-C", str(path), *arguments]

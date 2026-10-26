@@ -1,22 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agenticops.tapdata.net/contracts/station-reset.schema.json",
-  "title": "清单清理计划",
+  "title": "生命周期整区清理计划",
   "type": "object",
   "required": [
     "schema_version",
+    "scope",
+    "revision",
     "run_id",
     "config",
-    "objects",
-    "retained",
-    "residuals",
-    "digest",
-    "protected_paths"
+    "targets",
+    "source",
+    "digest"
   ],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 7
+      "const": 8
+    },
+    "scope": {
+      "enum": [
+        "task",
+        "station"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
     },
     "run_id": {
       "type": [
@@ -27,41 +37,70 @@
     "config": {
       "type": "object"
     },
-    "objects": {
+    "targets": {
       "type": "array",
+      "minItems": 2,
       "items": {
         "type": "object",
         "required": [
           "path",
-          "identity",
           "parent",
-          "repository",
-          "relative",
-          "type"
-        ]
+          "snapshot",
+          "recreate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parent": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 3
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "identity",
+                  "digest"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "identity": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 3
+                  },
+                  "digest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            ]
+          },
+          "recreate": {
+            "type": "boolean"
+          }
+        }
       }
     },
-    "retained": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "residuals": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
+    "source": {
+      "type": "object"
     },
     "digest": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
-    },
-    "protected_paths": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
     }
   }
 }

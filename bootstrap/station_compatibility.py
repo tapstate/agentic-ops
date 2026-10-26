@@ -86,13 +86,15 @@ def check_upgrade(product_root, current_ref, target_ref, operation="update"):
     if current["station_state_epoch"] == target["station_state_epoch"]:
         return []
     stations = load_station_registry(product_root, required=True)
+    if target.get("validation") == "feature":
+        return []
     if not stations:
         return []
     lines = [
         "目标版本包含不兼容变更，产品版本尚未切换：%s -> %s。" % (
             current_ref, target_ref
         ),
-        "请继续使用当前版本将任务完成后 release，或按未完成 clean 归档；随后对以下工位执行 station purge。",
+        "请按当前安装版本支持的流程保全或明确放弃任务成果，清理并退出任务；不要求任务业务完成。随后对以下工位执行 station purge。",
         "目标版本不会读取、迁移或修复旧工位状态；全部工位解绑后重新执行 agenticops %s。" % operation,
         "仍有绑定工位：",
     ]
@@ -101,7 +103,7 @@ def check_upgrade(product_root, current_ref, target_ref, operation="update"):
 
 
 def require_station_can_adopt(product_root, station, target_manifest=None):
-    """只接受当前产品 epoch；不采用旧工位状态。"""
+    """按产品声明检查工位来源；功能判定模式不转换任务或改写来源代际。"""
     return station_context.require_epoch(station, product_root, target_manifest)
 
 

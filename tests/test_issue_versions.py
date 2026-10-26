@@ -19,6 +19,8 @@ from workflow import git_refs, issue_versions, task, task_store
 from station_fixture import save_task as save_station_task
 
 
+from station_fixture import task_state_snapshot
+
 class IssueVersionsTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="ao-versions-")
@@ -120,10 +122,10 @@ class IssueVersionsTests(unittest.TestCase):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
         with contextlib.redirect_stdout(io.StringIO()):
             task.cmd_snapshot(args)
-            before = task_store.task_path(self.base, "TAP-123").read_bytes()
+            before = task_state_snapshot(self.base)
             path.write_text(json.dumps({"issue": {"key": "OTHER-1"}}))
             task.cmd_snapshot(args)
-        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        self.assertEqual(task_state_snapshot(self.base), before)
         args.expected_run_id = "run-ffffffffffff"
         with self.assertRaises(ValueError):
             task.cmd_snapshot(args)
@@ -178,14 +180,14 @@ class IssueVersionsTests(unittest.TestCase):
             self.assertEqual(task.cmd_issue_versions(args), 0)
 
     def test_next_is_read_only_and_reports_real_blockers(self):
-        previous = task_store.task_path(self.base, "TAP-123").read_bytes()
+        previous = task_state_snapshot(self.base)
         with contextlib.redirect_stdout(io.StringIO()) as output:
             task.cmd_next(SimpleNamespace(dir=self.base, issue_key="TAP-123"))
         report = json.loads(output.getvalue())
         self.assertFalse(report["advance_ready"])
         self.assertEqual(report["next_stage"], "design_review")
         self.assertTrue(any("影响版本" in b for b in report["blockers"]))
-        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), previous)
+        self.assertEqual(task_state_snapshot(self.base), previous)
 
     def test_next_does_not_apply_defect_checkpoints_to_other_task_classes(self):
         self.task.update(task_class="technical_task", stage="implementation")
@@ -206,7 +208,7 @@ class IssueVersionsTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 task.cmd_next(args)
             return json.loads(output.getvalue())
-        before = task_store.task_path(self.base, "TAP-123").read_bytes()
+        before = task_state_snapshot(self.base)
         original = read_next()
         path = self.base / "product/projects/tapdata/admission.json"
         spec = json.loads(path.read_text())
@@ -233,7 +235,7 @@ class IssueVersionsTests(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     task.cmd_status(args)
                 self.assertIn("已使用通用指引", output.getvalue())
-        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        self.assertEqual(task_state_snapshot(self.base), before)
 
     def test_stage_guidance_falls_back_when_project_config_unavailable(self):
         path = self.base / "product/projects/tapdata/admission.json"

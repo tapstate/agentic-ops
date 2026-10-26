@@ -23,7 +23,7 @@ def inspect(station, current_ref=None, target_ref=None):
     if Path(binding['product_root']).resolve() != ROOT:
         raise ValueError('入口产品根与工位绑定不一致')
     station_context.require_epoch(station, ROOT)
-    with task_store.task_state_lock(station):
+    with task_store.task_state_lock(station, execution=False):
         current = task_store.read_current(station)
         operation = station_operation.read(station)
         if current['current'] is not None or operation and operation['status'] != 'done':

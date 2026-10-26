@@ -248,7 +248,8 @@
           "knowledge_ref",
           "rationale",
           "case_strategy",
-          "execution_plan"
+          "execution_plan",
+          "cases"
         ],
         "properties": {
           "repository": {
@@ -264,7 +265,7 @@
           "level": {
             "type": "string",
             "minLength": 1,
-            "pattern": "\\S"
+            "pattern": "^(L(0|[1-9][0-9]*)|N/A)$"
           },
           "knowledge_ref": {
             "type": "string",
@@ -285,10 +286,44 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S"
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "change",
+                "reason"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "change": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseline_ref": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
           }
         },
         "additionalProperties": false
       }
+    },
+    "case_coverage": {
+      "issue_min_level": 1,
+      "issue_when_unsupported": true
     }
   }
 }

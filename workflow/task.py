@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""单任务工位：takeover/archive/release/clean 及确定性任务检查点。"""
+"""单任务工位：takeover/archive/clean 及确定性任务检查点。"""
 from __future__ import annotations
 
 # 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
@@ -103,34 +103,42 @@ def cmd_takeover(args):
     return 0
 
 
-def cmd_lifecycle(args):
-    from workflow import station
-    request = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
-                             args.expected_revision, args.operation_id, request)
-    print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
+def cmd_handoff_continuations(args):
+    from workflow import task_handoff, engineering_baseline
+    packet = json.loads(Path(args.input).read_text(encoding='utf-8'))
+    if engineering_baseline.digest(packet) != args.expected_digest:
+        raise ValueError('接续正文摘要不匹配，先核对 Jira 最新有效接续点')
+    print(json.dumps(task_handoff.continuation_input(packet), ensure_ascii=False, indent=2))
     return 0
 
 
+def cmd_lifecycle(args):
+    from workflow import station
+    request = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if args.cmd == 'archive' and 'handoff' not in request:
+        raise ValueError('任务归档 input 需包含 handoff（plan/progress/remaining/environment）；先整理持久接续材料')
+    readback = json.loads(Path(args.jira_readback).read_text()) if args.jira_readback else None
+    result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
+                             args.expected_revision, args.operation_id, request, jira_readback=readback)
+    print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
+    return 0 if result['status'] == 'done' else 2
+
+
 def cmd_cleanup_plan(args):
-    from workflow import station_resources, station_source, station_operation, engineering_baseline
-    with task_store.task_state_lock(args.dir):
-        task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
-        result = station_resources.plan(args.dir, task)
-        operation = station_operation.read(args.dir)
-        result["plan_revision"] = len(operation.get("plan_revisions", [])) if operation else 0
-        if task.get("engineering_baseline", {}).get("status") == "frozen":
-            result["candidate_digest"] = engineering_baseline.digest(station_source.inspect(args.dir, task["engineering_baseline"]))
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+    from workflow import station_cleanup
+    with task_store.task_state_lock(args.dir, execution=False):
+        task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+        print(json.dumps(station_cleanup.plan(args.dir, getattr(args, 'scope', 'task')), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_cleanup_preflight(args):
     from workflow import station_resources
-    with task_store.task_state_lock(args.dir):
+    with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         from workflow import station_clean, station_clean_view, station_operation
-        station_clean_view.emit(station_clean.check(args.dir, task, operation=station_operation.read(args.dir)),
+        station_clean_view.emit(station_clean.check(args.dir, task,
+                                                   request={'scope': getattr(args, 'scope', 'task')}),
                                 details=getattr(args, 'details', False))
     return 0
 
@@ -436,12 +444,16 @@ def _check_advance(task, target, base, spec):
 
 def cmd_advance(args):
     issue = task_store.resolve_issue(args.dir, args.issue_key)
-    with task_store.task_run_lock(args.dir, issue):
+    with task_store.task_run_lock(args.dir, issue, refresh_activity=False):
         task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
         if not (task.get("stage") == "completed" and task.get("terminal_proof")
                 and args.expected_stage in ("ci_validation", "completed")):
             task_store.require_development(args.dir, task)
-        return _cmd_advance_locked(args)
+        result = _cmd_advance_locked(args)
+        if result == 0:
+            from workflow import execution
+            execution.touch(args.dir, execution.session_id())
+        return result
 
 
 def _cmd_advance_locked(args):
@@ -449,7 +461,7 @@ def _cmd_advance_locked(args):
     # completed 是已核验的提交点；中断重试只收敛派生状态，不重复推进或重做验收。
     if task["stage"] == "completed" and args.expected_stage in ("ci_validation", "completed"):
         _finish_completion(args.dir, task)
-        print("任务已完成，授权撤销已收敛；仍需明确 release。")
+        print("任务已完成，授权撤销已收敛；需要退出时先核实保全，再清理任务。")
         _print_next(task, args.dir)
         return 0
     task_store.resolve_active_issue(args.dir, args.issue_key)
@@ -514,7 +526,7 @@ def _cmd_development_interaction(args):
 
 def cmd_runtime_path(args):
     from workflow import station_directories
-    with task_store.task_state_lock(args.dir):
+    with task_store.task_state_lock(args.dir, execution=False):
         task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
         if task.get("archive_ref") or task.get("outcome") != "in_progress":
             raise ValueError("任务已归档或非进行中，不能继续取得 runtime 路径")
@@ -534,7 +546,7 @@ NEXT_GUIDE = {
     "implementation": "在授权范围内实现和验证，按项目规则核对实际证据；继续已授权的提交、推送和 Draft PR，汇总外部同步警告",
     "pr_review": "按项目规则完成用例验收与代码审查，核对 next 返回的阻塞项后 advance",
     "ci_validation": "回读当前 PR Head 的 CI、审查和验收事实；满足项目交付条件后等待另行授权合并，回读合并事实再 completed",
-    "completed": "生成脱敏任务总结；研发明确确认 cleanup-plan 与最终候选后 release，归档并释放工位；Jira 同步结果另行回读",
+    "completed": "生成脱敏任务总结并核实持久成果；按 cleanup-plan 确认后清理任务；归档和 Jira 同步独立回读",
 }
 
 
@@ -555,7 +567,7 @@ def _print_next(task, base):
     from workflow import external_sync
     print(json.dumps(external_sync.safe_actions(base, task), ensure_ascii=False, indent=2))
     if task.get("archive_ref"):
-        print("任务已归档，仅供审计；下一步：回读 cleanup-plan 并确认后%s。" % (" release" if task.get("outcome") == "completed" else " clean"))
+        print("已有归档记录；核实新增成果，回读 cleanup-plan 并确认后清理任务。")
         return
     if not task.get("run_id"):
         print("旧状态缺少 run_id：可查看历史，不得直接发起流程写入；需人工确认恢复方案。")
@@ -578,7 +590,7 @@ def cmd_next(args):
     if task.get("archive_ref"):
         print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"],
             "advance_ready": False, "next_stage": None, "archive_ref": task["archive_ref"],
-            "guidance": "档案只供审计；回读 cleanup-plan，确认后执行 release 或 clean",
+            "guidance": "核实持久归档与新增成果；回读 cleanup-plan，确认后执行 clean",
             **external_sync.safe_actions(args.dir, task)}, ensure_ascii=False, indent=2))
         return 0
     index = STAGES.index(task["stage"])
@@ -678,7 +690,7 @@ def cmd_status(args):
     try:
         task = load(args.dir, args.issue_key)
     except (ValueError, OSError) as error:
-        if args.cmd in ('archive', 'release', 'clean', 'cleanup-preflight'):
+        if args.cmd in ('archive', 'clean', 'cleanup-preflight'):
             from workflow import station_clean_view
             station_clean_view.emit({'status': 'needs_attention', 'problems': [str(error)],
                 'boundary': '先回读原操作；未完成不报告已释放'}, details=getattr(args, 'details', False))
@@ -713,7 +725,7 @@ def cmd_status(args):
 def cmd_replan(args):
     from workflow import station_replan
     if args.replan_action == "prepare":
-        with task_store.task_state_lock(args.dir):
+        with task_store.task_state_lock(args.dir, execution=False):
             result = station_replan.prepare(args.dir, args.issue_key, args.expected_run_id,
                                             json.loads(Path(args.input).read_text(encoding="utf-8")))
     elif args.replan_action == "apply":
@@ -765,7 +777,12 @@ def main():
     p.add_argument("--expected-revision", required=True, type=int)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_takeover)
-    for kind in ("archive", "release", "clean"):
+    p = sub.add_parser('handoff-continuations', help='从已回读的接续正文提取现有 takeover 输入，不导入阶段或授权')
+    p.add_argument('--input', required=True)
+    p.add_argument('--expected-digest', required=True)
+    p.add_argument('--dir', default='.')
+    p.set_defaults(func=cmd_handoff_continuations)
+    for kind in ("archive", "clean"):
         p = sub.add_parser(kind)
         p.add_argument("--issue-key", required=True)
         p.add_argument("--expected-run-id", required=True)
@@ -774,17 +791,20 @@ def main():
         p.add_argument("--input", required=True)
         p.add_argument("--dir", default=".")
         p.add_argument("--details", action="store_true")
+        p.add_argument("--jira-readback", help="原生 Jira 回读 JSON；不执行网络写入")
         p.set_defaults(func=cmd_lifecycle)
     p = sub.add_parser("cleanup-plan")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--dir", default=".")
+    p.add_argument('--scope', choices=('task', 'station'), default='task')
     p.set_defaults(func=cmd_cleanup_plan)
     p = sub.add_parser("cleanup-preflight", help="只读展示任务状态与清理范围，供用户决定是否继续")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--dir", default=".")
     p.add_argument('--details', action='store_true')
+    p.add_argument('--scope', choices=('task', 'station'), default='task')
     p.set_defaults(func=cmd_cleanup_preflight)
     p = sub.add_parser("source-readiness", help="编码前刷新引用、检查工作区及分支关系")
     p.add_argument("--issue-key", required=True)
@@ -941,6 +961,29 @@ def main():
         sub.choices[command].add_argument("--expected-run-id", required=True)
     for command in ("add", "amend", "record-result"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
+    from workflow import jira_coordination
+    p = sub.add_parser('coordination', help='Jira 任务级接管协调；原生工具读写，不提供全局锁')
+    p.add_argument('coordination_action', choices=('status','check','prepare','complete','cancel'))
+    p.add_argument('--dir', default='.')
+    p.add_argument('--input', help='站点、任务 ID/key、来源及完整原生评论分页 JSON')
+    p.add_argument('--operation-id')
+    p.add_argument('--mode', choices=('claim','report','end'), default='claim')
+    p.add_argument('--executor')
+    p.add_argument('--expected-digest')
+    p.add_argument('--conflict-check-ref')
+    p.add_argument('--decision-ref')
+    p.add_argument('--claim-id')
+    p.set_defaults(func=jira_coordination.command)
+    from workflow import execution
+    p = sub.add_parser("execution", help="本地会话写入保护；任务级 8 小时判定使用 coordination")
+    p.add_argument("execution_action", choices=("status", "claim", "heartbeat"))
+    p.add_argument("--dir", default=".")
+    p.add_argument("--executor")
+    p.add_argument("--expected-control-digest", help="status 回读的占用摘要；绑定接管者及最后活动时间")
+    p.add_argument("--conflict-check-ref", help="原执行者已停写、在途操作已核实的依据")
+    p.add_argument("--decision-ref", help="本地交接决定来源；不能代替 Jira 协调核验")
+    p.set_defaults(func=execution.command)
+
     args = parser.parse_args()
     try:
         task_store.station_project(args.dir)

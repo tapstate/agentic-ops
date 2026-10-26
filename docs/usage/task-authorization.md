@@ -1,5 +1,7 @@
 # 任务接管与授权
 
+本文现役命令继续按当前实现使用。[任务生命周期目标合同](../architecture/single-task-station.md#任务生命周期目标合同)定义完整目标；持久归档与[执行接管](../architecture/single-task-station.md#执行接管当前源码)已进入当前源码，两个清理范围也已进入当前源码；旧安装是否具备这些能力须核实实际版本。源码保留仍按工位合同区分当前实现；授权期限见[实施授权](task-authorization.md#实施授权)，旧安装不会因文档变化而更新。数据职责统一见[数据生命周期开发规范](../development-data-lifecycle.md)。
+
 生命周期边界以[工位合同](../architecture/single-task-station.md)为准。清理脚本自动消费工位及项目清单，归档只记录结果，不要求完整会话或源码导出。
 
 ## 接管完整工程
@@ -49,7 +51,7 @@ python3 <agenticops-root>/workflow/task.py repository amend \
 
 同 run 恢复保留基线；目标分支推进不代表要重接。新 run 续办需要 takeover --continuation-input <json>，以 repository ID 为键给出 work_branch、baseline_sha、expected_head。历史基线和候选均为真实完整 commit SHA，分支与预期 Head 必须匹配；不是把最新目标当旧分支起点。登记此修改仓时另用 --expected-head 核验续办分支。
 
-新分支重做必须先 release/clean 结束旧处理，保留源码和 refs，再接新 run。不能只换 operation 或修改基线绕过现有占用；旧 PR 不自动关闭，旧验证不借给新候选。
+新分支重做须先保全或明确放弃旧成果，清理任务后再接新 run。不能只换 operation 或修改基线绕过现有占用；旧 PR 不自动关闭，旧验证不借给新候选。
 
 ## 从 Jira 任务接续
 
@@ -82,11 +84,13 @@ python3 <agenticops-root>/workflow/task.py repository amend \
 
 在已冻结源码上形成方案，使用 Q1/Q2 将根因或功能目标、修改范围、风险、回滚、验收项/预期/执行方式和允许后续动作一次性明确确认。未经确认不签发实施授权。已有用户决定明确覆盖当前方案及后续动作时，复用同一真实确认来源；调整后展示完整有效方案和变化，只补问未决内容或超出原授权的范围，不因整理材料再次索取相同决定。之后按 authorization.py grant 的现役参数绑定 issue/run、Agent 和方案版本；所有授权写入须携带 expected-run-id。
 
-范围或方案改变使旧确认失效；必要时 revoke，重新确认和签发，不手改授权文件。改变完整工程版本则先结束当前处理再接管。归档不冻结开发；release/clean 后须建立新 run 才能继续。
+范围或方案改变使旧确认失效；必要时 revoke，重新确认和签发，不手改授权文件。改变完整工程版本则先结束当前处理再接管。归档不冻结开发；清理任务后须建立新 run 才能继续。
+
+默认 `grant` 不设置固定到期时间；用户明确限定期限时才传 `--ttl-hours <小时>`。撤销、退出、run/范围/方案绑定变化仍按原规则处理。新默认值不删除已有授权的显式期限；无固定期限不等于允许无限扩大动作，也不控制 Agent Token 预算。执行接管与授权期限分离：当前源码候选将闲置判定统一到 Jira 协调回读，本地仅保护会话写入，统一见[工位合同](../architecture/single-task-station.md#jira-任务级接管协调与授权)。
 
 ### 方案未变时显式续签
 
-审查或 CI 等待导致授权到期，不必仅因此结束当前任务。先用 `authorization.py show` 查看原确认，并用 `show --digest` 取得原授权摘要；向用户展示当前 run、方案、仓库范围和新的有效期，取得明确决定及可回查来源后，使用此前固定的摘要执行：
+对旧授权或用户明确限定期限的授权，审查或 CI 等待导致到期时，不必仅因此结束当前任务。先用 `authorization.py show` 查看原确认，并用 `show --digest` 取得原授权摘要；向用户展示当前 run、方案、仓库范围和新的有效期，取得明确决定及可回查来源后，使用此前固定的摘要执行：
 
 ```sh
 python3 "$agenticops_root/workflow/authorization.py" renew \
@@ -95,6 +99,8 @@ python3 "$agenticops_root/workflow/authorization.py" renew \
   --confirmed-by "$decision_maker" --confirmation-ref "$confirmation_source" \
   --ttl-hours 8 --dir "$project_station"
 ```
+
+无固定期限的授权无需 `renew`；普通继续与 `reconfirm` 保持无固定期限。若需要重新限定期限，明确撤销并按当前方案重新签发，不把有限续签附加到无期限记录上。
 
 `renew` 仅适用于当前未归档任务的 `design_review`、`implementation`、`pr_review` 和 `ci_validation`。它核对原授权的任务、run、方案摘要、完整仓库绑定及当前 Project endpoint，只延长有效期并追加确认记录，不修改阶段、基线、方案、Agent 或质量证据。原授权摘要已变化、授权已撤销、方案或绑定改变、缺少旧方案摘要时拒绝；这些情况不能通过自动换参数重试解决。方案改变仍须按原流程重新设计确认。成功后重复提交同一摘要也拒绝，不能利用重放延长授权。确认来源是可回查记录，不提供用户身份认证。
 
@@ -123,7 +129,7 @@ python3 "$agenticops_root/workflow/authorization.py" reconfirm \
 
 - [首次使用指引](../usage-guide.md)：安装与初始化项目工位。
 - [权限与安全边界](../security/permissions.md)：凭证、服务器保护与 Workflow 检查点的边界。
-- [v1 工程架构](../architecture/agenticops-v1-architecture.md)：单工位、多仓库和四操作模型。
+- [v1 工程架构](../architecture/agenticops-v1-architecture.md)：单工位、多仓库和生命周期职责。
 
 ## PR 前同步检出来源
 
@@ -151,39 +157,42 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 补充必要用例后，执行最终范围的本地验证并回读对应 PR CI；关联当前源码、用例、依赖 Jar 和报告。若 Merge 或后续处理改变版本，旧执行按原版本保留，不能改写为当前结果；来源已包含且代码、用例及依赖全部未变时可引用仍有效的原执行并说明核对依据。失败按同一问题的累计修复记录续办；研发引导处理后重做受影响环节，不默认清空任务或从头开始。
 
+归档材料与原生 Jira 回读操作统一见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。归档不是自动提交或推送授权；缺少远端代码时先按有效授权保全，或记录研发明确放弃的仓库。
+
 ## 清理与退出
 
-用户已明确请求时，直接调用清理脚本；不要求先由 AI 分析、手写精确清单或准备会话输入。环境配置默认保留，源码、索引和工作区修改不被清理覆盖。需要预览时使用 --check，但它不是执行前置。
+当前源码候选使用两个范围，安装是否可用须核实实际版本。先由 Agent 调用预检，向研发说明实际删除范围、未保全成果及唯一数据；研发无需手写 JSON 或逐文件批准。任务清理保留 config，工位清理删除本地用户配置并保留初始接线。完整边界见[工位合同](../architecture/single-task-station.md#7-清单与退出职责)。
 
 ```sh
-python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action work-clean
-python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action clean
-python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action archive
-python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action release
+python3 <product-root>/workflow/station-clean.py --dir <station> --check --scope task --details
+python3 <product-root>/workflow/station-clean.py --dir <station> --execute --scope task --expected-plan-digest <预检digest> --decision-ref <有效用户决定来源> --materials preserved
 ```
 
-work-clean 保留任务，clean 结束本次本地运行；release 尝试归档后调用相同清理能力，支持任务中途退出及完成退出。归档写入失败按工位合同保留待决策快照，由 Agent 引导用户授权重试或明确放弃；不重新检查业务完成、不修改 Jira 或默认关闭 PR。配置清理增加 `--clear-config config/<相对对象>`，可重复，未选择配置保留。工位注销使用 `agenticops station purge`，有活动任务时先执行 release。
+清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
 
-脚本报告已完成对象、保留项、残留、异常及实际释放结果。有残留或异常时 Agent 接手原范围未完成事项，用户可选择保留、移出、删除或暂停。不得循环强删新内容或重复外部未知调用。
-
-归档失败结果包含 `digest`、`checkpoint` 和失败路径。先向用户说明未保存范围及实际清理进度，回读确认结果；取得明确决定后恢复原操作：
-
-```sh
-python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --archive-decision retry --expected-archive-digest <失败快照摘要>
-python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --archive-decision discard --expected-archive-digest <失败快照摘要>
-```
-
-`retry` 复用冻结材料；`discard` 只放弃该快照，不能删除已保存档案。清理后结果快照有独立摘要，之前的放弃决定不覆盖它。身份冲突、结果无法回读及本地操作日志不可写时暂停相关步骤，不能用授权伪造成功。
+归档独立使用 `--action archive --handoff-input <材料文件>`，具体流程见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。不再提供 release 或 work-clean 生命周期入口；任务进行中的缓存清理、环境重建由对应功能处理。
 
 ### 原清理操作的恢复
 
-脚本异常后用 `--resume --operation-id <原操作>` 恢复。若 Agent 已通过原生工具完成动作，增加 `--verify-result` 按实际结果收尾，不重跑删除。`--prepare-only` 只固定范围后交接。已完成对象再次产生内容时保留；未提交源码及配置保留不作为退出门禁；归档待决策时先处理指定快照。权限、身份或实际绑定写入失败时如实报告未完成。
+```sh
+python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作>
+```
+
+脚本回读已完成对象，只继续原范围的剩余工作；返回的 released、complete、resources 和 residuals 分别反映实际结果。pending 返回非零但不意味着已经执行的步骤被撤销。Agent 修复访问、补齐事实或按原授权处理后继续原操作，不重发未知外部写入、不手改回执。归档未知写入须先核实，不能通过清理绕过。
+
+尚未开始目录删除且资源步骤均已核验时，可取消原清理后重新预检：
+
+```sh
+python3 <product-root>/workflow/station-clean.py --dir <station> --cancel --operation-id <原操作> --decision-ref <明确取消决定>
+```
+
+取消保留任务，不自动重新启动已停止资源。已经开始删除时不能取消为新清理，应继续原操作处理。注销另用 `agenticops station purge`，有任务或未完成操作时先处理原操作；注销不再自动调用清理，也不代替源码删除决定。
 
 ## 完成预检与等待合并
 
 `task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 表示所有目标 PR 已推进 GitHub Ready for review 并回读确认，不表示已经合并。合并仍需独立明确授权。
 
-预检不写任务、处置或完成证据。`advance` 和未完成任务的 `release` 使用相同完成判定，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。
+预检不写任务、处置或完成证据。`advance` 使用完成判定，清理任务不执行交付验收，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。
 
 ## 同周期方案返工
 

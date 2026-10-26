@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """中央共享仓库的隔离 Git 集成验收。"""
 import json
+import io
+from contextlib import redirect_stderr
 import os
 from pathlib import Path
 import subprocess
@@ -13,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from bootstrap import shared_repositories as shared
+from workflow import station_source, station_context
 
 
 class SharedRepositoryTests(unittest.TestCase):
@@ -45,6 +48,37 @@ class SharedRepositoryTests(unittest.TestCase):
 
     def run_action(self, action):
         return shared.run(self.product, 'tapstate/wiki', action, self.pool)
+
+    def refresh_for_takeover(self, enabled=True):
+        output = io.StringIO()
+        with mock.patch.object(station_source.project_rules, 'load_profile', return_value={
+                'wiki_repository': 'tapstate/wiki', 'wiki_update_before_takeover': enabled}), \
+                mock.patch.object(station_context, 'read_binding', return_value={
+                    'product_root': str(self.product), 'source_pool': str(self.pool)}), redirect_stderr(output):
+            station_source.refresh_shared_references(self.root / 'station')
+        return output.getvalue()
+
+    def test_takeover_prepares_and_refreshes_latest_reference(self):
+        self.assertIn('已更新', self.refresh_for_takeover())
+        self.commit('new task reference')
+        head = self.git(self.seed, 'rev-parse', 'HEAD')
+        self.assertIn(head, self.refresh_for_takeover())
+        self.assertEqual(self.git(self.path, 'rev-parse', 'HEAD'), head)
+
+    def test_takeover_refresh_preserves_dirty_and_reports_network_failure(self):
+        self.refresh_for_takeover()
+        (self.path / 'article.md').write_text('local work')
+        self.assertIn('未能更新到最新', self.refresh_for_takeover())
+        self.assertEqual((self.path / 'article.md').read_text(), 'local work')
+        self.git(self.path, 'checkout', '--', 'article.md')
+        old = self.git(self.path, 'rev-parse', 'HEAD')
+        with mock.patch.object(shared.source_pool, 'refreshed_at_root', side_effect=ValueError('offline')):
+            self.assertIn('offline', self.refresh_for_takeover())
+        self.assertEqual(self.git(self.path, 'rev-parse', 'HEAD'), old)
+
+    def test_other_projects_do_not_refresh(self):
+        with mock.patch.object(shared, 'run', side_effect=AssertionError('unexpected update')):
+            self.assertEqual(self.refresh_for_takeover(enabled=False), '')
 
     def test_prepare_update_and_old_objects(self):
         self.assertEqual(self.run_action('ensure')['status'], 'ready')

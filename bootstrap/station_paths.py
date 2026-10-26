@@ -300,7 +300,14 @@ class StationDirectory:
         parts = _relative_parts(relative)
         child_fd = self._fds.get(parts)
         if child_fd is None:
-            return False
+            # 空目录可能从未读取子文件，也就尚未缓存描述符；先安全打开再核验删除。
+            parent_fd, leaf = self._parent(relative)
+            try:
+                os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            child_fd = self._open_child_directory(parent_fd, leaf, self.path(relative))
+            self._fds[parts] = child_fd
         parent_fd = self._fds[()] if len(parts) == 1 else self._fds.get(parts[:-1])
         if parent_fd is None:
             return False

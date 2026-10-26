@@ -223,7 +223,7 @@ def prepare(root, args):
             station_context.require_epoch(station, root)
     if any(not Path(station).is_absolute() for station in stations):
         raise ValueError('工位登记路径无效，不能确认恢复范围')
-    explicit = bool(args.to_ref or args.mode == 'recover-install')
+    explicit = bool(args.to_ref or args.mode == 'recover-install' or before != after)
     if target != original and explicit and stations and not args.writers_stopped and not args.check:
         raise ValueError('共享安装仍有工位；须核验全部产品调用已停写并声明 --writers-stopped')
     return document, {'status': 'check' if args.check else 'prepared', 'product_root': str(root),

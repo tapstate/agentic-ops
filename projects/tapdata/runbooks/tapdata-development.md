@@ -1,6 +1,10 @@
 # TapData 开发指引
 
+数据分类与生成、归档、恢复、清理责任统一遵循[数据生命周期开发规范](../../../docs/development-data-lifecycle.md)。本文项目操作仍以当前实现为准；目标两个清理操作及源码删除见[工位目标合同](../../../docs/architecture/single-task-station.md#任务生命周期目标合同)，不能用现有环境卸载或 purge 冒充已实现。
+
 按“定位源码 → 准备配置 → 构建 → 启动 → 验证加载与业务行为”推进；已有有效成果直接复用，只准备本任务需要的组件。Java 测试细节见[构建与测试](build-test-and-local-run.md)，仅在用户选择当前会话处理 TapTest 时读取 [TapTest 开发指引](taptest-development.md)。
+
+编译、部署、清理和恢复的共同边界遵循[生命周期协作规范](../../../docs/maintenance-guide.md#生命周期协作规范)。本页维护项目构建与装配方法，环境生命周期见[开发环境指引](test-environment.md)；不因构建失败默认清理任务或卸载环境，复用制品必须核对实际输入和产物。
 
 ## 1. 定位源码与修改范围
 

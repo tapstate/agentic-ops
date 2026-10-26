@@ -109,6 +109,10 @@ def validate_current(document):
         quality_contract.validate(document, "task-state.schema.json")
     except ValueError as error:
         raise ValueError("工位状态结构无效：%s" % error) from error
+    from workflow import execution
+    execution.validate(document.get("execution_control"))
+    from workflow import jira_coordination
+    jira_coordination.validate(document.get("jira_coordination"))
     current = document["current"]
     if current is None:
         return document
@@ -150,6 +154,10 @@ def compare_and_set(base, expected_revision, current):
     if type(expected_revision) is not int or before["revision"] != expected_revision:
         raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, before["revision"]))
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
+    if "execution_control" in before:
+        value["execution_control"] = copy.deepcopy(before["execution_control"])
+    if "jira_coordination" in before:
+        value["jira_coordination"] = copy.deepcopy(before["jira_coordination"])
     validate_current(value)
     _write_json_atomic(current_path(base), value)
     return value
@@ -311,6 +319,8 @@ def task_state_lock(
     base,
     allow_product_lifecycle=False,
     allow_incompatible_station=False,
+    execution=True,
+    refresh_activity=True,
 ):
     """持有工位状态目录锁，并在获得锁后重新核验工位绑定。
 
@@ -321,10 +331,12 @@ def task_state_lock(
     base = station_path(base)
     held = getattr(_held_locks, "stations", None)
     if held is None:
-        held = _held_locks.stations = set()
+        held = _held_locks.stations = {}
     # 仅同一进程、同一线程的嵌套 Workflow 调用复用锁；线程/进程间仍互斥。
     lock_key = (os.getpid(), str(base))
     if lock_key in held:
+        if execution and not held[lock_key]:
+            raise ValueError("只读工位锁内不能执行受管写入")
         yield
         return
     state_root = state_path(base)
@@ -370,11 +382,15 @@ def task_state_lock(
                 )
             if not allow_incompatible_station:
                 _require_station_epoch_supported(base, current_root)
-            held.add(lock_key)
+            from workflow import execution as execution_control
+            identity = execution_control.enter(base) if execution else None
+            held[lock_key] = execution
             try:
                 yield
+                if identity is not None and refresh_activity:
+                    execution_control.touch(base, identity)
             finally:
-                held.remove(lock_key)
+                del held[lock_key]
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
     finally:
@@ -382,9 +398,9 @@ def task_state_lock(
 
 
 @contextmanager
-def task_run_lock(base, issue_key):
+def task_run_lock(base, issue_key, refresh_activity=True, execution=True):
     validate_issue_key(issue_key)
-    with task_state_lock(base):
+    with task_state_lock(base, refresh_activity=refresh_activity, execution=execution):
         yield
 
 
@@ -407,12 +423,16 @@ def require_development(base, task):
 def task_mutation(function):
     @wraps(function)
     def locked(args):
-        with task_state_lock(args.dir):
+        with task_state_lock(args.dir, refresh_activity=False):
             issue = resolve_issue(args.dir, args.issue_key)
             task = check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
             require_development(args.dir, task)
             args.issue_key = issue
-            return function(args)
+            result = function(args)
+            if result == 0:
+                from workflow import execution
+                execution.touch(args.dir, execution.session_id())
+            return result
     return locked
 
 def registered_issues(base, statuses=None):

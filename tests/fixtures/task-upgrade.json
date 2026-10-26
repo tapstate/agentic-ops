@@ -1,0 +1,471 @@
+{
+  "source_commit": "c19087d334940a8a70c46af1514fba744e4954c8",
+  "source_epoch": 33,
+  "generation": "旧版 tests.test_quality.QualityTests.setUp + plan；业务与 Jira 为隔离夹具，不是真实客户数据",
+  "task": {
+    "schema_version": 1,
+    "revision": 2,
+    "current": {
+      "issue_key": "TAP-123",
+      "run_id": "run-0123456789ab",
+      "task_class": "defect_fix",
+      "stage": "implementation",
+      "facts": {
+        "fix_plan": {
+          "format": "structured-v1",
+          "problem_statements": [
+            {
+              "id": "P1",
+              "text": "夹具目标行为错误",
+              "source_ref": "fixture:issue"
+            }
+          ],
+          "evidence": [
+            {
+              "id": "F1",
+              "source_ref": "fixture:source",
+              "observation": "夹具可稳定验证当前行为"
+            }
+          ],
+          "hypotheses": [
+            {
+              "id": "H1",
+              "explains": [
+                "P1"
+              ],
+              "evidence_ids": [
+                "F1"
+              ],
+              "status": "confirmed",
+              "falsifier": "针对性断言不再失败"
+            }
+          ],
+          "blocking_inputs": [],
+          "changes": [
+            {
+              "scope": "夹具实现",
+              "hypothesis_ids": [
+                "H1"
+              ]
+            }
+          ],
+          "risks": [
+            "仅夹具范围"
+          ],
+          "rollback": "回退夹具改动",
+          "test_links": [
+            {
+              "item_id": "case-a",
+              "case_status": "existing",
+              "source_ref": "fixture:jira/case:case-a"
+            }
+          ]
+        }
+      },
+      "pending": null,
+      "history": [],
+      "engineering_baseline": {
+        "schema_version": 1,
+        "status": "frozen",
+        "profile": {
+          "id": "test-fixture",
+          "revision": 1,
+          "digest": "64defa2f8feb9801dcaa9e7231759cca89252850123b049bbcb497d49c461e07"
+        },
+        "resolution_input": {
+          "fixture": true
+        },
+        "repositories": {
+          "tapdata/tapdata": {
+            "repository_id": "tapdata/tapdata",
+            "origin": "https://github.com/tapdata/tapdata",
+            "ref_kind": "branch",
+            "ref_name": "develop",
+            "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "resolution_source": "fixture",
+            "rule_version": "fixture-1",
+            "path": "source/tapdata/tapdata"
+          },
+          "tapdata/tapdata-manager": {
+            "repository_id": "tapdata/tapdata-manager",
+            "origin": "https://github.com/tapdata/tapdata-manager",
+            "ref_kind": "branch",
+            "ref_name": "develop",
+            "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "resolution_source": "fixture",
+            "rule_version": "fixture-1",
+            "path": "source/tapdata/tapdata-manager"
+          }
+        },
+        "digest": "2709a461a1270f08a9339d8d4410f137de6901be0a1140e19e0a2d2f84228b00"
+      },
+      "task_repositories": {
+        "tapdata/tapdata": {
+          "repository_id": "tapdata/tapdata",
+          "baseline_entry_digest": "5e6dc29fa2d69408ac74e080992cb6a62a31d083024317aaaed0a714a852209b",
+          "work_branch": "fix/fixture",
+          "target_branch": "develop",
+          "approved_scope": [
+            "bug-fix"
+          ],
+          "verification_method": "fixture verification",
+          "observation": {
+            "catalog_digest": "5e6dc29fa2d69408ac74e080992cb6a62a31d083024317aaaed0a714a852209b",
+            "worktree": null,
+            "pull_request": null,
+            "ci": null,
+            "results": {
+              "pull_request": null,
+              "ci": null
+            }
+          },
+          "deliveries": [],
+          "disposition": "pending"
+        },
+        "tapdata/tapdata-manager": {
+          "repository_id": "tapdata/tapdata-manager",
+          "baseline_entry_digest": "401f82492690394b1cab5460c437e8ccf99752d68f310fb1ac01620dce77c945",
+          "work_branch": "fix/fixture",
+          "target_branch": "develop",
+          "approved_scope": [
+            "bug-fix"
+          ],
+          "verification_method": "fixture verification",
+          "observation": {
+            "catalog_digest": "401f82492690394b1cab5460c437e8ccf99752d68f310fb1ac01620dce77c945",
+            "worktree": null,
+            "pull_request": null,
+            "ci": null,
+            "results": {
+              "pull_request": null,
+              "ci": null
+            }
+          },
+          "deliveries": [],
+          "disposition": "pending"
+        }
+      },
+      "outcome": "in_progress",
+      "archive_ref": null,
+      "terminal_proof": null
+    }
+  },
+  "quality": {
+    "schema_version": 1,
+    "issue_key": "TAP-123",
+    "run_id": "run-0123456789ab",
+    "revision": 1,
+    "events": [
+      {
+        "at": "2026-10-25T16:26:19.203198+00:00",
+        "command": {
+          "action": "item",
+          "payload": {
+            "plan": {
+              "id": "case-a",
+              "checkpoint": "q4-acceptance",
+              "timing": "after_fix",
+              "case_ref": "case:case-a",
+              "case_version": "test-v1",
+              "case_status": "existing",
+              "method": "integration",
+              "repository": "tapdata/tapdata",
+              "target_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "criterion": "目标行为符合预期",
+              "steps": "启动测试服务，执行目标操作，检查日志和返回结果",
+              "expected_result": "PASS",
+              "scope": "目标故障路径"
+            },
+            "reason": "已有覆盖，建议复用"
+          }
+        },
+        "rules": {
+          "schema_version": 1,
+          "contract_revision": 4,
+          "commit_evidence_checkpoint": "q4-acceptance",
+          "intake_fact_keys": [
+            "problem_branch",
+            "problem_version",
+            "problem_symptom",
+            "reproduce_path",
+            "acceptance_criteria",
+            "issue_version_plan"
+          ],
+          "plan_fact_keys": [
+            "fix_plan"
+          ],
+          "structured_fix_plan": true,
+          "publication_mode": "checkpoint",
+          "comment_format": "human-text-v2",
+          "task_classes": [
+            "defect_fix"
+          ],
+          "checkpoints": [
+            {
+              "id": "q1-intake",
+              "title": "接管与 Jira 事实盘点",
+              "timing": "before_fix"
+            },
+            {
+              "id": "q2-plan",
+              "title": "方案及验收方式确认",
+              "timing": "before_fix"
+            },
+            {
+              "id": "q3-draft",
+              "title": "首轮验证与 Draft PR",
+              "timing": "after_fix",
+              "confirmation": "automatic"
+            },
+            {
+              "id": "q4-acceptance",
+              "title": "关联用例验收",
+              "timing": "after_fix"
+            },
+            {
+              "id": "q5-review",
+              "title": "审查及 CI 事实",
+              "timing": "after_fix"
+            },
+            {
+              "id": "q6-delivery",
+              "title": "交付证据核对",
+              "timing": "after_fix"
+            }
+          ],
+          "stage_checkpoints": {
+            "implementation": [
+              "q1-intake",
+              "q2-plan"
+            ],
+            "pr_review": [
+              "q3-draft"
+            ],
+            "ci_validation": [
+              "q4-acceptance"
+            ],
+            "completed": [
+              "q5-review",
+              "q6-delivery"
+            ]
+          },
+          "selection_checkpoint": "q2-plan",
+          "methods": {
+            "taptest": {
+              "origins": [
+                "taptest"
+              ],
+              "guidance": "保留 Jira 关联用例及状态检查；由用户决定是否在当前会话开发用例。仅在用户选择当前会话开发或执行时读取 TapTest 开发指引，按适用 Wiki 规范与任务源码处理；本地执行按实际 Test Execution 和报告关联单用例，不替代 Jira 状态接纳。",
+              "worktree_origins": []
+            },
+            "integration": {
+              "origins": [
+                "local_maven",
+                "ci"
+              ],
+              "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。",
+              "worktree_origins": [
+                "local_maven"
+              ]
+            },
+            "unit": {
+              "origins": [
+                "local_maven",
+                "ci"
+              ],
+              "guidance": "Unit 用例由用户与 Agent 在代码工程实现或复用；核对单元测试及 CI 集成测试的实际报告，并把最终验收绑定到完整提交 SHA。",
+              "worktree_origins": [
+                "local_maven"
+              ]
+            },
+            "manual": {
+              "origins": [
+                "manual"
+              ],
+              "guidance": "关联真实手工用例、执行人、环境、步骤/预期、观察结果及附件；不把无法自动化等同免测。",
+              "worktree_origins": []
+            },
+            "other": {
+              "origins": [
+                "external"
+              ],
+              "guidance": "用户明确批准的其它验证方式，单项单用例，记录方法细节及可回查证据。",
+              "worktree_origins": []
+            }
+          },
+          "knowledge": [
+            {
+              "name": "公司知识库",
+              "url": "https://github.com/tapstate/wiki",
+              "git": "git@github.com:tapstate/wiki.git"
+            },
+            {
+              "name": "集成测试规范索引",
+              "url": "https://github.com/tapstate/wiki/tree/main/06_研发流程/tapdata/集成测试用例规范",
+              "note": "07_集成测试可作实现线索，执行事实以目标分支代码/POM/报告为准。"
+            }
+          ],
+          "jira": {
+            "automatic_transition_attempts": [
+              "takeover",
+              "tests_passed"
+            ],
+            "manual_transitions": [
+              "pull_request_submitted",
+              "merged",
+              "done"
+            ],
+            "note": "接管不要求预先创建 Test。编码完成后，用户与 Agent 按验收方案创建或复用 Test 并在 Jira「已链接工作项」关联；AgenticOps 只读取、引导、跟进和核对。Tests Passed 前必须重新读取关联 Test、Test Details 与用户确认；Test Coverage 仅用于 Jira 实际 Validator 的例外字段。",
+            "site": "https://tapdata.atlassian.net"
+          },
+          "tests_passed": {
+            "linked_test_task": {
+              "relations": [
+                "is tested by"
+              ],
+              "issue_types": [
+                "Test"
+              ]
+            },
+            "test_types": {
+              "Manual": {
+                "method": "manual",
+                "guidance": "由用户启动所需本地或测试环境，执行 Jira Test 步骤并提供执行人、环境、实际结果及可回查证据。"
+              },
+              "TapTest": {
+                "method": "taptest",
+                "guidance": "回读关联 TapTest 的 Jira 状态、updated 和来源；通过状态即满足本地联调，不要求本地 PASS 或逐项 accept。",
+                "accepted_statuses": [
+                  "Tests Passed",
+                  "PULL REQUEST SUBMITTED",
+                  "MERGED",
+                  "完成"
+                ],
+                "accepted_status_ids": [
+                  "10038",
+                  "10039",
+                  "10040",
+                  "10021"
+                ],
+                "status_aliases": [
+                  "Pull Request Submitted",
+                  "Merged",
+                  "已完成"
+                ]
+              },
+              "Unit": {
+                "method": "unit",
+                "guidance": "由用户与 Agent 核对单元测试和 CI 集成测试；导入绑定完整提交 SHA 的实际报告。"
+              }
+            },
+            "ignored_test_types": {
+              "TapCE": "TapCE 当前不纳管，不计入通过也不自动视为通过；若因此无法满足验收或 Jira Validator，请用户调整 Jira 或验收方案后重新读取。"
+            },
+            "checkpoint": "q4-acceptance"
+          },
+          "pr_ready": {
+            "required_checkpoints": [
+              "q1-intake",
+              "q2-plan",
+              "q3-draft",
+              "q4-acceptance"
+            ],
+            "accepted_outcomes": [
+              "accept",
+              "not_applicable",
+              "observed"
+            ],
+            "require_linked_test_tasks": true,
+            "require_user_confirmation_per_linked_test": true,
+            "require_all_pr_checks_success": true
+          },
+          "draft_pr": "首次有意义变更且第一轮针对性验证后建议 Draft PR；验证受阻时披露结果并按首个有意义提交/一个工作日要求处理。正式提审依 Jira 标准流程。",
+          "standards": [
+            "TapData-研发与发布流程规范-v1.4（2026-09-02）",
+            "TapData-T3工单处理流程规范-v1.5（2026-09-02）"
+          ]
+        },
+        "context": {
+          "issue_key": "TAP-123",
+          "run_id": "run-0123456789ab",
+          "facts": {
+            "fix_plan": {
+              "format": "structured-v1",
+              "problem_statements": [
+                {
+                  "id": "P1",
+                  "text": "夹具目标行为错误",
+                  "source_ref": "fixture:issue"
+                }
+              ],
+              "evidence": [
+                {
+                  "id": "F1",
+                  "source_ref": "fixture:source",
+                  "observation": "夹具可稳定验证当前行为"
+                }
+              ],
+              "hypotheses": [
+                {
+                  "id": "H1",
+                  "explains": [
+                    "P1"
+                  ],
+                  "evidence_ids": [
+                    "F1"
+                  ],
+                  "status": "confirmed",
+                  "falsifier": "针对性断言不再失败"
+                }
+              ],
+              "blocking_inputs": [],
+              "changes": [
+                {
+                  "scope": "夹具实现",
+                  "hypothesis_ids": [
+                    "H1"
+                  ]
+                }
+              ],
+              "risks": [
+                "仅夹具范围"
+              ],
+              "rollback": "回退夹具改动",
+              "test_links": []
+            }
+          },
+          "replan_items": {},
+          "failures": {},
+          "cleanup_artifacts": {},
+          "repositories": {
+            "tapdata/tapdata": {
+              "repository": "tapdata/tapdata",
+              "base_branch": "develop",
+              "work_branch": "fix/fixture",
+              "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "catalog_digest": "5e6dc29fa2d69408ac74e080992cb6a62a31d083024317aaaed0a714a852209b",
+              "approved_scope": "bug-fix",
+              "verification_method": "fixture verification",
+              "ci_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            },
+            "tapdata/tapdata-manager": {
+              "repository": "tapdata/tapdata-manager",
+              "base_branch": "develop",
+              "work_branch": "fix/fixture",
+              "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "catalog_digest": "401f82492690394b1cab5460c437e8ccf99752d68f310fb1ac01620dce77c945",
+              "approved_scope": "bug-fix",
+              "verification_method": "fixture verification",
+              "ci_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          },
+          "missing_facts": [
+            "problem_branch",
+            "problem_version",
+            "problem_symptom"
+          ]
+        }
+      }
+    ]
+  }
+}

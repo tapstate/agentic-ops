@@ -29,6 +29,8 @@ release_hotfix_candidate() {
       release_validate_pr_binding "$RELEASE_PR_URL" "$jira_id" "$head" || exit 1
       release_verify_merge_commit "$repo_root" "$head" "$RELEASE_MERGE_COMMIT" || exit 1
       release_run_full_verification "$repo_root" "$head" ensure || exit 1
+      workflow_check_delivery tapstate/agentic-ops hard || exit 1
+      release_check_independent_approval "$RELEASE_PR_NUMBER" "$head" || exit 1
       release_finish "$repo_root" "" "$head" "$RELEASE_MERGE_COMMIT" manual hotfix_publish
       exit $?
     fi
@@ -72,11 +74,6 @@ release_hotfix_candidate() {
     exit 0
   fi
   release_preflight_candidate "$repo_root" "$head" || exit 1
-  epoch_mode="$(release_verification epoch --root "$repo_root" --base "$RELEASE_BASE_COMMIT" --head "$head")" || exit 1
-  if [ "$epoch_mode" != same ]; then
-    release_fail hotfix_epoch_changed preflight "跨 epoch 变更必须正式发布并创建版本 Tag" "使用 release.sh prepare --version vX.Y，不得用无标签 Hotfix"
-    exit 1
-  fi
   release_verify_story_gate "$repo_root" origin/main "$head" true || exit 1
   release_run_full_verification "$repo_root" "$head" ensure || exit 1
   release_check_base_unchanged "$repo_root" || exit 1

@@ -83,6 +83,62 @@ class CheckpointTests(unittest.TestCase):
         return self.args(expected_authorization_digest=authorization.record_digest(record), ttl_hours=8,
                          confirmed_by="reviewer", confirmation_ref="fixture:explicit-human-confirmation", **kwargs)
 
+    def test_default_grant_survives_three_days_and_explicit_deadline_expires(self):
+        from gate import engine
+        for hours in (None, 8):
+            with self.subTest(hours=hours):
+                self.confirmation(stage="design_review")
+                args = self.args(agent_id="reviewer", plan_version="v1", ttl_hours=hours)
+                with mock.patch("workflow.station_source.require_readiness", return_value=None):
+                    self.assertEqual(0, authorization.cmd_grant(args))
+                record = json.loads(self.auth_path.read_text())
+                self.assertEqual(hours is not None, "expires_at_epoch" in record)
+                allowed, reasons = engine.check_authorization(
+                    record, {"issue_key": "TAP-123", "branch_relevant": False},
+                    engine.load_policy(), now=time.time() + 3 * 86400)
+                self.assertEqual(hours is None, allowed, reasons)
+                record["status"] = "revoked"
+                self.assertFalse(engine.check_authorization(
+                    record, {"issue_key": "TAP-123", "branch_relevant": False},
+                    engine.load_policy())[0])
+
+    def test_grant_cli_omits_deadline_by_default(self):
+        with mock.patch.object(sys, "argv", ["authorization.py", "grant", "--issue-key", "TAP-123",
+                                            "--expected-run-id", self.state["run_id"], "--agent-id", "reviewer",
+                                            "--plan-version", "v1", "--dir", str(self.base)]), \
+                mock.patch.object(authorization, "cmd_grant", return_value=0) as grant:
+            self.assertEqual(0, authorization.main())
+        self.assertIsNone(grant.call_args.args[0].ttl_hours)
+
+    def test_unlimited_reconfirm_preserves_deadline_absence_and_rejects_renewal(self):
+        record = self.confirmation()
+        record.pop("expires_at_epoch")
+        task_store._write_json_atomic(self.auth_path, record)
+        before = self.auth_path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "无需续签"):
+            authorization.cmd_renew(self.renewal(record))
+        with self.assertRaisesRegex(ValueError, "无需续签"):
+            authorization.cmd_reconfirm(self.renewal(record, expected_q2_digest="new-q2", renew_ttl_hours=8))
+        self.assertEqual(before, self.auth_path.read_bytes())
+        with mock.patch.object(authorization.quality, "q2_digest", return_value="new-q2"):
+            self.assertEqual(0, authorization.cmd_reconfirm(self.renewal(record, expected_q2_digest="new-q2")))
+        updated = json.loads(self.auth_path.read_text())
+        self.assertNotIn("expires_at_epoch", updated)
+        self.assertEqual("new-q2", updated["approved_q2_digest"])
+        self.assertEqual(record["repositories"], updated["repositories"])
+
+    def test_malformed_expiry_is_not_treated_as_unlimited(self):
+        for expiry in (None, True, "8", float("nan"), float("inf")):
+            with self.subTest(expiry=expiry):
+                record = self.confirmation()
+                record["expires_at_epoch"] = expiry
+                # 构造外部损坏输入；正常原子写入本身拒绝 NaN/Infinity。
+                self.auth_path.write_text(json.dumps(record))
+                before = self.auth_path.read_bytes()
+                with self.assertRaisesRegex(ValueError, "有效期无效"):
+                    authorization.cmd_reconfirm(self.renewal(record, expected_q2_digest="new-q2"))
+                self.assertEqual(before, self.auth_path.read_bytes())
+
     def test_start_help_and_invalid_agent_leave_station_untouched(self):
         before = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
         for arguments, expected in ((["--help"], 0), (["--agent", "does-not-exist"], 2),
@@ -153,9 +209,9 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(self.read()["outcome"], "completed")
                 with mock.patch.object(task, "_check_advance", side_effect=AssertionError("must not recheck")):
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    before = self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()
+                    before = self.auth_path.read_bytes(), self.read(), task_store.read_task(self.base, "TAP-123")
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()))
+                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.read_task(self.base, "TAP-123")))
                 self.assertEqual(task_store.task_status(self.base, "TAP-123"), "completed")
                 self.assertEqual(len(self.read()["history"]), 1)
                 with self.assertRaises(ValueError):
@@ -165,9 +221,9 @@ class CheckpointTests(unittest.TestCase):
         for stage in ("implementation", "pr_review", "ci_validation"):
             with self.subTest(stage=stage):
                 record = self.confirmation(stage, expired=True)
-                before = task_store.task_path(self.base, "TAP-123").read_bytes()
+                before = task_store.read_task(self.base, "TAP-123")
                 self.assertEqual(authorization.cmd_renew(self.renewal(record)), 0)
-                self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+                self.assertEqual(task_store.read_task(self.base, "TAP-123"), before)
                 renewed = json.loads(self.auth_path.read_text())
                 self.assertGreater(renewed["expires_at_epoch"], time.time())
                 self.assertEqual({k: renewed[k] for k in record if k != "expires_at_epoch"},
@@ -373,9 +429,13 @@ class CheckpointTests(unittest.TestCase):
     def test_missing_evidence_keeps_state_and_confirmation_unchanged(self):
         self.state["stage"] = "implementation"
         self.save()
-        before = task_store.task_path(self.base, "TAP-123").read_bytes()
+        with task_store.task_state_lock(self.base):
+            pass
+        envelope = task_store.current_path(self.base).read_bytes()
+        before = task_store.read_task(self.base, "TAP-123")
         self.assertEqual(task.cmd_advance(self.args()), 3)
-        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        self.assertEqual(envelope, task_store.current_path(self.base).read_bytes())
+        self.assertEqual(task_store.read_task(self.base, "TAP-123"), before)
         self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
 
     def test_missing_watermark_does_not_block_local_intake(self):

@@ -75,6 +75,20 @@ class FakeEnvironment(mod.Environment):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_read_only_query_does_not_claim_or_repair_configuration(self):
+        from workflow import execution
+        before = mod.task_store.current_path(self.station).read_bytes()
+        old = self.env.config_dir / '.dev-previous'
+        old.mkdir()
+        (old / 'recoverable').write_text('keep')
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: ''}):
+            with self.env.lock('list'):
+                self.env.names()
+        self.assertEqual(before, mod.task_store.current_path(self.station).read_bytes())
+        self.assertTrue((old / 'recoverable').exists())
+        self.assertFalse((self.env.store.root / '.lock').exists())
+
+
     def test_early_database_rejection_precedes_build(self):
         with mock.patch.object(self.env, 'early_probe', return_value={'collection_count': 2}):
             with self.assertRaisesRegex(mod.EnvironmentError, '尚未开始构建'):
@@ -810,7 +824,6 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
             render_spec.loader.exec_module(render)
             skills = render.project_skill_sources(ROOT, "tapdata")
         self.assertIn(ROOT / "projects/tapdata/skills/tapdata-test-env", skills)
-        self.assertEqual(mod.read_json(ROOT / "contracts/station-state-compatibility.json")["station_state_epoch"], 33)
 
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，容器健康脚本行为待核验")

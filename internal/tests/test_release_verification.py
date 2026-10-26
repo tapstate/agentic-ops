@@ -27,6 +27,8 @@ class ReleaseVerificationTests(unittest.TestCase):
         self.root.mkdir()
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
         self.env.pop('AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING', None)
+        # 嵌套发布验收必须使用夹具自己的根与操作锁，不能继承外层快照定位。
+        self.env.pop('AGENTIC_OPS_RELEASE_SNAPSHOT', None)
         self.env.pop('AO_CONNECTOR_MAVEN_TEST', None)
         self.env.pop('AO_JAR_MAVEN_TEST', None)
         self.git('init', '-q', '-b', 'main')
@@ -86,7 +88,7 @@ else: sys.exit(2)
         return len(self.counter.read_text().splitlines()) if self.counter.exists() else 0
 
     def shell(self, body, check=True):
-        result = subprocess.run(['bash', '-c', 'set -euo pipefail\nsource ' + shlex.quote(str(COMMON)) + '\n' + body],
+        result = subprocess.run(['bash', '-c', 'set -euo pipefail\nsource ' + shlex.quote(str(COMMON.parent / 'development-workflow.sh')) + '\nsource ' + shlex.quote(str(COMMON)) + '\n' + body],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         if check and result.returncode:
             self.fail(result.stdout + result.stderr)
@@ -111,7 +113,8 @@ else: sys.exit(2)
         gh.write_text('#!' + sys.executable + '\n' +
                       'import sys\na=sys.argv\n' +
                       f"body={body!r}\n" +
-                      "if '--json' in a and a[a.index('--json')+1]=='body': print(body)\n" +
+                      "if a[1]=='api': print('main' if a[-1]=='.default_branch' else 'true')\n" +
+                      "elif '--json' in a and a[a.index('--json')+1]=='body': print(body)\n" +
                       f"elif a[a.index('--json')+1]=='baseRefName,headRefOid': print('main\\t{self.head}')\n" +
                       f"else: print('38\\thttps://github.com/tapstate/agentic-ops/pull/38\\tMERGED\\tmain\\t{self.head}\\t{commit}')\n")
         gh.chmod(0o700)
@@ -367,6 +370,27 @@ else: sys.exit(2)
         self.git('push', '-q', 'origin', commit + ':refs/heads/main')
         state.write_text(json.dumps(dict(state='MERGED', head=self.head, merge=commit)))
         self.git('push', '-q', 'origin', ':refs/heads/codex/AO-262/fix-main')
+        pr_gh = self.env['AGENTIC_OPS_GH_BIN']
+        self.governance_gh()
+        governance = self.env['AGENTIC_OPS_GH_BIN']
+        router = self.area / 'hotfix-router-gh'
+        router.write_text('#!' + sys.executable + '\n' + f'''import os,sys
+args=sys.argv[1:]
+path={governance!r} if args[0]=='api' or ('--json' in args and args[args.index('--json')+1]=='author') else {pr_gh!r}
+os.execv(path,[path]+args)
+''')
+        router.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(router)
+        good_rules, good_reviews = self.ruleset.read_text(), self.reviews.read_text()
+        rules = json.loads(good_rules)
+        rules['enforcement'] = 'disabled'
+        self.ruleset.write_text(json.dumps(rules))
+        self.assertIn('release_main_protection_required', self.hotfix_call().stderr)
+        self.ruleset.write_text(good_rules)
+        self.reviews.write_text('[[]]')
+        self.assertIn('release_independent_approval_required', self.hotfix_call().stderr)
+        self.assertNotEqual(commit, self.git('rev-parse', 'develop', root=bare))
+        self.reviews.write_text(good_reviews)
         second = self.hotfix_call()
         self.assertEqual(0, second.returncode, second.stderr)
         data = json.loads(second.stdout.splitlines()[-1])
@@ -378,12 +402,12 @@ else: sys.exit(2)
         self.assertEqual(commit, self.git('rev-parse', 'develop', root=bare))
         self.assertEqual(4, self.count())
 
-    def test_cross_epoch_hotfix_rejected_before_release_tests(self):
+    def test_cross_epoch_hotfix_preserves_independent_review(self):
         bare, _ = self.hotfix_fixture(cross_epoch=True)
         result = self.hotfix_call()
         self.assertNotEqual(0, result.returncode)
-        self.assertIn('hotfix_epoch_changed', result.stderr)
-        self.assertEqual(0, self.count())
+        self.assertIn('waiting_for_manual_merge', result.stdout)
+        self.assertEqual(4, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
 
     def test_same_epoch_ordinary_hotfix_atomically_publishes_without_pr(self):
@@ -510,15 +534,246 @@ else: sys.exit(2)
 
     def test_formal_trust_review_keeps_jira_and_reuses_release_evidence(self):
         self.hotfix_fixture()
+        automatic = self.shell(f'release_verify_story_gate "$PWD" origin/main {self.head} false ""', check=False)
+        self.assertIn('release_story_gate_trust_root_changed', automatic.stderr)
+        self.assertEqual(0, self.count())
         self.verifier().execute('ensure')
         result = self.shell(f'RELEASE_IDENTITY=v1.4\nRELEASE_JIRA_ID=AO-262\nRELEASE_BASE_COMMIT={self.base}\n'
-                            + f'release_submit_trust_root_review "$PWD" tapstate/agentic-ops v1.4 release/v1.4 {self.head} soft true')
+                            + f'release_submit_review "$PWD" tapstate/agentic-ops v1.4 release/v1.4 {self.head} hard true')
         self.assertEqual(0, result.returncode)
         body = (self.area / 'pr-body').read_text()
         self.assertIn('- Jira 任务：`AO-262`', body)
         self.assertIn(f'<!-- agentic-ops-release:v1.4:{self.base} -->', body)
         self.assertEqual(4, self.count())
 
+
+    def test_ordinary_candidate_can_choose_manual_review_without_auto_merge(self):
+        bare, state = self.hotfix_fixture(trust=False)
+        self.verifier().execute('ensure')
+        self.shell(f'RELEASE_IDENTITY=v1.4\nRELEASE_BASE_COMMIT={self.base}\n'
+                   + f'release_submit_review "$PWD" tapstate/agentic-ops v1.4 release/v1.4 {self.head} hard true')
+        self.assertEqual('OPEN', json.loads(state.read_text())['state'])
+        self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
+        self.assertEqual(4, self.count())
+
+    def test_local_candidate_replacement_retains_old_commit_and_refuses_remote_review(self):
+        bare, state = self.hotfix_fixture()
+        self.git('branch', 'release/v1.4', self.base)
+        gh = self.area / 'candidate-gh'
+        gh.write_text('#!/bin/sh\nprintf "%s\\n" "${TEST_PR_COUNT:-0}"\n')
+        gh.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
+        command = f'RELEASE_REPLACE_CANDIDATE={self.base}\nrelease_prepare_fixed_branch "$PWD" release/v1.4 {self.head}'
+        missing = self.shell(f'release_prepare_fixed_branch "$PWD" release/v1.4 {self.head}', check=False)
+        self.assertIn('release_fixed_branch_conflict', missing.stderr)
+        self.env['TEST_PR_COUNT'] = '1'
+        refused = self.shell(command, check=False)
+        self.assertIn('release_candidate_review_exists', refused.stderr)
+        self.assertEqual(self.base, self.git('rev-parse', 'release/v1.4'))
+        self.env['TEST_PR_COUNT'] = '0'
+        self.git('push', '-q', 'origin', 'release/v1.4')
+        refused = self.shell(command, check=False)
+        self.assertIn('release_fixed_branch_conflict', refused.stderr)
+        self.git('push', '-q', 'origin', ':release/v1.4')
+        worktree = self.area / 'candidate-worktree'
+        self.git('worktree', 'add', '-q', str(worktree), 'release/v1.4')
+        refused = self.shell(command, check=False)
+        self.assertIn('release_candidate_checked_out', refused.stderr)
+        self.git('worktree', 'remove', str(worktree))
+        self.shell(command)
+        self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
+        self.assertEqual(self.base, self.git('rev-parse', 'codex/superseded-release-v1.4-' + self.base))
+        self.assertEqual(0, self.count())
+
+    def test_candidate_replacement_rejects_change_during_remote_check(self):
+        self.remote(self.base)
+        self.git('branch', 'release/v1.4', self.base)
+        intervening = self.git('commit-tree', self.head + '^{tree}', '-p', self.head, '-m', 'other session')
+        gh = self.area / 'concurrent-gh'
+        gh.write_text('#!/bin/sh\ngit -C ' + shlex.quote(str(self.root)) +
+                      ' update-ref refs/heads/release/v1.4 ' + intervening + '\nprintf "0\\n"\n')
+        gh.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
+        result = self.shell(f'RELEASE_REPLACE_CANDIDATE={self.base}\n'
+                            f'release_prepare_fixed_branch "$PWD" release/v1.4 {self.head}', check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(intervening, self.git('rev-parse', 'release/v1.4'))
+        self.assertEqual('', self.git('for-each-ref', '--format=%(refname)', 'refs/heads/codex/superseded-'))
+
+    def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
+        bare, state = self.hotfix_fixture(cross_epoch=False)
+        shutil.rmtree(self.root / '.local/story-gate')
+        unrelated = self.area / 'unrelated-history'
+        unrelated.mkdir()
+        (self.root / '.local/story-gate').symlink_to(unrelated, target_is_directory=True)
+        # 正式版本不消费开发台账，甚至不应沿无关链接读取或写入。
+        # 本地准备没有范围验收或人工批准历史，也应执行自己的独立验收。
+        # 隔离远端使用真实 bare 仓库；仅映射传输身份，不替换发布判定。
+        bin_dir = self.area / 'bin'
+        bin_dir.mkdir()
+        git_bin = shutil.which('git')
+        wrapper = bin_dir / 'git'
+        wrapper.write_text('#!' + sys.executable + '\n' + f'''import os,sys
+args=sys.argv[1:]
+if args[-3:]==['config','--get-all','remote.origin.url'] or ('remote' in args and 'get-url' in args):
+ print('https://github.com/tapstate/agentic-ops.git')
+else: os.execv({git_bin!r},[{git_bin!r}]+args)
+''')
+        wrapper.chmod(0o700)
+        self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
+        # 此边界只支持 PR 调用，任何治理 API/配置请求均失败。
+        for stage in ('prepare', 'submit-for-review', 'publish', 'recover'):
+            rejected = subprocess.run(['bash', 'internal/release/release.sh', stage, '--version', 'v1.4', '--configure-workflow'],
+                                      cwd=self.root, env=self.env, capture_output=True, text=True)
+            self.assertIn('release_configuration_separate', rejected.stderr)
+            self.assertFalse(state.exists())
+        self.git('branch', 'release/v1.4', self.base)
+        conflict = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
+                                  cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertIn('release_fixed_branch_conflict', conflict.stderr)
+        self.assertEqual(0, self.count())
+        self.git('branch', '-D', 'release/v1.4')
+        result = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
+                                cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        data = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual('pending', data['delivery_checks'])
+        self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4'))
+        self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
+        self.assertEqual(4, self.count())
+        inspected = subprocess.run(['bash', 'internal/release/release.sh', 'inspect', '--version', 'v1.4'],
+                                   cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, inspected.returncode, inspected.stderr)
+        self.assertIn('submit-for-review', json.loads(inspected.stdout)['next_command'])
+        self.assertEqual(4, self.count())
+        verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--version', 'v1.4'],
+                                  cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
+        self.assertEqual(8, self.count())
+        blocked = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4'],
+                                 cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn('release_confirmation_required', blocked.stderr)
+        self.assertFalse(state.exists())
+        self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
+        record = self.verifier().path
+        saved = record.read_text()
+        record.unlink()
+        missing = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--confirm-release'],
+                                 cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertIn('release_verification_required', missing.stderr)
+        self.assertFalse(state.exists())
+        self.assertEqual(8, self.count())
+        record.write_text(saved)
+        result = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--jira', 'AO-262', '--confirm-release'],
+                                cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual('hard', json.loads(result.stdout.splitlines()[-1])['protection_mode'])
+        self.assertEqual('OPEN', json.loads(state.read_text())['state'])
+        self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
+        self.assertEqual('', self.git('tag', root=bare))
+        self.assertEqual([], list(unrelated.iterdir()))
+        self.assertEqual(8, self.count())
+
+    def governance_gh(self):
+        self.ruleset = self.area / 'ruleset.json'
+        self.reviews = self.area / 'reviews.json'
+        self.ruleset.write_text(json.dumps(dict(id=7, name='company-main', target='branch', enforcement='active',
+            bypass_actors=[], conditions=dict(ref_name=dict(include=['refs/heads/main'], exclude=[])),
+            rules=[dict(type='deletion'), dict(type='non_fast_forward'), dict(type='pull_request', parameters=dict(
+                allowed_merge_methods=['merge'], required_approving_review_count=2, require_code_owner_review=True,
+                dismiss_stale_reviews_on_push=True, require_last_push_approval=True, required_review_thread_resolution=True))])))
+        self.reviews.write_text(json.dumps([[dict(id=1, user=dict(login='reviewer', type='User'), state='APPROVED', commit_id=self.head, submitted_at='2026-10-25')]]))
+        gh = self.area / 'governance-gh'
+        gh.write_text('#!' + sys.executable + '\n' + f'''import json,subprocess,sys,pathlib
+args=sys.argv[1:]
+if args[:2]==['pr','view']: data={{'author':{{'login':'author'}}}}
+elif args[0]=='api':
+ endpoint=args[1]
+ if '/reviews?' in endpoint: data=json.loads(pathlib.Path({str(self.reviews)!r}).read_text())
+ elif '/rulesets/' in endpoint: data=json.loads(pathlib.Path({str(self.ruleset)!r}).read_text())
+ elif '/rulesets?' in endpoint: data=[json.loads(pathlib.Path({str(self.ruleset)!r}).read_text())]
+ else: data={{'default_branch':'main','allow_merge_commit':True,'allow_auto_merge':False}}
+else: sys.exit(90)
+if any(x in args for x in ['PATCH','PUT','POST']): sys.exit(91)
+sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(data),text=True).returncode)
+''')
+        gh.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
+
+    def test_delivery_accepts_stronger_renamed_ruleset_but_auto_merge_is_separate(self):
+        self.governance_gh()
+        self.shell('workflow_check_delivery tapstate/agentic-ops hard')
+        result = self.shell('workflow_check_auto_merge tapstate/agentic-ops', check=False)
+        self.assertIn('release_auto_merge_required', result.stderr)
+        value = json.loads(self.ruleset.read_text())
+        for field in ('enforcement', 'bypass_actors'):
+            changed = dict(value, **{field: 'disabled' if field == 'enforcement' else [dict(actor_id=1)]})
+            self.ruleset.write_text(json.dumps(changed))
+            result = self.shell('workflow_check_delivery tapstate/agentic-ops hard', check=False)
+            self.assertIn('release_main_protection_required', result.stderr)
+
+    def test_independent_approval_requires_current_head_other_human_and_latest_decision(self):
+        self.governance_gh()
+        call = f'release_check_independent_approval 38 {self.head}'
+        self.shell(call)
+        review = json.loads(self.reviews.read_text())[0][0]
+        for change in (dict(commit_id=self.base), dict(user=dict(login='author', type='User')),
+                       dict(user=dict(login='bot', type='Bot')), dict(state='DISMISSED')):
+            self.reviews.write_text(json.dumps([[dict(review, **change)]]))
+            self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, user=dict(login='second', type='User'), state='CHANGES_REQUESTED')]]))
+        self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED')]]))
+        self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED'), dict(review, id=3), dict(review, id=4, state='COMMENTED')]]))
+        self.shell(call)
+
+
+    def test_hard_recovery_checks_protection_and_approval_before_tag_without_auto_merge(self):
+        self.write('.githooks/pre-commit', '# trust-root candidate\n')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'trust-root')
+        self.head = self.git('rev-parse', 'HEAD')
+        self.verifier().execute('ensure')
+        commit = self.merge()
+        bare = self.remote(commit)
+        self.fake_gh(commit)
+        pr_gh = self.env['AGENTIC_OPS_GH_BIN']
+        self.governance_gh()
+        governance = self.env['AGENTIC_OPS_GH_BIN']
+        router = self.area / 'router-gh'
+        router.write_text('#!' + sys.executable + '\n' + f'''import os,sys
+args=sys.argv[1:]
+path={governance!r} if args[0]=='api' or ('--json' in args and args[args.index('--json')+1]=='author') else {pr_gh!r}
+os.execv(path,[path]+args)
+''')
+        router.chmod(0o700)
+        self.env['AGENTIC_OPS_GH_BIN'] = str(router)
+        setup = 'RELEASE_IDENTITY=v1.4\n'
+        call = 'release_recover_merged_candidate "$PWD" v1.4 38 false "" hard'
+        good_rules = self.ruleset.read_text()
+        rules = json.loads(good_rules)
+        rules['enforcement'] = 'disabled'
+        self.ruleset.write_text(json.dumps(rules))
+        self.assertIn('release_main_protection_required', self.shell(setup + call, check=False).stderr)
+        self.assertEqual('', self.git('tag', root=bare))
+        self.assertIn('release_main_protection_required', self.shell(setup + call.replace('hard', 'soft'), check=False).stderr)
+        self.ruleset.write_text(good_rules)
+        good_reviews = self.reviews.read_text()
+        self.reviews.write_text('[[]]')
+        self.assertIn('release_independent_approval_required', self.shell(setup + call, check=False).stderr)
+        self.assertEqual('', self.git('tag', root=bare))
+        self.reviews.write_text(good_reviews)
+        plan = self.shell(setup + call, check=False)
+        lines = [json.loads(x) for x in plan.stderr.splitlines() if x.startswith('{')]
+        self.assertEqual('release_recovery_confirmation_required', lines[-1]['code'])
+        command = lines[-1]['required_human_action']
+        self.assertNotIn('--allow-soft-gate', command)
+        digest = command.split()[-1]
+        self.shell(setup + f'release_recover_merged_candidate "$PWD" v1.4 38 true {digest} hard')
+        self.assertEqual(commit, self.git('rev-parse', 'v1.4^{}', root=bare))
+        self.assertEqual(4, self.count())
 
     def test_snapshot_verifier_ignores_changed_original_worktree_modules(self):
         self.hotfix_fixture(trust=False)

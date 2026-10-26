@@ -15,6 +15,8 @@ from workflow import jira_status, jira_tests, pr_ready, task_store  # noqa: E402
 from station_fixture import save_task as save_station_task
 
 
+from station_fixture import task_state_snapshot
+
 class JiraStatusTests(unittest.TestCase):
     def test_sensitive_packet_reports_location_without_disclosing_value(self):
         from workflow import jira_collect
@@ -181,7 +183,7 @@ class JiraStatusTests(unittest.TestCase):
         from workflow import archive_store
         reservation = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
         current = task_store.current_path(self.base)
-        before = current.read_bytes()
+        before = task_state_snapshot(self.base)
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
         self.assertEqual(first["outcome"], "ready")
         self.assertEqual(first["transition_id"], "421")
@@ -190,24 +192,24 @@ class JiraStatusTests(unittest.TestCase):
         readback = self.snapshot(status="In Progress")
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
         self.assertEqual(done["outcome"], "succeeded")
-        self.assertEqual(current.read_bytes(), before)
+        self.assertEqual(task_state_snapshot(self.base), before)
         self.assertEqual([], list(reservation.iterdir()))
 
     def test_jira_done_does_not_complete_local_task(self):
         current = task_store.current_path(self.base)
-        before = current.read_bytes()
+        before = task_state_snapshot(self.base)
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Done"))
         self.assertEqual(result["reason"], "jira_status_mismatch")
-        self.assertEqual(current.read_bytes(), before)
+        self.assertEqual(task_state_snapshot(self.base), before)
 
     def test_native_pr_approved_hands_off_without_write_intent(self):
         snapshot = self.snapshot(status="Pull Request Submitted")
         snapshot["transitions"] = [{"id": "291", "name": "PR Approved", "to": {"name": "Merged"}, "fields": {}}]
-        before = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        before = {str(p): task_state_snapshot(self.base) if p.resolve() == task_store.current_path(self.base) else p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         result = jira_status.prepare(self.base, "TAP-123", "native:291", snapshot)
         self.assertEqual(result["outcome"], "handoff")
         self.assertEqual(result["reason"], "human_only_transition")
-        after = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        after = {str(p): task_state_snapshot(self.base) if p.resolve() == task_store.current_path(self.base) else p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         self.assertEqual(after, before)
 
     def test_takeover_accepts_configured_chinese_target_status(self):
@@ -622,11 +624,11 @@ class TerminalStatusTests(unittest.TestCase):
             station_resources.verify_known_external(self.base, self.task)
         with self.assertRaises(ValueError):
             jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(), "op-new-takeover")
-        before = (self.base / ".agenticops/current-task.json").read_bytes()
+        before = task_state_snapshot(self.base)
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", self.snapshot("In Progress"), "", operation_id)
         self.assertEqual(done["outcome"], "succeeded")
         self.assertEqual(done["operation_id"], record["operation_id"])
-        self.assertEqual(before, (self.base / ".agenticops/current-task.json").read_bytes())
+        self.assertEqual(before, task_state_snapshot(self.base))
         station_resources.verify_known_external(self.base, self.task)
 
     def test_defect_takeover_recovery_window_and_explicit_not_written(self):

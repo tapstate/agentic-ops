@@ -55,6 +55,21 @@ class InstallationUpdateTests(unittest.TestCase):
         self.git(self.seed, 'commit', '-qm', message)
         return self.git(self.seed, 'rev-parse', 'HEAD')
 
+    def test_feature_checked_update_keeps_task_and_requires_stopped_writers(self):
+        old = self.bound()
+        before = old.read_bytes()
+        self.manifest.write_text(json.dumps({'station_state_epoch': 39, 'validation': 'feature'}))
+        target = self.commit('feature owned validation')
+        self.args.to_ref = target
+        with self.assertRaisesRegex(ValueError, 'writers-stopped'):
+            update.execute(self.install, self.args)
+        self.assertEqual(self.original, self.git(self.install, 'rev-parse', 'HEAD'))
+        self.args.writers_stopped = True
+        result = update.execute(self.install, self.args)
+        self.assertEqual(target, self.git(self.install, 'rev-parse', 'HEAD'))
+        self.assertEqual(before, old.read_bytes())
+        self.assertEqual(target, product_state.load(self.install)['current_ref'])
+
     def bound(self):
         station = self.root / 'old-station'
         state = station / '.agenticops'

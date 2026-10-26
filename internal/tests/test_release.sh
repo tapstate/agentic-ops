@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 独立测试进程共享一个明确的测试会话；并发用例自行更换或清除。
+export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
 test_root="$(mktemp -d)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -107,6 +110,14 @@ fi
 
 if "$repo_root/internal/release/release.sh" prepare --version 1.0 >/dev/null 2>&1; then
   fail "release.sh 不得接受非 vX.Y 版本"
+fi
+
+# 本地候选可撤销；核心分支和远端删除保护不因此放宽。
+printf '%s %040d refs/heads/release/v1.9\n' "$head_sha" 0 |
+  "$repo_root/.githooks/reference-transaction" prepared || fail "本地 release 候选应可撤销"
+if printf '%s %040d refs/heads/main\n' "$head_sha" 0 |
+  "$repo_root/.githooks/reference-transaction" prepared >/dev/null 2>&1; then
+  fail "本地 main 不得删除"
 fi
 
 release_python="${AGENTIC_OPS_INTERNAL_TEST_PYTHON:-$repo_root/.local/venv/internal/bin/python}"

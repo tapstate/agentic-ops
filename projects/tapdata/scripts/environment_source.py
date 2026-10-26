@@ -131,5 +131,5 @@ def prepare(station):
                            for path in runtime.glob("tapdata-source-preparation-*"))
         if residuals:
             result["preparation_residuals"] = residuals
-            result["recovery_hint"] = "源码已准备；接管前保全运行区临时仓库，并按 work-clean 结果处理残留"
+            result["recovery_hint"] = "源码已准备；接管前保全运行区临时仓库，并按任务清理的已确认范围处理残留"
         return result
