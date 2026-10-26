@@ -507,6 +507,25 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(record["commands"][0]["exit_code"], 0)
         self.assertTrue((candidate / "bundle/tapdata").is_file())
 
+    def test_failed_helper_can_use_native_artifacts_through_original_verifier(self):
+        output = self.build_fixture()  # 显式制品夹具；不冒充真实 TapData 编译。
+        real = mod.Environment(self.station)
+        self.config['build'] = [{'cwd': 'tapdata/tapdata', 'argv': [sys.executable, '-c', 'raise SystemExit(7)']}]
+        with mock.patch.object(real, 'snapshot', return_value={}):
+            with self.assertRaisesRegex(mod.EnvironmentError, '宿主机构建失败'):
+                real.build(self.config)
+        # Agent 核实原生准备结果后，配方只做实际必要检查，原功能继续验证全部装配。
+        self.config['build'] = [{'cwd': 'tapdata/tapdata', 'argv': ['test', '-s', 'output/components/tm.jar']}]
+        with mock.patch.object(real, 'snapshot', return_value={}), mock.patch.object(real, 'probe', return_value={}), mock.patch.object(mod, 'call', return_value=''):
+            candidate, record = real.build(self.config)
+        self.assertTrue(record['validated'])
+        self.assertEqual(0, record['commands'][0]['exit_code'])
+        (output / 'components/tapdata-agent.jar').unlink()
+        with mock.patch.object(real, 'snapshot', return_value={}), mock.patch.object(mod, 'call') as external:
+            with self.assertRaisesRegex(mod.EnvironmentError, '装配缺失'):
+                real.build(self.config)
+        external.assert_not_called()
+
     def test_native_bundle_is_verified_before_consumption(self):
         output = self.build_fixture()
         script = """import hashlib,json,shutil,sys

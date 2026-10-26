@@ -120,6 +120,14 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 
 旧路径覆盖当前命名环境布局、config/tm.yml、config/fe.yml、config/secrets 下的散放文件及 config/taptest。不兼容材料先按工位合同备份隔离，新环境不自动加载旧路径。转换的[触发时机与处理顺序](../../../docs/architecture/single-task-station.md#转换触发时机与处理顺序)统一由工位合同维护。TapData 匹配备份时核对名称、TM 地址、Mongo 目标库、组件和秘密引用，不自动把散放文件归到默认环境或判为共享。旧 schema 1 的 build/assets 与探测字段分离为 preparation 候选，并由 Agent 对当前源码重新核验；schema 2 及独立 preparation 同样不能直接冒充当前有效配方。旧 TapTest 内嵌凭据转为草稿秘密和新引用，实际原生输入仍按消费者支持生成。无法确认或转换的材料保留在备份。备份、同名冲突、兼容判断及验收沿工位合同，不在项目指引另建迁移器或计划。
 
+## 功能依赖与兼容接续
+
+本环境功能拥有运行配置（schema 2）、构建 preparation（schema 1）及活动环境记录；字段要求由 test_environment.py 的 validate/combine_config 校验维护，模板只提供草稿。结构版本随需求变化，不要求与应用 epoch 相同。路径、秘密、备份和目录发布复用 environment_config 接口，不由清理功能解释配置内容。
+
+Agent 优先从当前项目源码、已有配置和已核实环境获取字段含义、组件入口、构建方法及探测要求，向研发说明差异和缺项后修补草稿；有效正式配置直接复用。正式配置不符合当前字段合同时，prepare-inputs 保留原件并提供草稿，不因旧版本号阻断草稿准备，也不自动认定旧语义等同当前版本。损坏 JSON 或未知来源仍须保全核实。确认后的草稿沿 check-inputs/configure 重新检查，成功不等于连接、构建或部署通过。
+
+构建与部署继续复用下文现役入口，不新增原生成果导入框架。辅助构建失败时，Agent 可在授权范围内按当前源码完成编译，将已核实产物保留在受管 source 或本轮 build 区域；经研发确认后调整 preparation 的 build 为实际必要的准备/产物检查步骤，assets 指向真实产物，再由原 build/deploy 入口执行完整装配、内容/架构检查、Java/Node 与数据库预检。不能把空命令当成功证据，也不能手改 build-record.json 的 validated 或 active.json。任意外部目录和缺少来源的旧产物不直接采用；业务验证仍独立执行。该接力可复用既有能力，真实 TapData 编译与部署通过仍需单独取证。
+
 ## 配置准备与预检
 
 `prepare-inputs` 先复用完整的新配置或草稿，缺项时才查找备份并填补可确定的输入；秘密文件权限为 0600，重复调用保留已填内容。用户可修改草稿或用自然语言反馈普通输入，由 Agent 写入；秘密只在本地文件填写，不进入聊天、命令参数或日志。草稿中断后继续复用，配置操作本身不修改工位状态或 epoch。
