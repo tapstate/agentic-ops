@@ -124,7 +124,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None, bef
     inherited = list(previous.get("retained_results", [])) if previous else []
     if previous and previous.get("cleanup_result"):
         result = previous["cleanup_result"]
-        if result.get("residuals") or result.get("resources"):
+        if result.get("residuals") or result.get("resources") or result.get("pending_external"):
             inherited.append({"operation_id": previous["operation_id"], "run_id": previous["run_id"], "result": result})
     if inherited:
         value["retained_results"] = inherited
@@ -200,6 +200,8 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan, k
              "steps": {}, "cleanup_plan": copy.deepcopy(cleanup_plan),
              "supersedes": {"operation_id": previous["operation_id"], "digest": engineering_baseline.digest(previous)},
              "previous_operation": {key: item for key, item in previous.items() if key != "handoff"}}
+    if previous.get("retained_results"):
+        value["retained_results"] = previous["retained_results"]
     save(base, value)
     return value
 

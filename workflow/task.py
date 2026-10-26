@@ -71,12 +71,13 @@ def operation_summary(operation):
         return None
     result = {key: operation[key] for key in (
         "operation_id", "kind", "run_id", "expected_revision", "request_digest",
-        "phase", "status", "archive_ref", "archive_result") if key in operation}
+        "phase", "status", "archive_ref", "archive_result", "cleanup_result") if key in operation}
     steps = operation.get("steps", {})
     result["completed_steps"] = [name for name, step in steps.items() if step.get("receipt") is not None]
     result["pending_steps"] = [name for name, step in steps.items()
                                if step.get("receipt") is None and not step.get("superseded_by")]
     result["superseded_steps"] = [name for name, step in steps.items() if step.get("superseded_by")]
+    result["pending_external_results"] = [row["operation_id"] for row in operation.get("retained_results", []) if row.get("result", {}).get("pending_external")]
     result["details"] = "repository context --full（读取完整操作与恢复回执）"
     return result
 
@@ -132,6 +133,13 @@ def cmd_lifecycle(args):
                              args.expected_revision, args.operation_id, request, jira_readback=readback)
     print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
     return 0 if result['status'] == 'done' else 2
+
+
+def cmd_cleanup_readback(args):
+    from workflow import station_cleanup
+    receipt = station_context.read_object(args.input, '清理成果更正回读')
+    print(json.dumps(station_cleanup.correction_readback(args.dir, args.operation_id, receipt), ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_cleanup_plan(args):
@@ -826,6 +834,11 @@ def main():
         p.add_argument("--details", action="store_true")
         p.add_argument("--jira-readback", help="原生 Jira 回读 JSON；不执行网络写入")
         p.set_defaults(func=cmd_lifecycle)
+    p = sub.add_parser('cleanup-readback', help='核验清理成果更正的原生 Jira 回读，不重做本地清理')
+    p.add_argument('--dir', default='.')
+    p.add_argument('--operation-id', required=True)
+    p.add_argument('--input', required=True)
+    p.set_defaults(func=cmd_cleanup_readback)
     p = sub.add_parser("cleanup-plan")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--expected-run-id", required=True)

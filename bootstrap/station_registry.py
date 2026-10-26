@@ -258,6 +258,9 @@ def detach_preflight(product_root, station, purge=False, tree=None):
     from workflow import jira_coordination
     if jira_coordination.pending(station):
         raise ValueError("Jira 协调记录尚未结束回读；清理可完成，注销前先 coordination end/complete 收尾")
+    from workflow import station_cleanup
+    if station_cleanup.pending_corrections(station):
+        raise ValueError('清理成果更正尚未回读；先收尾，注销不能删除唯一同步线索')
     operation_path = state_root / "operation.json"
     if operation_path.exists():
         if operation_path.is_symlink():

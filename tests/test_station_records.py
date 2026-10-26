@@ -36,6 +36,34 @@ class RecordTests(unittest.TestCase):
     def cleanup_request(self):
         return {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': 'discard', 'decision_ref': '用户确认清理本地成果'}
 
+    def test_cleanup_correction_survives_new_task_and_is_read_back_without_reclean(self):
+        task = self.takeover()
+        request = self.cleanup_request()
+        request['progress_correction'] = '放弃本轮实现，仅保留已确认方案；后续需重新实施。'
+        result = station_cleanup.execute(self.ws, task['issue_key'], task['run_id'], task['_revision'],
+            'op-clean-progress-correction', request)
+        self.assertTrue(result['cleanup_result']['complete'])
+        candidate = result['cleanup_result']['progress_correction']
+        self.assertEqual('pending', candidate['status'])
+        self.assertIsNone(task_store.read_task(self.ws))
+        next_task = self.takeover('op-new-after-correction')
+        again = station_cleanup.execute(self.ws, next_task['issue_key'], next_task['run_id'], next_task['_revision'],
+            'op-clean-with-previous-correction', self.cleanup_request())
+        self.assertTrue(again['cleanup_result']['complete'])
+        self.assertEqual(['op-clean-progress-correction'], station_cleanup.pending_corrections(self.ws))
+        next_task = self.takeover('op-third-after-correction')
+        before = task_store.current_path(self.ws).read_bytes()
+        receipt = {key: candidate[key] for key in ('site', 'body')}
+        receipt.update(issue_key=task['issue_key'], comment_id='200', source_ref='fixture:jira/comment/200')
+        bad = dict(receipt, issue_key='TAP-999')
+        with self.assertRaisesRegex(ValueError, '不匹配'):
+            station_cleanup.correction_readback(self.ws, 'op-clean-progress-correction', bad)
+        value = station_cleanup.correction_readback(self.ws, 'op-clean-progress-correction', receipt)
+        self.assertEqual('saved', value['progress_correction'])
+        station_cleanup.correction_readback(self.ws, 'op-clean-progress-correction', receipt)
+        self.assertEqual(before, task_store.current_path(self.ws).read_bytes())
+        self.assertEqual(next_task['run_id'], task_store.read_task(self.ws)['run_id'])
+
     def test_task_cleanup_uses_owner_to_remove_repair_backups(self):
         task = self.takeover()
         document = task_store.read_current(self.ws)

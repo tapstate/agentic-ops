@@ -204,10 +204,16 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertTrue((self.station / 'runtime/unknown').exists())
         from workflow import station_cleanup, station_resources
         plan = station_cleanup.plan(self.station)
-        request = {'scope': 'task', 'expected_plan_digest': plan['digest'], 'materials': 'discard', 'decision_ref': '明确放弃本地成果并清理任务'}
+        request = {'scope': 'task', 'expected_plan_digest': plan['digest'], 'materials': 'discard', 'decision_ref': '明确放弃本地成果并清理任务', 'progress_correction': '本轮成果放弃，仅保留方案'}
         with mock.patch.object(station_resources, 'cleanup_declared', return_value=[]):
             result = station_cleanup.execute(self.station, 'TAP-123', 'run-test', 1, 'op-purge-preceding-clean', request)
         self.assertTrue(result['cleanup_result']['complete'], result)
+        with self.assertRaisesRegex(ValueError, '成果更正尚未回读'):
+            registry.command_detach(args, ROOT, purge=True)
+        candidate = result['cleanup_result']['progress_correction']
+        station_cleanup.correction_readback(self.station, result['operation_id'], {
+            'site': candidate['site'], 'issue_key': 'TAP-123', 'body': candidate['body'],
+            'comment_id': '123', 'source_ref': 'fixture:jira/comment/123'})
         registry.command_detach(args, ROOT, purge=True)
         self.assertFalse((self.station / '.agenticops/station.json').exists())
         self.assertEqual('reusable', (self.station / 'config/service').read_text())

@@ -140,3 +140,11 @@ Agent 使用共享 [ao-task-resume](../../skills/shared/ao-task-resume/SKILL.md)
 环境缺少构建、完整应用装配、数据库或许可证条件时，保留源码成果并继续不依赖这些条件的准备。Agent 应给出下一条可执行操作与明确缺项，记录实际 NOT_RUN/UNKNOWN；安装成功、容器创建或接管成功都不能冒充应用验收。
 
 恢复总结至少说明已复用成果、新运行与实际阶段、当前源码版本、执行过的验证，以及下一步和剩余缺口。使用者之后再次给出同一 Jira key，Agent 应能沿这些已回读事实继续。
+
+## 清理与成果更正
+
+默认清理只删除已确认范围内的本地材料，不撤销 Jira 上的方案或历史成果。研发明确放弃已记录的实现或进度时，Agent 整理新的有效进度、保留方案及剩余事项，经确认后向清理入口提供 `--progress-correction-file <文本文件>`（task.py clean 的 JSON 输入使用 `progress_correction`）。说明不含秘密，不改 Jira 历史或自动设为完成。
+
+本地成功与 Jira 更正独立报告。清理结果中的 progress_correction 提供稳定正文、摘要与目标；Agent 在本地清理完成后用原生工具查重、写入并回读，未知结果先查原操作，不能重发。回读的 site/issue_key/comment_id/body/source_ref 沿 `task.py cleanup-readback --operation-id <原清理编号> --input <回读.json> --dir <工位>` 核验。接口只收尾更正，不重新删除文件或取得任务接管权。
+
+Jira 不可用时本地清理仍可完成，原有操作回执保留更正待办，后续新任务不抹掉它；本地清理完成不等于远端成果已更正。注销须先完成回读，避免删除唯一线索。旧版本不得继续写入带有待更正记录的新现场。此入口是已确认语义说明的回读，不自动判断哪些历史业务决定失效；恢复 Agent 仍核对 Jira 最新有效决定。
