@@ -29,7 +29,7 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 
 ### 外部 TM 配置与协议
 
-运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；旧 epoch 的 schema 1/2 配置仅从备份转换为草稿，不直接加载。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
+运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；不符合当前需求的旧配置先保全并整理为草稿，经确认和原功能复查后采用；符合当前配置合同的材料直接复用，不以应用 epoch 判定配置失效。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
 
 继续使用原生 `tapdata start backend --workDir <节点工作目录>`。有效配置中的 tapdata.conf.backendUrl 经 Launcher 的 backend_url 环境变量传入 FE；配置中的 cloud.baseURLs 保持同一目标，避免两个入口指向不同 TM。不使用无参数交互初始化，不改用 Cloud token 流程。Launcher 非 Cloud 路径会访问配置的 Mongo 获取 Access Code，故必须提供目标 TM 对应的 Mongo 连接及适用认证；不能仅凭 TM URL 推导数据库地址，也不能用另一空库替代。复用受控秘密文件与目标分支原生认证，不把凭据写入普通配置、argv 或公开回执。
 
