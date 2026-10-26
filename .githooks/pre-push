@@ -21,7 +21,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     esac
   fi
   if [ "$remote_ref" = "refs/heads/main" ] &&
-    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "hotfix" ] &&
     [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "history-rewrite" ]; then
     echo "direct push to main is prohibited; use a pull request" >&2
     exit 1
@@ -29,11 +28,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$local_sha" = "$zero_sha" ]; then continue; fi
 
   case "${AGENTIC_OPS_SPECIAL_PUSH:-}" in
-    hotfix)
-      case "$remote_ref" in refs/heads/main|refs/heads/develop) continue;; esac
-      echo "hotfix_push_target_invalid" >&2
-      exit 1
-      ;;
     history-rewrite)
       case "$remote_ref" in refs/heads/main|refs/heads/develop|refs/heads/release/*|refs/tags/v*) continue;; esac
       echo "history_rewrite_push_target_invalid" >&2

@@ -113,6 +113,8 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 | 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收；[维护验证](maintenance-guide.md#5-验证)负责源码规则测试、真实交互测试与固定验收的分工 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 
+本仓库正式发布与 Hotfix 的 develop 验证、PR 合并及正式版本 Tag/存档主线由[维护指引](maintenance-guide.md#6-发布与-hotfix)统一说明，[INT-001](user-stories/v1/int-001-release-governance.md)维护验收场景；不作为受管项目的发布规则。
+
 文档链接权威来源而不重复维护相同规则。具体工作项、进度、阻塞和验收由 Jira 管理，不在本树新增平行执行计划。
 
 缺陷质量协作属于“使用与维护”主题：[质量检查与证据](usage/quality-checkpoints.md)说明检查点、非阻断修复策略调优、编码后 Jira Test 关联、Test Type 跟进、用户处置、非阻断 Jira 状态同步、PR Ready 核对和回写恢复；项目验证方式以 `projects/<project>/quality.json` 为准，修复策略以 `policies/defect-repair-strategies.json` 为通用事实源并允许项目只覆盖默认选择，数据结构以 `contracts/quality-*.schema.json` 为准，不在使用文档另设任务阶段。

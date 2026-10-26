@@ -677,7 +677,7 @@ release_submit_review() {
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1
   release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交人工审查 PR" || return 1
-  release_push_fixed_branch "$repo_root" "$branch" "$head" || return 1
+  release_push_develop "$repo_root" "$head" || return 1
   release_find_or_create_pr "$repository" "$branch" main "$head" "$version" release "${RELEASE_JIRA_ID:-}" "$protection_mode" || return 1
   release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$head" || return 1
 }
@@ -695,6 +695,9 @@ release_confirm_publish() {
   printf '即将%s AgenticOps %s\n' "$action_label" "$version" >&2
   printf '仓库：%s\n' "tapstate/agentic-ops" >&2
   printf '发布 HEAD：%s\n' "$head" >&2
+  if [ -n "${RELEASE_MERGE_COMMIT:-}" ] && [ "$RELEASE_MERGE_COMMIT" != - ]; then
+    printf '实际合并提交：%s\n' "$RELEASE_MERGE_COMMIT" >&2
+  fi
   printf '目标分支：%s -> %s\n' "$source_branch" "$target_branch" >&2
   printf '完整验证：通过（%s）\n' "$RELEASE_VERIFIED_AT" >&2
   printf '待发布提交：\n' >&2
@@ -770,9 +773,9 @@ pages = json.load(sys.stdin)
 if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
     raise ValueError("invalid review pages")
 latest = {}
-for row in sorted((row for page in pages for row in page), key=lambda row: (row["submitted_at"], row["id"])):
-    if row["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
-        latest[row["user"]["login"]] = row["state"]
+rows = (row for page in pages for row in page if row["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"))
+for row in sorted(rows, key=lambda row: (row["submitted_at"], row["id"])):
+    latest[row["user"]["login"]] = row["state"]
 print("true" if all(state != "CHANGES_REQUESTED" for state in latest.values()) else "false")
 ')" || {
     release_fail release_review_read_failed review "PR 审查记录无法解析" "保留原记录并核实返回格式，不推定无异议"
@@ -794,53 +797,54 @@ release_read_merged_pr() {
     RELEASE_RECOVERY_MERGE_COMMIT <<< "$row"
 }
 
-release_find_merged_pr() {
-  local preferred_head="$1" preferred_merge="$2" rows number url state base head merge
-  rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --base main \
-    --state merged --limit 100 --json number,url,state,baseRefName,headRefOid,mergeCommit \
-    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || {
-    release_fail "release_pr_state_read_failed" "state_inspection" "无法读取已合并 PR 状态" "请检查 GitHub 权限和网络后重新执行 release.sh inspect；不得据此认定 PR 缺失"
-    return 2
+release_find_delivery_pr() {
+  local identity="$1" rows
+  rows="$("${AGENTIC_OPS_GH_BIN:-gh}" api 'repos/tapstate/agentic-ops/pulls?state=all&base=main&per_page=100' --paginate \
+    --jq ".[] | select((.body // \"\") | contains(\"<!-- agentic-ops-release:$identity:\")) | [.number,.html_url,(if .merged_at then \"MERGED\" elif .state == \"open\" then \"OPEN\" else \"CLOSED\" end),.head.sha,(.merge_commit_sha // \"-\")] | @tsv")" || return 1
+  [ "$(printf '%s\n' "$rows" | sed '/^$/d' | wc -l | tr -d ' ')" -le 1 ] || {
+    release_fail release_pr_ambiguous preflight "同一发布身份有多个 PR" "请显式选择原 PR，不自动替换候选"
+    return 1
   }
-  while IFS=$'\t' read -r number url state base head merge; do
-    [ -n "$number" ] || continue
-    if [ "$head" = "$preferred_head" ] || { [ -n "$preferred_merge" ] && [ "$merge" = "$preferred_merge" ]; }; then
-      RELEASE_RECOVERY_PR_NUMBER="$number"
-      RELEASE_RECOVERY_PR_URL="$url"
-      RELEASE_RECOVERY_PR_STATE="$state"
-      RELEASE_RECOVERY_PR_BASE="$base"
-      RELEASE_RECOVERY_PR_HEAD="$head"
-      RELEASE_RECOVERY_MERGE_COMMIT="$merge"
-      return 0
-    fi
-  done <<< "$rows"
-  return 1
+  RELEASE_PR_NUMBER=""; RELEASE_PR_URL=""; RELEASE_PR_STATE=""; RELEASE_PR_HEAD=""; RELEASE_MERGE_COMMIT=""
+  if [ -n "$rows" ]; then
+    IFS=$'\t' read -r RELEASE_PR_NUMBER RELEASE_PR_URL RELEASE_PR_STATE RELEASE_PR_HEAD RELEASE_MERGE_COMMIT <<< "$rows"
+  fi
 }
 
-release_find_open_release_pr() {
-  local release_branch="$1" rows
-  rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops \
-    --head "$release_branch" --base main --state open --limit 1 \
-    --json number,url,state,baseRefName,headRefOid,mergeCommit \
-    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,(.mergeCommit.oid // "")] | @tsv' 2>/dev/null)" || {
-    release_fail "release_pr_state_read_failed" "state_inspection" "无法读取发布分支关联的开放 PR" "请检查 GitHub 权限和网络后重新执行 release.sh inspect"
-    return 2
+release_check_develop_pr() {
+  local count
+  count="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --head develop --base main --state open \
+    --json body --jq "[.[] | select(.body | contains(\"<!-- agentic-ops-release:$RELEASE_IDENTITY:\") | not)] | length")" || return 1
+  [ "$count" = 0 ] || {
+    release_fail release_develop_pr_busy preflight "develop 已有其它发布的开放 PR" "先核对并完成或关闭原 PR，不推送新候选改变它"
+    return 1
   }
-  [ -n "$rows" ] || return 1
-  IFS=$'\t' read -r RELEASE_RECOVERY_PR_NUMBER RELEASE_RECOVERY_PR_URL \
-    RELEASE_RECOVERY_PR_STATE RELEASE_RECOVERY_PR_BASE RELEASE_RECOVERY_PR_HEAD \
-    RELEASE_RECOVERY_MERGE_COMMIT <<< "$(printf '%s\n' "$rows" | head -n 1)"
-  [ "$RELEASE_RECOVERY_PR_STATE" = "OPEN" ] && [ "$RELEASE_RECOVERY_PR_BASE" = "main" ]
 }
 
-release_candidate_is_in_main() {
-  local repo_root="$1"
-  local head="$2"
-  git -C "$repo_root" fetch origin main >/dev/null 2>&1 || {
-    release_fail "release_main_fetch_failed" "state_inspection" "无法刷新 origin/main" "请检查网络后重新执行 release.sh inspect 或 publish"
-    return 2
+release_push_develop() {
+  local root="$1" head="$2" remote
+  [ "$(git -C "$root" rev-parse develop)" = "$head" ] || return 1
+  release_check_base_unchanged "$root" || return 1
+  release_check_develop_pr || return 1
+  # 已核验发布证据及操作确认；只允许快进，不能覆盖并行开发。
+  AGENTIC_OPS_SPECIAL_PUSH=release git -C "$root" push origin "$head:refs/heads/develop" || true
+  remote="$(git -C "$root" ls-remote --heads origin refs/heads/develop)" || return 1
+  [ "${remote%%[[:space:]]*}" = "$head" ] || {
+    release_fail release_develop_drift push "远端 develop 与已验收候选不一致" "核对实际推送结果及并行提交，不强推"
+    return 1
   }
-  git -C "$repo_root" merge-base --is-ancestor "$head" origin/main
+}
+
+release_check_archive_branch() {
+  local root="$1" version="$2" expected="$3" local_head remote
+  local_head="$(git -C "$root" rev-parse --verify "refs/heads/release/$version" 2>/dev/null || true)"
+  remote="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+  remote="${remote%%[[:space:]]*}"
+  if { [ -n "$local_head" ] && [ "$local_head" != "$expected" ]; } ||
+     { [ -n "$remote" ] && [ "$remote" != "$expected" ]; }; then
+    release_fail release_archive_conflict preflight "release/$version 已指向其它提交" "保留现有分支，先确认旧候选或版本归属；不自动移动存档"
+    return 1
+  fi
 }
 
 release_inspect_state() {
@@ -857,15 +861,9 @@ release_inspect_state() {
     number="$RELEASE_RECOVERY_PR_NUMBER"; url="$RELEASE_RECOVERY_PR_URL"
     pr_state="$RELEASE_RECOVERY_PR_STATE"; head="$RELEASE_RECOVERY_PR_HEAD"; merge="$RELEASE_RECOVERY_MERGE_COMMIT"
   else
-    rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --head "release/$version" --base main --state all \
-      --json number,url,state,headRefOid,mergeCommit --jq '.[] | [.number,.url,.state,.headRefOid,(.mergeCommit.oid // "-")] | @tsv')" || return 1
-    if [ -n "$rows" ]; then
-      [ "$(printf '%s\n' "$rows" | wc -l | tr -d ' ')" = 1 ] || {
-        release_fail release_pr_ambiguous state_inspection "发现多个版本 PR" "用 --merged-pr 指定确切 PR"
-        return 1
-      }
-      IFS=$'\t' read -r number url pr_state head merge <<< "$rows"
-    fi
+    release_find_delivery_pr "$version" || return 1
+    number="$RELEASE_PR_NUMBER"; url="$RELEASE_PR_URL"; pr_state="$RELEASE_PR_STATE"
+    head="$RELEASE_PR_HEAD"; merge="$RELEASE_MERGE_COMMIT"
   fi
   state=release_prepare_required
   next_command="internal/release/release.sh prepare --version $version"
@@ -879,6 +877,15 @@ release_inspect_state() {
       if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != true ] || [ "$RELEASE_REMOTE_TAG_COMMIT" != "$merge" ]; then
         state=release_remote_tag_conflict; next_command=""
       else
+        archive="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+        archive="${archive%%[[:space:]]*}"
+        if [ "$archive" != "$merge" ]; then
+          state=release_archive_pending
+          next_command="internal/release/release.sh recover --version $version --merged-pr $number"
+          if [ -n "$archive" ]; then state=release_archive_conflict; next_command=""; fi
+          printf '{"ok":true,"operation":"release_inspect","state":"%s","delivery_status":"tag_only","version":"%s","merge_commit":"%s","archive_commit":"%s","next_command":"%s"}\n' "$state" "$version" "$merge" "$archive" "$next_command"
+          return 0
+        fi
         delivery=published
         sync=pending_integration
         if git -C "$root" merge-base --is-ancestor "$merge" "$develop_head"; then
@@ -896,19 +903,17 @@ release_inspect_state() {
     state=release_pr_closed; next_command=""
   elif [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
     state=release_merged_pr_missing; next_command=""
-  elif git -C "$root" show-ref --verify --quiet "refs/heads/release/$version"; then
-    state=release_candidate_present
-    next_command="internal/release/release.sh submit-for-review --version $version"
+  elif [ -n "$local_develop" ]; then
+    state=release_develop_candidate
+    next_command="internal/release/release.sh prepare --version $version"
   fi
   printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","delivery_status":"%s","develop_sync_status":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","next_command":"%s"}\n' \
     "$version" "$state" "$delivery" "$sync" "$develop_head" "$main_head" "$local_tag" "${RELEASE_REMOTE_TAG_COMMIT:-}" "$number" "$url" "$head" "$merge" "$next_command"
 }
 
 release_recover_merged_candidate() {
-  local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode="$6"
-  local soft_option=""
-  if [ "$protection_mode" = soft ]; then soft_option=" --allow-soft-gate"; fi
-  local candidate merge_commit pr_url local_tag local_release remote_release develop_head material digest tagger tag_object old_ref zero_ref
+  local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode=hard
+  local candidate merge_commit pr_url local_tag material digest
   if ! printf '%s\n' "$pr_number" | grep -Eq '^[1-9][0-9]*$'; then
     release_fail "invalid_release_merged_pr" "recovery_validation" "恢复发布必须提供正整数 --merged-pr" "请先运行 release.sh inspect 确认关联的已合并 PR 编号"
     return 1
@@ -939,19 +944,15 @@ release_recover_merged_candidate() {
     return 1
   fi
   release_run_full_verification "$repo_root" "$candidate" check || return 1
-  # 信任根交付始终需要受保护 main；普通历史 soft 恢复保留显式选择。
-  local delivery_mode="$protection_mode" trust_changes
-  trust_changes="$(release_story_gate_trust_root_changes "$repo_root" "$RELEASE_BASE_COMMIT" "$candidate")" || return 1
-  if [ -n "$trust_changes" ]; then delivery_mode=hard; soft_option=""; fi
-  protection_mode="$delivery_mode"
-  workflow_check_delivery tapstate/agentic-ops "$delivery_mode" || return 1
-  if [ "$delivery_mode" = hard ]; then release_check_review_objections "$pr_number" || return 1; fi
+  release_check_archive_branch "$repo_root" "$version" "$merge_commit" || return 1
+  workflow_check_delivery tapstate/agentic-ops hard || return 1
+  release_check_review_objections "$pr_number" || return 1
   local_tag="$(git -C "$repo_root" rev-parse --verify "$version^{}" 2>/dev/null || true)"
   material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
   digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
-  release_print_confirmation_bundle "$repo_root" "恢复已提前合入候选并发布不可变 Tag" "$version" "$candidate" "PR #$pr_number" main "候选已由独立 PR 合入；只创建缺失的正确 Tag，绝不覆盖已有 Tag。" "$pr_url" "$merge_commit"
+  release_print_confirmation_bundle "$repo_root" "恢复已合并候选的 Tag 与版本存档" "$version" "$candidate" "PR #$pr_number" main "候选已由 PR 合入；只补齐同一合并提交的 Tag 与版本存档，不覆盖冲突引用。" "$pr_url" "$merge_commit"
   if [ "$confirmed" != "true" ]; then
-    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number$soft_option --confirm-release --confirm-recovery $digest"
+    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改 Tag 或存档" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number --confirm-release --confirm-recovery $digest"
     return 1
   fi
   if [ "$confirmation_digest" != "$digest" ]; then
@@ -1018,35 +1019,48 @@ release_find_or_create_pr() {
   local publish_mode="${6:-release}"
   local jira_id="${7:-}"
   local protection_mode="${8:-hard}"
-  local existing
-  local pr_list
-  local body_file
-  local pr_title
-  local pr_jq
-
-  pr_jq=".[] | select(.headRefOid == \"$head\") | [.number, .url, .state, .headRefOid] | @tsv"
-  if [ "$protection_mode" = "soft" ]; then
-    pr_jq='.[] | [.number, .url, .state, .headRefOid] | @tsv'
-  fi
-
-  if ! pr_list="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list \
-    --repo "$repository" \
-    --base "$target_branch" \
-    --head "$source_branch" \
-    --state all \
-    --json number,url,state,headRefOid \
-    --jq "$pr_jq" 2>/dev/null)"; then
-    release_fail "release_pr_list_failed" "pull_request" "无法查询现有发布 PR" "请检查 GitHub 认证和网络后重试，禁止在查询失败时创建重复 PR"
-    return 1
-  fi
-  existing="$(printf '%s\n' "$pr_list" | head -n 1)"
-  if [ -n "$existing" ]; then
-    IFS=$'\t' read -r RELEASE_PR_NUMBER RELEASE_PR_URL RELEASE_PR_STATE RELEASE_PR_HEAD <<< "$existing"
-    if [ "$RELEASE_PR_HEAD" != "$head" ]; then
-      release_fail "release_pr_head_drift" "pull_request" "现有 PR HEAD 与固定发布 HEAD 不一致" "请停止合并并人工核查发布分支，禁止用新提交替换已验证 HEAD"
+  local body_file pr_title identity="${version:-$jira_id}"
+  release_find_delivery_pr "$identity" || return 1
+  if [ -n "$RELEASE_PR_NUMBER" ]; then
+    [ "$RELEASE_PR_STATE" = OPEN ] && [ "$RELEASE_PR_HEAD" = "$head" ] || {
+      release_fail release_pr_head_drift pull_request "原 PR 状态或 Head 与本次候选不符" "回读原 PR；不沿用旧批准或更换交付对象"
       return 1
+    }
+    # 调用方已经核验新候选、证据及操作授权；返工复用原 PR，只刷新受管证据行。
+    local facts old_body
+    facts="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" --repo "$repository" --json baseRefName,headRefName,headRefOid,state \
+      --jq '[.baseRefName,.headRefName,.headRefOid,.state] | @tsv')" || return 1
+    [ "$facts" = "$(printf 'main\tdevelop\t%s\tOPEN' "$head")" ] || return 1
+    old_body="$(mktemp)"; body_file="$(mktemp)"
+    if ! "${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" --repo "$repository" --json body --jq .body > "$old_body"; then
+      rm -f "$old_body" "$body_file"; return 1
     fi
-    return 0
+    if ! python3 - "$old_body" "$body_file" "$identity" "$head" "$RELEASE_BASE_COMMIT" "$RELEASE_VERIFIED_AT" <<'PYBODY'
+import pathlib, re, sys
+old, new, identity, head, base, verified = sys.argv[1:]
+body = pathlib.Path(old).read_text()
+fixed = re.findall(r"^<!-- agentic-ops-fixed-head:([0-9a-f]{40,64}) -->$", body, re.M)
+bindings = re.findall(r"^<!-- agentic-ops-release:([^:]+):([0-9a-f]{40,64}) -->$", body, re.M)
+if len(fixed) != 1 or len(bindings) != 1 or bindings[0][0] != identity:
+    raise ValueError("原 PR 证据绑定缺失或冲突，需人工核实")
+body = body.replace(f"<!-- agentic-ops-fixed-head:{fixed[0]} -->", f"<!-- agentic-ops-fixed-head:{head} -->")
+body = body.replace(f"<!-- agentic-ops-release:{identity}:{bindings[0][1]} -->", f"<!-- agentic-ops-release:{identity}:{base} -->")
+body = re.sub(r"^- 待合并 HEAD：.*$", lambda _: f"- 待合并 HEAD：`{head}`", body, flags=re.M)
+body = re.sub(r"^- 本地验证完成时间（UTC）：.*$", lambda _: f"- 本地验证完成时间（UTC）：`{verified}`", body, flags=re.M)
+pathlib.Path(new).write_text(body)
+PYBODY
+    then rm -f "$old_body" "$body_file"; return 1; fi
+    if ! cmp -s "$old_body" "$body_file"; then
+      "${AGENTIC_OPS_GH_BIN:-gh}" pr edit "$RELEASE_PR_URL" --repo "$repository" --body-file "$body_file" >/dev/null || true
+      # 外部写入结果未知时仅回读，不盲目重发，也不把原 Head 的批准当作新批准。
+      if ! "${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" --repo "$repository" --json body --jq .body > "$old_body" ||
+         [ "$(cat "$old_body")" != "$(cat "$body_file")" ]; then
+        rm -f "$old_body" "$body_file"; return 1
+      fi
+    fi
+    rm -f "$old_body" "$body_file"
+    release_validate_pr_binding "$RELEASE_PR_URL" "$identity" "$head"
+    return $?
   fi
 
   body_file="$(mktemp)"
@@ -1073,199 +1087,6 @@ release_find_or_create_pr() {
   }
   RELEASE_PR_STATE="OPEN"
   RELEASE_PR_HEAD="$head"
-}
-
-release_check_soft_pr_fixed_head_if_exists() {
-  local repository="$1"
-  local source_branch="$2"
-  local target_branch="$3"
-  local head="$4"
-  local pr_list
-  local existing
-
-  if ! pr_list="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list \
-    --repo "$repository" \
-    --base "$target_branch" \
-    --head "$source_branch" \
-    --state all \
-    --json number,url,state,headRefOid \
-    --jq '.[] | [.number, .url, .state, .headRefOid] | @tsv' 2>/dev/null)"; then
-    release_fail "release_pr_list_failed" "pre_push" "无法在推送前查询现有发布 PR" "请检查 GitHub 认证和网络后重试"
-    return 1
-  fi
-  existing="$(printf '%s\n' "$pr_list" | head -n 1)"
-  if [ -z "$existing" ]; then
-    return 0
-  fi
-
-  IFS=$'\t' read -r RELEASE_PR_NUMBER RELEASE_PR_URL RELEASE_PR_STATE RELEASE_PR_HEAD <<< "$existing"
-  if [ "$RELEASE_PR_HEAD" != "$head" ]; then
-    release_fail "release_pr_head_drift" "pre_push" "本地修复 HEAD 与现有 PR HEAD 不一致" "禁止推送；请恢复首次验证的固定 HEAD 后重试"
-    return 1
-  fi
-  release_read_pr_fixed_head "$repository" || return 1
-  if [ "$RELEASE_PR_FIXED_HEAD" != "$head" ]; then
-    release_fail "release_pr_head_drift" "pre_push" "本地修复 HEAD 已偏离 PR 记录的首次验证 HEAD" "禁止推送；请恢复首次验证的固定 HEAD 后重试"
-    return 1
-  fi
-}
-
-release_refresh_pr_state() {
-  local repository="$1"
-  local result
-  result="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" \
-    --repo "$repository" \
-    --json state,mergeCommit,url,number,headRefOid \
-    --jq '[.state, (.mergeCommit.oid // "-"), .url, .number, .headRefOid] | @tsv')" || {
-    release_fail "release_pr_read_failed" "manual_merge" "无法读取发布 PR 状态" "请检查 GitHub 状态后重新执行 publish"
-    return 1
-  }
-  IFS=$'\t' read -r RELEASE_PR_STATE RELEASE_MERGE_COMMIT RELEASE_PR_URL RELEASE_PR_NUMBER RELEASE_PR_HEAD <<< "$result"
-  if [ "$RELEASE_MERGE_COMMIT" = "-" ]; then RELEASE_MERGE_COMMIT=""; fi
-}
-
-release_read_pr_fixed_head() {
-  local repository="$1"
-  local body
-  local fixed_head
-
-  body="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" \
-    --repo "$repository" --json body --jq .body)" || {
-    release_fail "release_pr_read_failed" "manual_merge" "无法读取发布 PR 的固定 HEAD 证据" "请检查 GitHub 状态后重新执行 publish"
-    return 1
-  }
-  fixed_head="$(printf '%s\n' "$body" | sed -n 's/.*<!-- agentic-ops-fixed-head:\([0-9a-f]\{40\}\) -->.*/\1/p' | head -n 1)"
-  if [ -z "$fixed_head" ]; then
-    release_fail "release_pr_fixed_head_missing" "manual_merge" "发布 PR 缺少固定 HEAD 证据" "禁止继续发布；请核查 PR 是否由发布脚本创建"
-    return 1
-  fi
-  RELEASE_PR_FIXED_HEAD="$fixed_head"
-}
-
-release_wait_for_manual_merge() {
-  local repo_root="$1"
-  local repository="$2"
-  local operation="$3"
-  local version="$4"
-  local head="$5"
-  local branch="$6"
-  local jira_id="${7:-}"
-
-  release_refresh_pr_state "$repository" || return 1
-  release_read_pr_fixed_head "$repository" || return 1
-  if [ "$RELEASE_PR_HEAD" != "$head" ]; then
-    release_fail "release_pr_head_drift" "manual_merge" "PR HEAD 与固定发布 HEAD 不一致" "请停止合并并人工核查发布分支"
-    return 1
-  fi
-  if [ "$RELEASE_PR_FIXED_HEAD" != "$head" ]; then
-    release_fail "release_pr_head_drift" "manual_merge" "当前 PR HEAD 已偏离首次验证的固定发布 HEAD" "请停止合并并从原始固定 HEAD 重新创建发布 PR"
-    return 1
-  fi
-  case "$RELEASE_PR_STATE" in
-    MERGED)
-      return 0
-      ;;
-    CLOSED)
-      release_fail "release_pr_closed" "manual_merge" "发布 PR 已关闭但未合并" "请恢复或重新创建 PR 后重试"
-      return 1
-      ;;
-    OPEN)
-      release_write_waiting_audit "$repo_root" "$operation" "$version" "$head" "$branch" "$jira_id" || return 1
-      printf '{"schema_version":"step-result/v2","ok":false,"operation":"%s","status":"waiting_for_manual_merge","retry_safe":true,"result":{"status":"blocked","summary":"等待人工使用 Merge commit 合并 PR","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"human","action":"merge_pr_with_merge_commit_then_rerun","question":"请使用 Merge commit 合并 PR 后重新运行继续命令","choices":[{"id":"merge","label":"合并 PR 并继续","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","branch":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","audit_file":"%s","continue_command":"%s"}\n' \
-        "$operation" "$version" "$head" "$branch" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_AUDIT_FILE" "$RELEASE_CONTINUE_COMMAND"
-      return 2
-      ;;
-    *)
-      release_fail "release_pr_state_invalid" "manual_merge" "无法识别发布 PR 状态" "请核查 PR 后重新执行 publish"
-      return 1
-      ;;
-  esac
-}
-
-# 软门禁下仍由研发工程师在 GitHub 上执行 Merge commit。本函数只负责在
-# 固定 HEAD 未漂移的前提下等待该人工事实出现，随后让当前 publish 继续完成校验和 Tag。
-release_wait_for_soft_merge() {
-  local repository="$1"
-  local head="$2"
-  local attempt=0
-
-  while [ "$attempt" -lt 360 ]; do
-    release_refresh_pr_state "$repository" || return 1
-    release_read_pr_fixed_head "$repository" || return 1
-    if [ "$RELEASE_PR_HEAD" != "$head" ]; then
-      release_fail "release_pr_head_drift" "manual_merge" "PR HEAD 与固定发布 HEAD 不一致" "请停止合并并人工核查发布分支"
-      return 1
-    fi
-    if [ "$RELEASE_PR_FIXED_HEAD" != "$head" ]; then
-      release_fail "release_pr_head_drift" "manual_merge" "当前 PR HEAD 已偏离首次验证的固定发布 HEAD" "请停止合并并从原始固定 HEAD 重新创建发布 PR"
-      return 1
-    fi
-    case "$RELEASE_PR_STATE" in
-      MERGED)
-        return 0
-        ;;
-      CLOSED)
-        release_fail "release_pr_closed" "manual_merge" "发布 PR 已关闭但未合并" "请恢复或重新创建 PR 后重试"
-        return 1
-        ;;
-      OPEN)
-        attempt=$((attempt + 1))
-        sleep 5
-        ;;
-      *)
-        release_fail "release_pr_state_invalid" "manual_merge" "无法识别发布 PR 状态" "请核查 PR 后重新执行 publish"
-        return 1
-        ;;
-    esac
-  done
-  release_fail "release_merge_timeout" "manual_merge" "等待发布 PR 合并超时" "请检查 PR 门禁，处理后重新执行 publish"
-  return 1
-}
-
-release_enable_auto_merge() {
-  local repository="$1"
-  if [ "$RELEASE_PR_STATE" = "MERGED" ]; then
-    return 0
-  fi
-  if ! "${AGENTIC_OPS_GH_BIN:-gh}" pr merge "$RELEASE_PR_URL" --repo "$repository" --merge --auto --match-head-commit "$RELEASE_PR_HEAD"; then
-    release_fail "release_auto_merge_failed" "auto_merge" "无法为发布 PR 启用 Merge Auto-merge" "请检查 PR 合并条件后重新执行 publish"
-    return 1
-  fi
-}
-
-release_wait_for_merge() {
-  local repository="$1"
-  local attempt=0
-  local result
-  local state
-  local merge_commit
-  local url
-  local number
-
-  while [ "$attempt" -lt 120 ]; do
-    result="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" \
-      --repo "$repository" \
-      --json state,mergeCommit,url,number \
-      --jq '[.state, (.mergeCommit.oid // ""), .url, .number] | @tsv')" || {
-      release_fail "release_pr_read_failed" "merge_wait" "无法读取发布 PR 状态" "请检查 GitHub 状态后重新执行 publish"
-      return 1
-    }
-    IFS=$'\t' read -r state merge_commit url number <<< "$result"
-    if [ "$state" = "MERGED" ]; then
-      RELEASE_MERGE_COMMIT="$merge_commit"
-      RELEASE_PR_URL="$url"
-      RELEASE_PR_NUMBER="$number"
-      return 0
-    fi
-    if [ "$state" = "CLOSED" ]; then
-      release_fail "release_pr_closed" "merge_wait" "发布 PR 已关闭但未合并" "请恢复或重新创建 PR 后重试"
-      return 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 5
-  done
-  release_fail "release_merge_timeout" "merge_wait" "等待发布 PR 合并超时" "请检查 PR 门禁，处理后重新执行 publish"
-  return 1
 }
 
 release_verify_remote_contains() {
@@ -1353,7 +1174,7 @@ if waiting:
     remaining = ['人工审查并以 Merge commit 合入 PR，然后执行继续命令']
 value.update(schema_version='step-result/v2', retry_safe=True,
              result=dict(status='blocked' if waiting else 'succeeded',
-                         summary='等待独立人工合并' if waiting else ('发布已交付，分支同步待完成' if pending else '发布已完成'),
+                         summary='等待维护者审查并授权合并' if waiting else ('发布已交付，分支同步待完成' if pending else '发布已完成'),
                          facts={}, evidence=[], effects=[], remaining=remaining),
              next_step=dict(kind='none', scope='flow', mode='manual', executor='stop',
                             action='hotfix_completed' if value['operation'] == 'hotfix_publish' else 'release_completed', call=None))
@@ -1365,6 +1186,8 @@ if waiting or pending:
                              call=dict(operation='submit_decision', argv=[]))
 if value.get('version'):
     value['tag_commit'] = value.get('merge_commit', '')
+    value['archive_branch'] = 'release/' + value['version']
+    value['archive_commit'] = value.get('merge_commit', '')
 if value['operation'] == 'release_recover':
     value['recovery_reason'] = 'candidate_already_in_main'
 if value['operation'] == 'hotfix_publish':
@@ -1373,8 +1196,6 @@ if value['operation'] == 'hotfix_publish':
     value.setdefault('changed', not waiting)
     value.setdefault('branch_created', False)
     value['gate'] = 'story_gate'
-    if value.get('protection_mode') == 'direct':
-        value['merge_subject'] = 'Hotfix: ' + value['jira_id'] + ' 合并 develop 到 main'
 print(json.dumps(value, ensure_ascii=False))
 PY
 }
@@ -1384,7 +1205,9 @@ release_finish() {
   release_verify_remote_contains "$root" "$commit" || return 1
   release_verify_merge_commit "$root" "$head" "$commit" || return 1
   if [ -n "$version" ]; then
+    release_check_archive_branch "$root" "$version" "$commit" || return 1
     release_create_and_push_version_tag "$root" "$version" "$commit" || return 1
+    release_push_fixed_branch "$root" "release/$version" "$commit" || return 1
   fi
   release_sync_develop_to_main "$root" "$commit" || RELEASE_DEVELOP_SYNC=unknown
   if [ "$RELEASE_DEVELOP_SYNC" != synced ]; then status=completed_with_pending_sync; fi
@@ -1401,95 +1224,6 @@ release_verify_merge_commit() {
     release_fail release_merge_result_changed merge_verification "实际合并父提交或代码树与已验收范围不符" "停止 Tag；重新评估实际结果、验收与授权范围"
     return 1
   }
-}
-
-release_check_fixed_branch() {
-  local repo_root="$1"
-  local branch="$2"
-  local candidate_head="$3"
-  local local_head
-  local remote_head
-
-  local_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
-  RELEASE_CHECKED_LOCAL_HEAD="$local_head"
-  remote_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null)" || return 1
-  remote_head="${remote_head%%[[:space:]]*}"
-  if [ -n "$remote_head" ]; then
-    git -C "$repo_root" fetch origin "$branch" >/dev/null 2>&1 || {
-      release_fail "release_fixed_branch_fetch_failed" "release_branch" "无法刷新 origin/$branch" "请检查网络后重试"
-      return 1
-    }
-    if [ "$remote_head" != "$candidate_head" ] || { [ -n "$local_head" ] && [ "$local_head" != "$remote_head" ]; }; then
-      release_fail "release_fixed_branch_conflict" "release_branch" "现有 $branch 不是本次已验证的固定 HEAD" "请人工核查固定发布分支，禁止覆盖或移动"
-      return 1
-    fi
-    RELEASE_FIXED_HEAD="$remote_head"
-    return 0
-  fi
-  if [ -n "$local_head" ] && [ "$local_head" != "$candidate_head" ]; then
-    if [ "${RELEASE_REPLACE_CANDIDATE:-}" != "$local_head" ]; then
-      release_fail release_fixed_branch_conflict release_branch "本地 $branch 已有其它候选" "核对范围后用 prepare --version ${branch#release/} --replace-candidate $local_head 重新准备；旧提交与证据保留"
-      return 1
-    fi
-    if git -C "$repo_root" worktree list --porcelain | grep -Fxq "branch refs/heads/$branch"; then
-      release_fail release_candidate_checked_out release_branch "候选分支仍在工位中检出" "先保全该工位并切换其它分支，再重新准备"
-      return 1
-    fi
-    local prs
-    prs="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --head "$branch" --state all --json number --jq 'length')" || return 1
-    if [ "$prs" != 0 ]; then
-      release_fail release_candidate_review_exists release_branch "旧候选已有 PR 或无法确认 PR 状态" "保留现有候选，先核实原审查；本地替换仅适用于未提交审查的候选"
-      return 1
-    fi
-  fi
-  RELEASE_FIXED_HEAD="$candidate_head"
-}
-
-release_prepare_fixed_branch() {
-  local repo_root="$1" branch="$2" candidate_head="$3"
-  release_check_fixed_branch "$repo_root" "$branch" "$candidate_head" || return 1
-  local old_head backup
-  old_head="$RELEASE_CHECKED_LOCAL_HEAD"
-  if [ -n "$old_head" ] && [ "$old_head" != "$candidate_head" ]; then
-    backup="refs/heads/codex/superseded-${branch//\//-}-$old_head"
-    # 旧引用同时成为保留分支；CAS 防止验收期间候选被其它会话改变。
-    printf 'start\ncreate %s %s\nupdate refs/heads/%s %s %s\nprepare\ncommit\n' \
-      "$backup" "$old_head" "$branch" "$candidate_head" "$old_head" |
-      git -C "$repo_root" update-ref --stdin || return 1
-  elif [ -z "$old_head" ]; then
-    git -C "$repo_root" branch "$branch" "$candidate_head" || {
-      release_fail release_fixed_branch_create_failed release_branch "无法创建固定发布分支 $branch" "请检查本地 Git 状态后重试"
-      return 1
-    }
-  fi
-}
-
-release_resolve_prepared_fixed_branch() {
-  local repo_root="$1"
-  local branch="$2"
-  local local_head
-  local remote_head
-
-  local_head="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$branch" 2>/dev/null || true)"
-  remote_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null)" || return 1
-  remote_head="${remote_head%%[[:space:]]*}"
-  if [ -n "$remote_head" ]; then
-    git -C "$repo_root" fetch origin "$branch" >/dev/null 2>&1 || {
-      release_fail "release_fixed_branch_fetch_failed" "release_branch" "无法刷新 origin/$branch" "请检查网络后重试"
-      return 1
-    }
-    if [ -n "$local_head" ] && [ "$local_head" != "$remote_head" ]; then
-      release_fail "release_fixed_branch_conflict" "release_branch" "本地与远端 $branch 目标不一致" "请人工核查固定发布分支，禁止覆盖"
-      return 1
-    fi
-    RELEASE_FIXED_HEAD="$remote_head"
-    return 0
-  fi
-  if [ -z "$local_head" ]; then
-    release_fail "release_prepare_required" "release_branch" "缺少已验证的固定发布分支 $branch" "请先执行 release.sh prepare --version ${branch#release/}"
-    return 1
-  fi
-  RELEASE_FIXED_HEAD="$local_head"
 }
 
 release_push_fixed_branch() {
@@ -1516,11 +1250,14 @@ release_push_fixed_branch() {
     release_fail "release_fixed_branch_conflict" "release_branch" "远端 $branch 不是固定发布 HEAD" "禁止覆盖远端发布分支，请人工核查"
     return 1
   fi
-  if [ -z "$remote_head" ] && ! AGENTIC_OPS_SPECIAL_PUSH=release \
-    git -C "$repo_root" push -u origin "refs/heads/$branch:refs/heads/$branch"; then
-    release_fail "release_fixed_branch_push_failed" "release_branch" "无法推送固定发布分支 $branch" "请检查远端权限后重试"
-    return 1
+  if [ -z "$remote_head" ]; then
+    AGENTIC_OPS_SPECIAL_PUSH=release git -C "$repo_root" push --force-with-lease="refs/heads/$branch:" origin "$head:refs/heads/$branch" || true
   fi
+  remote_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch")" || return 1
+  [ "${remote_head%%[[:space:]]*}" = "$head" ] || {
+    release_fail release_fixed_branch_push_failed release_branch "远端 $branch 尚未确认指向目标提交" "保留现场并回读；不移动或覆盖远端分支"
+    return 1
+  }
 }
 
 release_push_tag_if_needed() {
@@ -1651,40 +1388,6 @@ release_write_audit_json() {
   }
 
   RELEASE_AUDIT_FILE="$audit_file"
-}
-
-release_write_audit() {
-  local repo_root="$1"
-  local version="$2"
-  local head="$3"
-  local protection_mode="${4:-hard}"
-  local payload
-  payload="$(printf '{"operation":"release_publish","status":"completed","version":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag":"%s","tag_commit":"%s","protection_mode":"%s"}' \
-    "$version" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "${RELEASE_DEVELOP_COMMIT:-}" "$version" "$RELEASE_TAG_COMMIT" "$protection_mode")"
-  release_write_audit_json "$repo_root" "release-$version-$head.json" "$payload"
-}
-
-release_write_recovery_audit() {
-  local repo_root="$1" version="$2" head="$3" protection_mode="${4:-soft}" payload
-  payload="$(printf '{"operation":"release_recover","status":"completed","version":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","tag":"%s","tag_commit":"%s","protection_mode":"%s","recovery_reason":"candidate_already_in_main"}' \
-    "$version" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$version" "$RELEASE_TAG_COMMIT" "$protection_mode")"
-  release_write_audit_json "$repo_root" "release-recover-$version-$head.json" "$payload"
-}
-
-release_write_waiting_audit() {
-  local repo_root="$1"
-  local operation="$2"
-  local version="$3"
-  local head="$4"
-  local branch="$5"
-  local audit_name
-  local payload
-
-  audit_name="release-$version-$head.json"
-  RELEASE_CONTINUE_COMMAND="internal/release/release.sh publish --version $version --allow-soft-gate --confirm-release"
-  payload="$(printf '{"operation":"%s","status":"waiting_for_manual_merge","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","continue_command":"%s"}' \
-    "$operation" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_CONTINUE_COMMAND")"
-  release_write_audit_json "$repo_root" "$audit_name" "$payload"
 }
 
 release_validate_jira_id() {
