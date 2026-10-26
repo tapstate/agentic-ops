@@ -15,7 +15,7 @@ python3 <候选>/bootstrap/installation_update.py --product-root <原安装> --m
 
 这里只切换原跟踪通道内可快进到达的代码。切换后启动新会话，刷新接线并运行正常 task status/quality status；Jira 协调缺失按 coordination check/prepare/complete 回读、确认并补齐，再重试原功能。原 run 和历史事件保留，当前证据按当前规则重算。缺项没有安全入口时保留现场并反馈，不改活动状态。
 
-旧安装或回退目标未声明 `validation: feature` 时仍受旧 epoch 保护。以下关于跨 epoch 先退出、purge 的说明仅适用于旧模式；自动启动更新仍只处理同 epoch，跨 epoch 使用上述显式停写更新。当前不承诺任意旧格式转换、旧在途操作自动采用或平台会话热更新。
+旧安装或回退目标未声明 `validation: feature` 时仍受旧 epoch 保护。以下关于跨 epoch 先退出、purge 的说明仅适用于旧模式；启动侧经研发明确确认并核实停写后，也可更新到跨 epoch 的功能校验目标，具体参数见下节。当前不承诺任意旧格式转换、旧在途操作自动采用或平台会话热更新。
 
 ## 启动与任务恢复时的更新选择
 
