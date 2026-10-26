@@ -439,6 +439,17 @@ stories:
         result = service.verify('range', base=self.base, head=self.head, scope='full')
         service.approve('range', result['impact_id'], 'user-confirmation:AO-262:commit:' + self.head,
                         base=self.base, head=self.head)
+        # 这些交付用例验证发布补验及其后续复用，明确让 uv 返回不同的工具版本。
+        # 不能依赖宿主 Python 恰好不同；开发证据直接复用由专门用例覆盖。
+        release_python = self.area / 'release-python'
+        release_python.write_text('#!' + sys.executable + '\n' +
+                                  'import os,sys\n' +
+                                  "if sys.argv[1:] == ['--version']: print('Python release fixture')\n" +
+                                  f'else: os.execv({sys.executable!r}, [{sys.executable!r}] + sys.argv[1:])\n')
+        release_python.chmod(0o700)
+        self.uv.write_text(self.uv.read_text().replace(
+            "elif sys.argv[1:3] == ['python','find']: print(sys.executable)",
+            f"elif sys.argv[1:3] == ['python','find']: print({str(release_python)!r})"))
         self.counter.write_text('')  # 独立统计发布执行，不把真实开发验收算作发布验收。
         bare = self.remote(self.base)
         gh = self.area / 'hotfix-gh'
