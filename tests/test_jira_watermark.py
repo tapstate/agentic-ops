@@ -26,6 +26,12 @@ class JiraWatermarkTests(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.product = self.base / "product"
         shutil.copytree(ROOT / "projects" / "tapdata", self.product / "projects" / "tapdata")
+        # 旧版单字段记录仍可按原意图回读；新协议另有专项场景。
+        profile_path = self.product / "projects/tapdata/profile.json"
+        profile = json.loads(profile_path.read_text())
+        profile["jira"]["takeover_watermark"]["schema_version"] = 1
+        profile["jira"]["takeover_watermark"].pop("marker_fields", None)
+        profile_path.write_text(json.dumps(profile))
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
         shutil.copy2(ROOT / ".gitignore", self.product / ".gitignore")
         subprocess.run(["git", "init", "-q", "-b", "develop"], cwd=self.product, check=True)
@@ -196,6 +202,122 @@ class TerminalWatermarkTests(unittest.TestCase):
         self.assertTrue(action["original_target_observed"])
         self.assertEqual(action["next_action"], "manual_handoff")
 
+
+class FourMarkerTests(unittest.TestCase):
+    def setUp(self):
+        JiraWatermarkTests.setUp(self)
+        path = self.product / "projects/tapdata/profile.json"
+        profile = json.loads(path.read_text())
+        profile['jira']['takeover_watermark'] = json.loads((ROOT / 'projects/tapdata/profile.json').read_text())['jira']['takeover_watermark']
+        path.write_text(json.dumps(profile))
+        subprocess.run(['git', 'add', '.'], cwd=self.product, check=True)
+        subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'markers'], cwd=self.product, check=True)
+
+    def snapshot(self, values=None):
+        fields = dict.fromkeys(['customfield_10421', 'customfield_10366', 'customfield_10462', 'customfield_10365'])
+        fields.update(values or {})
+        fields['issuetype'] = {'id': '10011'}
+        return {'source_ref': 'fixture:jira/read', 'issue': {'key': 'TAP-123', 'fields': fields},
+                'current_user': {'accountId': 'jira-login', 'displayName': '登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'}}
+
+    def test_four_field_write_readback_and_resume_preserves_original(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        self.assertEqual(4, len(record['native_request']['fields']))
+        self.assertEqual('a'*32, record['expected_fields']['customfield_10462'])
+        self.assertEqual(self.task['run_id'], record['expected_fields']['customfield_10365'])
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        readback = self.snapshot(record['expected_fields'])
+        result = jira_watermark.complete(self.base, 'TAP-123', 'unknown', readback)
+        self.assertTrue(jira_watermark.summary_ready(self.base, self.task))
+        self.assertEqual('verified', result['outcome'])
+        with mock.patch.object(product_version, 'describe', side_effect=ValueError('升级后的产品不应刷新原版本')):
+            repeated = jira_watermark.prepare(self.base, 'TAP-123', readback)
+        self.assertEqual(record['expected_fields'], repeated['expected_fields'])
+        self.assertNotIn('native_request', repeated)
+        # Jira 时区和毫秒表示差异不应导致误判。
+        readback['issue']['fields']['customfield_10366'] = jira_watermark.marker_time(record['expected_fields']['customfield_10366']).isoformat(timespec='milliseconds')
+        self.assertEqual('verified', jira_watermark.complete(self.base, 'TAP-123', 'unknown', readback)['outcome'])
+
+    def test_partial_readback_or_lost_ownership_blocks_summary(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        partial = self.snapshot(record['expected_fields'])
+        del partial['issue']['fields']['customfield_10462']
+        with self.assertRaisesRegex(ValueError, '不完整'):
+            jira_watermark.complete(self.base, 'TAP-123', 'unknown', partial)
+        changed = dict(record['expected_fields'], customfield_10462='b'*32, customfield_10365='TAP-123-other')
+        result = jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(changed))
+        self.assertEqual('unknown', result['outcome'])
+        self.assertNotIn('native_request', result)
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        self.assertEqual(record['expected_fields'], result['expected_fields'])
+
+    def test_previous_run_requires_bound_resolution_and_current_coordination(self):
+        prior = {'customfield_10421': 'old-version', 'customfield_10366': '2026-01-01T00:00:00Z',
+                 'customfield_10462': 'b'*32, 'customfield_10365': 'TAP-123-old'}
+        snapshot = self.snapshot(prior)
+        with self.assertRaisesRegex(ValueError, '旧 run'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        snapshot['previous_takeover'] = {'observed_fields': prior, 'evidence_ref': 'fixture:jira/confirmed-handoff'}
+        record = jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertEqual(self.task['run_id'], record['expected_fields']['customfield_10365'])
+        self.assertEqual(prior, record['previous_fields'])
+
+    def test_same_station_new_run_also_needs_cleanup_evidence(self):
+        snapshot = self.snapshot({'customfield_10462': 'a'*32, 'customfield_10365': 'old-run'})
+        with self.assertRaisesRegex(ValueError, '旧 run'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+
+    def test_missing_field_or_actor_not_inferred_from_assignee(self):
+        snapshot = self.snapshot()
+        snapshot['issue']['fields']['assignee'] = {'accountId': 'assignee', 'displayName': '负责人'}
+        del snapshot['current_user']
+        with self.assertRaisesRegex(ValueError, '登录用户'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        snapshot = self.snapshot()
+        del snapshot['issue']['fields']['customfield_10366']
+        with self.assertRaisesRegex(ValueError, '不完整'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+
+    def test_proven_not_applied_retries_original_payload_only(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        self.assertEqual('unknown', jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())['outcome'])
+        snapshot = self.snapshot()
+        snapshot['not_applied_ref'] = 'fixture:request-rejected-no-write'
+        retried = jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertEqual('ready', retried['outcome'])
+        self.assertEqual(record['native_request'], retried['native_request'])
+        snapshot['issue']['fields']['customfield_10365'] = 'another-run'
+        with self.assertRaisesRegex(ValueError, '原写前观察'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertNotIn('native_request', jira_watermark.status(self.base, self.task))
+
+    def test_legacy_verified_is_preserved_and_upgraded_without_replacing_version(self):
+        rules = jira_watermark.config(self.base)
+        legacy_rules = dict(rules, schema_version=1)
+        legacy_rules.pop('marker_fields')
+        with mock.patch.object(jira_watermark, 'config', return_value=legacy_rules):
+            legacy = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        with self.assertRaisesRegex(ValueError, '旧版水印'):
+            jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        observed = self.snapshot({'customfield_10421': legacy['version']})
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', observed)
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        observed['previous_takeover'] = {'observed_fields': {k:v for k,v in observed['issue']['fields'].items() if k.startswith('customfield_')},
+                                         'evidence_ref': 'fixture:legacy-run-observed'}
+        with mock.patch.object(product_version, 'describe', side_effect=AssertionError('不刷新接管版本')):
+            upgraded = jira_watermark.prepare(self.base, 'TAP-123', observed)
+        self.assertEqual(legacy['version'], upgraded['version'])
+        self.assertEqual(legacy['at'], upgraded['expected_fields']['customfield_10366'])
+        self.assertIn('legacy_watermark', jira_watermark.load_state(self.base, self.task))
+
+    def test_terminal_readback_confirms_only_original_four_fields(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        self.task.update(stage='completed', outcome='completed')
+        save_station_task(self.base, self.task)
+        with self.assertRaises(ValueError):
+            jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        result = jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))
+        self.assertEqual('verified', result['outcome'])
 
 if __name__ == "__main__":
     unittest.main()

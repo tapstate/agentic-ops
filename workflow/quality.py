@@ -806,6 +806,23 @@ def apply(base, issue, run_id, revision, command):
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
+            if command["payload"]["id"] == "takeover-" + digest([task["issue_key"], task["run_id"]])[:20]:
+                from workflow import jira_watermark, external_sync
+                if not task.get("source_prepared") or not jira_watermark.summary_ready(base, task):
+                    raise ValueError("接管摘要发送前必须回读核验四项接管标记及源码基线")
+                marker = jira_watermark.status(base, task)
+                snapshot = command["payload"].get("takeover_snapshot", {})
+                fields, issue_type = jira_watermark.issue_from(snapshot, issue)
+                if (not snapshot.get("source_ref") or issue_type != marker["issue_type_id"]
+                        or not jira_watermark.markers_equal(jira_watermark.marker_values(fields, marker),
+                            marker["expected_fields"], marker["marker_fields"]["begin_at"])
+                        or snapshot.get("current_user", {}).get("accountId") != marker["actor"]["accountId"]):
+                    raise ValueError("接管摘要写前回读标记或 Jira 登录用户已变化，先核实归属")
+                body = replay(state)["publications"][command["payload"]["id"]]["body"]
+                if body != external_sync.takeover_body(task, command["payload"]["id"], jira_watermark.status(base, task)):
+                    raise ValueError("接管摘要与已核验的标记、登录用户或仓库分支不一致；重新生成并确认")
+            elif "takeover_snapshot" in command["payload"]:
+                raise ValueError("takeover_snapshot 仅用于当前 run 的接管摘要")
         model = replay(state)
         action, payload = command['action'], command['payload']
         bound_checkpoint = payload.get('checkpoint') if action in ('checkpoint', 'draft') else None

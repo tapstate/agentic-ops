@@ -124,6 +124,9 @@ def warnings(base, task, report=None):
                        "recovery": "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
 
     from workflow import project_rules
+    watermark = jira_watermark.status(base, task)
+    if watermark.get("outcome") == "verified" and watermark.get("marker_version") != 2 and jira_watermark.config(base).get("schema_version") == 2:
+        add("agenticops_version", "deferred", "旧版水印已回读；prepare 补齐四项标记，不覆盖原在途意图")
     attempts = jira_status.load_state(base, task)["attempts"]
     status_rules = project_rules.load_profile(station=base).get("jira", {}).get("status_sync", {})
     if task["task_class"] in status_rules.get("task_classes", []):
@@ -149,29 +152,21 @@ def warnings(base, task, report=None):
     return result
 
 
-def takeover_body(task, publication_id):
-    """只从已保存的接管事实生成摘要，不推断方案、修改仓或验收结果。"""
-    fields = task.get("facts", {}).get("jira_snapshot", {}).get("issue", {}).get("fields", {})
-    lines = ["%s：已接管" % task["issue_key"]]
-    if fields.get("summary"):
-        lines.append("任务：%s" % fields["summary"])
-    assignee = fields.get("assignee") or {}
-    if assignee.get("displayName"):
-        lines.append("接管时 Jira 负责人：%s" % assignee["displayName"])
-    lines.extend(["运行：%s" % task["run_id"], "任务类型：%s" % task["task_class"]])
-    baseline = task.get("engineering_baseline", {})
-    if baseline.get("profile", {}).get("id"):
-        lines.append("工程 Profile：%s" % baseline["profile"]["id"])
-    version = baseline.get("resolution_input", {}).get("version")
-    if version:
-        lines.append("接管版本／主仓分支：%s" % version)
-    repositories = baseline.get("repositories", {})
-    lines.append("源码准备：已完成")
-    if repositories:
-        lines.append("冻结仓库数：%s" % len(repositories))
-    lines.extend(["接管仅证明本地准备完成，不代表 Q1、实施方案或验收已通过。",
-                  "记录：%s" % publication_id])
-    return "\n\n".join(lines)
+def takeover_body(task, publication_id, watermark):
+    """从接管标记及冻结源码基线生成人读摘要；内部发布 ID 不进入正文。"""
+    lines = ["版本：AgenticOps %s" % watermark["version"],
+             "操作人：%s" % watermark["actor"]["displayName"],
+             "运行编号：%s" % task["run_id"], "任务类型：%s" % task["task_class"], "", "仓库分支列表："]
+    repositories = task.get("engineering_baseline", {}).get("repositories", {})
+    for name, repository in sorted(repositories.items()):
+        kind, ref = repository.get("ref_kind"), repository.get("ref_name")
+        if kind == "branch" and ref:
+            lines.append("- %s：%s" % (name, ref))
+        elif kind in ("tag", "sha", "commit"):
+            lines.append("- %s：无分支（%s：%s）" % (name, "Tag" if kind == "tag" else "SHA", ref or repository.get("commit_sha", "")))
+        else:
+            raise ValueError("冻结仓库缺少已核验来源分支或 Tag/SHA：%s" % name)
+    return "\n".join(lines)
 
 
 def actions(base, task, report=None):
@@ -207,6 +202,7 @@ def actions(base, task, report=None):
         result.append(row)
 
     publications = report.get("publications", {})
+    intake_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
     covered = set()
     for key, record in publications.items():
         if record["status"] == "verified":
@@ -218,15 +214,23 @@ def actions(base, task, report=None):
             covered.add(cp)
         add(key, "comment", "unknown" if unknown else "deferred", record=record,
             checkpoint=cp, refresh_required=not record.get("snapshot_current", False))
+        if key == intake_id and not unknown:
+            if not jira_watermark.summary_ready(base, task):
+                result[-1].update(next_action="verify_takeover_markers", reason="先回读四项接管标记，再恢复摘要")
+                continue
+            body = takeover_body(task, intake_id, jira_watermark.status(base, task))
+            if body != record["body"]:
+                result[-1].update(body=body, next_action="refresh_and_confirm", refresh_required=True)
+                continue
         if not unknown and (not record.get("snapshot_current", False) or record["status"] == "deferred"):
             result[-1]["next_action"] = "refresh_and_confirm" if active else "manual_handoff"
             if cp and report.get("checkpoints", {}).get(cp, {}).get("reviewed"):
                 result[-1]["body"] = report["checkpoints"][cp]["publication_body"]
     if enabled and rules.get("publication_mode") == "checkpoint":
-        intake_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
         if intake_id not in publications:
-            if task.get("source_prepared"):
-                add(intake_id, "takeover_comment", "not_attempted", body=takeover_body(task, intake_id))
+            if task.get("source_prepared") and jira_watermark.summary_ready(base, task):
+                add(intake_id, "takeover_comment", "not_attempted",
+                    body=takeover_body(task, intake_id, jira_watermark.status(base, task)))
         for cp, view in report.get("checkpoints", {}).items():
             if view["reviewed"] and not view["published"] and cp not in covered:
                 key = cp + "-" + quality.digest([task["run_id"], view["publication_body"]])[:20]
@@ -260,7 +264,7 @@ def actions(base, task, report=None):
             if record["outcome"] == "missing":
                 result[-1]["status"] = "not_attempted"
             result[-1]["original_target_observed"] = bool(record.get("readback_ref") and record.get("readback_value") == record.get("version"))
-            result[-1]["current_version_sync"] = "需按当前产品版本另行核验；本回执不改变原目标"
+            result[-1]["current_version_sync"] = "同一 run 保留原接管版本与时间；回执不改变原目标"
     # 评论来源及正文仍在 prepare_write 检查；查询不把本地绝对路径加入对外正文。
     return {"sync_actions": result, "warnings": pending, "sync_diagnostics": [],
             "sync_boundary": "只读待办不是写入成功；按授权原生执行并回读，未知结果不重发"}

@@ -150,7 +150,15 @@ def validate_takeover_watermark(profile):
         "schema_version", "required", "logical_key", "field_id", "field_name",
         "field_type", "issue_type_ids", "write_mode",
     }
-    if set(value) != required or value.get("schema_version") != 1:
+    if value.get("schema_version") == 2:
+        required.add("marker_fields")
+        markers = value.get("marker_fields")
+        if (not isinstance(markers, dict) or set(markers) != {"begin_at", "station", "run_id"}
+                or any(not isinstance(v, str) or not re.fullmatch(r"customfield_[1-9][0-9]*", v)
+                       for v in markers.values())
+                or len(set(markers.values()) | {value.get("field_id")}) != 4):
+            raise ValueError("jira.takeover_watermark.marker_fields 必须声明三个不重复的字段 ID")
+    if set(value) != required or value.get("schema_version") not in (1, 2):
         raise ValueError("jira.takeover_watermark 结构无效")
     if value.get("required") is not True:
         raise ValueError("jira.takeover_watermark 必须 required=true")

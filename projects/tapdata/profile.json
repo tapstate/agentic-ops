@@ -28,14 +28,15 @@
       "verification_method": "customfield_10049"
     },
     "takeover_watermark": {
-      "schema_version": 1,
+      "schema_version": 2,
       "required": true,
       "logical_key": "agenticops_version",
       "field_id": "customfield_10421",
       "field_name": "AgenticOps Version",
       "field_type": "string",
       "issue_type_ids": ["10010", "10011", "10008"],
-      "write_mode": "overwrite"
+      "write_mode": "overwrite",
+      "marker_fields": {"begin_at": "customfield_10366", "station": "customfield_10462", "run_id": "customfield_10365"}
     },
     "status_sync": {
       "schema_version": 1,

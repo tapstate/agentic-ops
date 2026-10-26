@@ -3410,32 +3410,46 @@ class SyncRecoveryTests(unittest.TestCase):
         self.task['facts']['jira_snapshot'] = {'issue': {'fields': {
             'summary': '任务级资源监控', 'assignee': {'displayName': '测试研发'}}}}
         self.save_task()
+        from workflow import jira_watermark
+        with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'):
+            snapshot = {'source_ref': 'fixture:jira/read', 'current_user': {'accountId': 'login-user',
+                'displayName': '当前登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'},
+                'issue': {'key': self.task['issue_key'], 'fields': {'issuetype': {'id': '10011'},
+                    'customfield_10421': None, 'customfield_10366': None, 'customfield_10462': None, 'customfield_10365': None}}}
+            marker = jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
+        self.assertFalse(any(item['kind'] == 'takeover_comment' for item in external_sync.actions(self.base, self.task)['sync_actions']))
+        snapshot['issue']['fields'].update(marker['expected_fields'])
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
+        self.task = task_store.read_task(self.base)
         report = self.view()
         actions = external_sync.actions(self.base, self.task, report)['sync_actions']
         row = next(item for item in actions if item['kind'] == 'takeover_comment')
         self.assertEqual('not_attempted', row['status'])
-        for text in ('任务级资源监控', '测试研发', 'test-fixture',
-                     self.task['run_id'], '源码准备：已完成', '不代表 Q1'):
+        for text in ('版本：AgenticOps v1.fixture', '操作人：当前登录研发', '任务类型：defect_fix',
+                     self.task['run_id'], '仓库分支列表：', 'tapdata/tapdata：develop'):
             self.assertIn(text, row['body'])
-        self.assertNotIn(str(self.base), row['body'])
-        prepared = copy.deepcopy(self.task)
-        prepared['engineering_baseline']['profile']['id'] = 'full-application'
-        prepared['engineering_baseline']['resolution_input']['version'] = 'develop'
-        summary = external_sync.takeover_body(prepared, row['id'])
-        self.assertIn('工程 Profile：full-application', summary)
-        self.assertIn('接管版本／主仓分支：develop', summary)
+        for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', str(self.base)):
+            self.assertNotIn(text, row['body'])
         self.assertEqual(report, self.view())
         self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])
         record = self.apply('draft', {'id': row['id'], 'body': row['body']})['publications'][row['id']]
         self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
-        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest']})['publications'][row['id']]
+        stale = copy.deepcopy(snapshot)
+        stale['issue']['fields']['customfield_10462'] = 'b' * 32
+        with self.assertRaisesRegex(ValueError, '写前回读'):
+            self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
+        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
         self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
         pending = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
         self.assertEqual('readback', pending['next_action'])
         self.assertEqual(row['body'], pending['record']['body'])
+        with self.assertRaisesRegex(ValueError, '作者'):
+            self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
+                'issue_key': self.task['issue_key'], 'comment_id': 'wrong-author', 'body': row['body'],
+                'source_ref': 'fixture:wrong-author', 'author_account_id': 'assignee-user'})
         self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
             'issue_key': self.task['issue_key'], 'comment_id': 'takeover-comment', 'body': row['body'],
-            'source_ref': 'fixture:jira/takeover-comment'})
+            'source_ref': 'fixture:jira/takeover-comment', 'author_account_id': 'login-user'})
         self.assertFalse(any(item['id'] == row['id'] for item in external_sync.actions(self.base, self.task)['sync_actions']))
 
     def test_takeover_summary_is_not_emitted_before_source_prepared(self):
