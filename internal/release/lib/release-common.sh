@@ -653,7 +653,7 @@ release_verify_story_gate() {
     fi
     release_fail "release_story_gate_trust_root_changed" "story_gate" \
       "固定发布范围修改了 Hook、故事门禁或发布信任根，禁止自动发布" \
-      "请通过受保护 main 的独立人工审查 PR 合入该信任根变更；合入后由新的 origin/main 基线验证后续发布"
+      "请通过受保护 main 的人工审查 PR 合入该信任根变更；合入后由新的 origin/main 基线验证后续发布"
     return 1
   fi
   if [ "$gate_status" -ne 0 ]; then
@@ -676,7 +676,7 @@ release_submit_review() {
   release_verify_story_gate "$repo_root" origin/main "$head" true "" || return 1
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1
-  release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交独立审查 PR" || return 1
+  release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交人工审查 PR" || return 1
   release_push_fixed_branch "$repo_root" "$branch" "$head" || return 1
   release_find_or_create_pr "$repository" "$branch" main "$head" "$version" release "${RELEASE_JIRA_ID:-}" "$protection_mode" || return 1
   release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$head" || return 1
@@ -756,15 +756,14 @@ release_read_remote_tag() {
   [ -z "$direct" ] || [ -z "$peeled" ] || RELEASE_REMOTE_TAG_ANNOTATED="true"
 }
 
-# 回读当前 Head 的独立批准，不以 PR 已合并或正文声明代替审查事实。
-release_check_independent_approval() {
-  local pr="$1" head="$2" author approved
-  author="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr" --repo tapstate/agentic-ops --json author --jq '.author.login' 2>/dev/null)" || return 1
-  [ -n "$author" ] || return 1
-  approved="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
-    --jq "add | map(select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | (all(.[]; .state != \"CHANGES_REQUESTED\")) and any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\" and .user.type == \"User\")" 2>/dev/null)" || return 1
-  [ "$approved" = true ] || {
-    release_fail release_independent_approval_required review "缺少当前候选 Head 的独立人工批准或仍有要求修改的审查" "请在 GitHub 核实由 PR 作者以外的人员批准当前提交；不得用已合并状态代替审查"
+# 单人维护不要求另一账号批准；人工决定仍须绑定固定 Head，由调用 Agent 核实。
+# 这里仅复查远端未解决的审查异议，不将无异议或已合并当成人工批准。
+release_check_review_objections() {
+  local pr="$1" clear
+  clear="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
+    --jq 'add | map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | all(.[]; .state != "CHANGES_REQUESTED")' 2>/dev/null)" || return 1
+  [ "$clear" = true ] || {
+    release_fail release_review_changes_requested review "仍有未解决的要求修改审查" "请先处理并回读审查异议；无异议不代替用户对固定提交的人工确认与合并授权"
     return 1
   }
 }
@@ -930,7 +929,7 @@ release_recover_merged_candidate() {
   if [ -n "$trust_changes" ]; then delivery_mode=hard; soft_option=""; fi
   protection_mode="$delivery_mode"
   workflow_check_delivery tapstate/agentic-ops "$delivery_mode" || return 1
-  if [ "$delivery_mode" = hard ]; then release_check_independent_approval "$pr_number" "$candidate" || return 1; fi
+  if [ "$delivery_mode" = hard ]; then release_check_review_objections "$pr_number" || return 1; fi
   local_tag="$(git -C "$repo_root" rev-parse --verify "$version^{}" 2>/dev/null || true)"
   material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
   digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
@@ -1335,7 +1334,7 @@ waiting = value.get('status') == 'waiting_for_manual_merge'
 pending = value.get('develop_sync_status') not in (None, 'synced')
 remaining = ['按 main/develop 实际引用完成同步，不覆盖并行开发提交'] if pending else []
 if waiting:
-    remaining = ['独立人工审查并以 Merge commit 合入 PR，然后执行继续命令']
+    remaining = ['人工审查并以 Merge commit 合入 PR，然后执行继续命令']
 value.update(schema_version='step-result/v2', retry_safe=True,
              result=dict(status='blocked' if waiting else 'succeeded',
                          summary='等待独立人工合并' if waiting else ('发布已交付，分支同步待完成' if pending else '发布已完成'),

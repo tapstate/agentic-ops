@@ -191,7 +191,7 @@ case "$command_name" in
     fi
     release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$release_head" || exit 1
     workflow_check_delivery tapstate/agentic-ops "$protection_mode" || exit 1
-    if [ "$protection_mode" = hard ]; then release_check_independent_approval "$RELEASE_PR_NUMBER" "$release_head" || exit 1; fi
+    if [ "$protection_mode" = hard ]; then release_check_review_objections "$RELEASE_PR_NUMBER" || exit 1; fi
     release_finish "$repo_root" "$version" "$release_head" "$RELEASE_MERGE_COMMIT" "$protection_mode" release_publish || exit 1
     ;;
   submit-for-review)
@@ -210,13 +210,13 @@ case "$command_name" in
       exit 1
     fi
     if [ "$candidate_in_main_status" -eq 0 ]; then
-      release_fail "release_candidate_already_in_main" "state_inspection" "固定发布候选已经包含在 origin/main，不能再创建独立审查 PR" "请运行 release.sh inspect，并按输出使用 recover"
+      release_fail "release_candidate_already_in_main" "state_inspection" "固定发布候选已经包含在 origin/main，不能再创建人工审查 PR" "请运行 release.sh inspect，并按输出使用 recover"
       exit 1
     fi
     release_require_version_tag_available "$repo_root" "$version" || exit 1
     release_preflight_candidate "$repo_root" "$release_head" || exit 1
     release_submit_review "$repo_root" tapstate/agentic-ops "$version" "$release_source_branch" "$release_head" "$protection_mode" "$confirm_release" || exit 1
-    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_submit_for_review","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布候选已提交独立审查 PR，尚未合并或创建 Tag","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"reviewer","action":"review_and_merge_release_pr","question":"请先完成独立审查并核验 main 保护及必需检查；另行授权 Merge commit 合并后运行 inspect，当前未核验交付条件","choices":[{"id":"review","label":"审查并合并 PR","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","release_branch":"%s","protection_mode":"%s","delivery_checks":"pending"}\n' \
+    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_submit_for_review","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布候选已提交人工审查 PR，尚未合并或创建 Tag","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"reviewer","action":"review_and_merge_release_pr","question":"请先完成人工审查并核验 main 保护及必需检查；另行授权 Merge commit 合并后运行 inspect，当前未核验交付条件","choices":[{"id":"review","label":"审查并合并 PR","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","release_branch":"%s","protection_mode":"%s","delivery_checks":"pending"}\n' \
       "$version" "$release_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$release_source_branch" "$protection_mode"
     ;;
   verify)
