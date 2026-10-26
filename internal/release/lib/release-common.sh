@@ -759,9 +759,25 @@ release_read_remote_tag() {
 # 单人维护不要求另一账号批准；人工决定仍须绑定固定 Head，由调用 Agent 核实。
 # 这里仅复查远端未解决的审查异议，不将无异议或已合并当成人工批准。
 release_check_review_objections() {
-  local pr="$1" clear
-  clear="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp \
-    --jq 'add | map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")) | group_by(.user.login) | map(sort_by(.submitted_at, .id) | last) | all(.[]; .state != "CHANGES_REQUESTED")' 2>/dev/null)" || return 1
+  local pr="$1" clear pages
+  pages="$("${AGENTIC_OPS_GH_BIN:-gh}" api "repos/tapstate/agentic-ops/pulls/$pr/reviews?per_page=100" --paginate --slurp)" || {
+    release_fail release_review_read_failed review "无法回读 PR 审查记录" "先核实 GitHub 连接与权限，再沿原 PR 重试；不推定无异议"
+    return 1
+  }
+  clear="$(printf '%s' "$pages" | python3 -c '
+import json, sys
+pages = json.load(sys.stdin)
+if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+    raise ValueError("invalid review pages")
+latest = {}
+for row in sorted((row for page in pages for row in page), key=lambda row: (row["submitted_at"], row["id"])):
+    if row["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+        latest[row["user"]["login"]] = row["state"]
+print("true" if all(state != "CHANGES_REQUESTED" for state in latest.values()) else "false")
+')" || {
+    release_fail release_review_read_failed review "PR 审查记录无法解析" "保留原记录并核实返回格式，不推定无异议"
+    return 1
+  }
   [ "$clear" = true ] || {
     release_fail release_review_changes_requested review "仍有未解决的要求修改审查" "请先处理并回读审查异议；无异议不代替用户对固定提交的人工确认与合并授权"
     return 1

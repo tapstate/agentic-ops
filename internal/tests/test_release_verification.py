@@ -706,6 +706,9 @@ elif args[0]=='api':
  else: data={{'default_branch':'main','allow_merge_commit':True,'allow_auto_merge':False}}
 else: sys.exit(90)
 if any(x in args for x in ['PATCH','PUT','POST']): sys.exit(91)
+if '--slurp' in args and '--jq' in args: sys.exit(92)
+if '--jq' not in args:
+ print(json.dumps(data));sys.exit(0)
 sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(data),text=True).returncode)
 ''')
         gh.chmod(0o700)
@@ -727,6 +730,8 @@ sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(
         self.governance_gh()
         call = 'release_check_review_objections 38'
         review = json.loads(self.reviews.read_text())[0][0]
+        self.reviews.write_text('{}')
+        self.assertIn('release_review_read_failed', self.shell(call, check=False).stderr)
         self.reviews.write_text('[[]]')
         self.shell(call)  # 无异议只是机器检查，不是人工批准。
         self.reviews.write_text(json.dumps([[dict(review, user=dict(login='author', type='User'))]]))
