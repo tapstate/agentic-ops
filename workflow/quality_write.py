@@ -169,6 +169,8 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
                     raise ValueError("相同正文已回读确认，不重复发送")
             record["operation_id"] = quality.digest([ctx["issue_key"], ctx["run_id"], key, record["digest"]])
             record["status"] = "intent"
+            if p.get("takeover_snapshot"):
+                record["author_account_id"] = p["takeover_snapshot"]["current_user"]["accountId"]
     elif action in ("receipt", "readback"):
         if p["operation_id"] != record.get("operation_id"):
             raise ValueError("外部操作编号不匹配")
@@ -191,6 +193,8 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
         else:
             if any(p[k] != record[k] for k in ("site", "issue_key")) or not body_matches(record["body"], p["body"], p.get("body_representation", "exact-text")):
                 raise ValueError("回读目标或正文不匹配，保持待核对，不得重发")
+            if record.get("author_account_id") and p.get("author_account_id") != record["author_account_id"]:
+                raise ValueError("回读评论作者与原 Jira 登录用户不匹配")
             if record.get("comment_id") and p["comment_id"] != record["comment_id"]:
                 raise ValueError("回读评论 ID 与回执不匹配")
             record.update({"status": "verified", "comment_id": p["comment_id"], "source_ref": p["source_ref"]})

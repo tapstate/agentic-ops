@@ -114,7 +114,7 @@ Git 克隆只包含该分支已提交内容，不包含当前未提交修改；�
 - 本仓库审查、验收与发布工具：`internal/`，不进入产品运行层
 - 产品维护协作指引：`skills/`（不含 `shared/`）；它们只供维护 Agent 使用，不安装或接线到业务工位。共享需求设计入口为 `skills/shared/ao-requirement/`，维护根和项目工位共用方法，按目标项目读取约束。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
 
-新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest v3、必要的指引模板和测试（不提供通用工具 Hook）；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
+新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest v3、必要的指引模板和测试（不提供通用工具 Hook）；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；schema 2 增加 Begin At、Station、Run ID 的 `marker_fields` ID 映射，实际读写不使用显示名，字段类型及恢复顺序见[四项接管标记](usage/quality-checkpoints.md#四项接管标记)；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
 `python3 workflow/project_rules.py` 的 `render`、`branch` 和 `workflow` 子命令必须通过 `--project <project>` 显式指定项目。无工位的 Python 调用同样提供 `project`，不再默认 TapData；工位调用使用 `station` 的现有绑定。缺少项目时停止读取或生成，旧脚本应补齐参数，不能用默认业务项目代替缺失输入。
 

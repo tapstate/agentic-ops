@@ -604,6 +604,7 @@
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
             },
+            "takeover_snapshot": {"type": "object"},
             "digest": {
               "type": "string",
               "minLength": 1,
@@ -715,6 +716,7 @@
               "minLength": 1,
               "pattern": "\\S"
             },
+            "author_account_id": {"type": "string", "minLength": 1},
             "body_representation": {
               "type": "string",
               "enum": [

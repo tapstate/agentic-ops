@@ -2,11 +2,34 @@
 
 ## 接管摘要发布与回读
 
-接管准备成功后，Agent 在本轮主动处理 `takeover_comment`，不等待 Q1 或方案确认。先保存 Jira 初始快照，从 `external_sync.py status` 读取当前 run 的稳定 id 与正文；基本信息来自已核验的任务号、任务摘要、接管时 Jira 负责人、任务类型、运行编号、工程 Profile、接管版本／主仓分支和源码准备结果，不填写未确认的修改仓、工作分支或验收结论。接管摘要不代表 Q1 或实施方案已确认。
+接管准备成功后，先按下述四项标记流程写入并回读，再从 `external_sync.py status` 获取 `takeover_comment`。摘要只包含 AgenticOps 接管版本、当前 Agent 所用 Jira 连接的登录用户显示名、当前 run_id、项目 Workflow 的 task_class，以及冻结工程基线中的全部仓库及来源分支列表。操作人保存 accountId 供核对，不使用 Jira Assignee、系统登录名或 Agent 应用用户名；Jira Cloud 返回的 displayName 用于显示。Tag/SHA 基线明确显示“无分支（Tag／SHA：…）”，不把临时检出分支或后续工作分支当作来源分支。内部发布编号不进入评论正文。
 
-复用接管及对应 Jira 回写的有效授权，按同一 id 执行 `draft`（使用待办正文）、`confirm`（引用真实已有授权）、`prepare_write`，再由 Agent 原生调用 Jira 评论接口。取得评论 ID 后记 `receipt result=created`，重新读取该 Jira 评论的目标、ID 和完整正文，经 `readback` 核对匹配才报告同步成功；仅返回 `sync_actions` 或接口创建成功均不等于回读完成。缺少有效写入授权时只询问该缺项，不重复确认已授权的接管或正文事实。
+### 四项接管标记
 
-已验证评论不重发；已有发送意图、超时或结果不明时保留原 id、正文和操作记录，先回读定位原评论，不创建新 id 重发。已知未写入可按既有 `receipt result=deferred` 记录原因；未知结果记 `unknown`。评论接口、回执保存或回读异常时，如实说明接管已成功、同步失败点与待办，继续不依赖同步结果的分析和研发，不回滚或重跑接管，不伪造回执，也不增加阶段推进门禁。后续通过同一同步待办恢复，回执不能保存时保留远端评论 ID 与来源供核对。
+TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写和校验只使用 ID，不依赖中英文标题。字段默认英文，中文标题是同一字段的 zh_CN 翻译，不能为不同语言创建重复字段。
+
+| 默认标题 | 中文标题 | 字段 ID | 值 |
+|---|---|---|---|
+| AgenticOps Version | AgenticOps 版本 | customfield_10421 | 本次接管的产品版本 |
+| AgenticOps Begin At | AgenticOps 接管时间 | customfield_10366 | 首次记录本次接管的带时区时间 |
+| AgenticOps Station | AgenticOps 工位编号 | customfield_10462 | 工位 station_id |
+| AgenticOps Run ID | AgenticOps 运行编号 | customfield_10365 | 当前 run_id |
+
+配置缺失时先查全站活动字段及类似语义、类型和上下文，复用匹配字段；确认无对应字段才创建，并检查项目字段方案、编辑屏幕和中文翻译。本次复用原 `Agentic Run ID`、`Agentic Takeover Time`，保留 ID 和历史值。字段不在某个工作项回读结果中，不等于全站不存在。
+
+先完成既有[接管协调](../architecture/single-task-station.md#jira-任务级接管协调与授权)，再读取工作项四个字段及 `issuetype.id`，明确返回 null 与未返回字段的区别。`jira_watermark.py prepare` 的输入包含 `source_ref`、原生 `issue`，以及从同一 Jira 连接读取的 `current_user`（accountId、displayName、active=true、source_ref）。已有不同工位/run 或不完整标记时，先核实原 run 归档、清理或交接，将依据放入 `previous_takeover.evidence_ref`，并以 `previous_takeover.observed_fields` 绑定本次读到的四项原值；标记本身不证明原执行者停写，也不替代现有协调要求。
+
+`prepare` 固定四项值并返回一次 issue edit 的 `native_request.fields`。原生工具写入四项后重新读四项，由 `complete --outcome unknown` 核验一致才置为 verified；日期时间按同一时刻比较。当前连接器没有同时写评论和字段的操作，因此执行两次有依赖的请求：先整体写标记并回读，后写摘要。无全局并发锁，沿用不同进程不会在一分钟内同时接管的使用假设。
+
+同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 `complete` 回读，确认后 `prepare` 保留旧记录并补齐其余字段，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败只暂停依赖它的摘要，无依赖研发继续。
+
+### 摘要发送与防重
+
+复用接管及对应 Jira 回写的有效授权，按待办稳定 id 执行 `draft`、`confirm`、`prepare_write`。接管摘要的 prepare_write 必须携带新读取的 `takeover_snapshot`（source_ref、issue 及 current_user.accountId）；程序核对四项标记和登录身份仍与原意图一致，再允许生成评论发送意图。标记已被其它工位/run 改写时，不发送过期摘要。已有的接管协调评论保持原合同，这里的顺序针对人读接管摘要。
+
+取得评论 ID 后记 `receipt result=created`，回读目标、ID、完整正文和作者；`readback` 的 `author_account_id` 必须匹配原 Jira 登录用户。已验证评论不重发；发送意图、超时或结果不明时保留原 id、正文和 operation_id，查全相关评论并唯一定位原评论，不重新生成正文或新 id。无法唯一定位时保留未知，不能把“暂时没查到”当作未发送；不承诺跨服务严格恰好一次。旧版已发送评论仍按其原正文和回执回读，不因升级补发新版摘要。
+
+已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
 
 ## 同步待办与有限回执恢复
 
@@ -247,7 +270,7 @@ flowchart TD
 
 初始化后先用 `task.py snapshot --issue-key <issue> --expected-run-id <run> --input <snapshot.json> --dir <station>` 保存已读的 issue/source_ref。该入口同 run 幂等，独立于水印、Jira 权限和产品版本查询；后续本地普通事实由 record 维护，在相关检查点确认。
 
-接管时复用一次 Jira 初始快照，`jira_watermark.py prepare` 保存本地初始事实和产品版本，再准备原生回写。失败或未知结果记录为同步待办，允许推进 task_intake；未知写入先回读，同 run 恢复不重复导入或覆盖初始事实。
+接管标记按[四项接管标记](#四项接管标记)处理；字段回读成功后才发送摘要。失败或未知结果不阻止无依赖的 task_intake，本地初始事实不随恢复覆盖。
 
 缺陷进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
 
