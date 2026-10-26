@@ -190,9 +190,7 @@ workflow_check_main_ruleset() {
       (any(.rules[]; .type == "deletion")) and (any(.rules[]; .type == "non_fast_forward")) and
       (any(.rules[]; .type == "pull_request" and
         (.parameters.allowed_merge_methods == ["merge"]) and
-        (.parameters.required_approving_review_count >= 1) and
         .parameters.dismiss_stale_reviews_on_push == true and
-        .parameters.require_last_push_approval == true and
         .parameters.required_review_thread_resolution == true))' 2>/dev/null)" || return 1
     [ "$status" != true ] || return 0
   done
@@ -232,8 +230,8 @@ workflow_write_ruleset_payload() {
         "allowed_merge_methods": ["merge"],
         "dismiss_stale_reviews_on_push": true,
         "require_code_owner_review": false,
-        "require_last_push_approval": true,
-        "required_approving_review_count": 1,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
         "required_review_thread_resolution": true
       }
     }
@@ -390,7 +388,7 @@ workflow_check_delivery() {
   }
   if [ "$mode" = hard ]; then
     workflow_check_main_ruleset "$repository" || {
-      workflow_fail release_main_protection_required "远端交付缺少要求的 main 保护规则" "请独立审查并配置保护后重试；不得以 soft 绕过信任根审查"
+      workflow_fail release_main_protection_required "远端交付缺少要求的 main 保护规则" "请按已授权规范配置保护后重试；不得以 soft 绕过信任根审查"
       return 1
     }
   fi

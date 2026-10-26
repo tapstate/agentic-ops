@@ -387,8 +387,8 @@ os.execv(path,[path]+args)
         self.ruleset.write_text(json.dumps(rules))
         self.assertIn('release_main_protection_required', self.hotfix_call().stderr)
         self.ruleset.write_text(good_rules)
-        self.reviews.write_text('[[]]')
-        self.assertIn('release_independent_approval_required', self.hotfix_call().stderr)
+        self.reviews.write_text(json.dumps([[dict(json.loads(good_reviews)[0][0], state='CHANGES_REQUESTED')]]))
+        self.assertIn('release_review_changes_requested', self.hotfix_call().stderr)
         self.assertNotEqual(commit, self.git('rev-parse', 'develop', root=bare))
         self.reviews.write_text(good_reviews)
         second = self.hotfix_call()
@@ -706,6 +706,9 @@ elif args[0]=='api':
  else: data={{'default_branch':'main','allow_merge_commit':True,'allow_auto_merge':False}}
 else: sys.exit(90)
 if any(x in args for x in ['PATCH','PUT','POST']): sys.exit(91)
+if '--slurp' in args and '--jq' in args: sys.exit(92)
+if '--jq' not in args:
+ print(json.dumps(data));sys.exit(0)
 sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(data),text=True).returncode)
 ''')
         gh.chmod(0o700)
@@ -723,24 +726,40 @@ sys.exit(subprocess.run(['jq','-r',args[args.index('--jq')+1]],input=json.dumps(
             result = self.shell('workflow_check_delivery tapstate/agentic-ops hard', check=False)
             self.assertIn('release_main_protection_required', result.stderr)
 
-    def test_independent_approval_requires_current_head_other_human_and_latest_decision(self):
+    def test_single_maintainer_checks_objections_without_requiring_other_approver(self):
         self.governance_gh()
-        call = f'release_check_independent_approval 38 {self.head}'
-        self.shell(call)
+        call = 'release_check_review_objections 38'
         review = json.loads(self.reviews.read_text())[0][0]
-        for change in (dict(commit_id=self.base), dict(user=dict(login='author', type='User')),
-                       dict(user=dict(login='bot', type='Bot')), dict(state='DISMISSED')):
-            self.reviews.write_text(json.dumps([[dict(review, **change)]]))
-            self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
-        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, user=dict(login='second', type='User'), state='CHANGES_REQUESTED')]]))
-        self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
-        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED')]]))
-        self.assertIn('release_independent_approval_required', self.shell(call, check=False).stderr)
-        self.reviews.write_text(json.dumps([[review], [dict(review, id=2, state='CHANGES_REQUESTED'), dict(review, id=3), dict(review, id=4, state='COMMENTED')]]))
+        self.reviews.write_text('{}')
+        self.assertIn('release_review_read_failed', self.shell(call, check=False).stderr)
+        self.reviews.write_text('[[]]')
+        self.shell(call)  # 无异议只是机器检查，不是人工批准。
+        self.reviews.write_text(json.dumps([[dict(review, user=dict(login='author', type='User'))]]))
         self.shell(call)
+        change = dict(review, id=2, state='CHANGES_REQUESTED')
+        self.reviews.write_text(json.dumps([[review], [change, dict(review, id=3, state='COMMENTED')]]))
+        self.assertIn('release_review_changes_requested', self.shell(call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[review], [change, dict(review, id=3, state='DISMISSED')]]))
+        self.shell(call)
+        self.reviews.write_text(json.dumps([[review], [dict(change, user=dict(login='second', type='User'))]]))
+        self.assertIn('release_review_changes_requested', self.shell(call, check=False).stderr)
+
+    def test_single_maintainer_ruleset_keeps_pr_and_safety_rules(self):
+        self.governance_gh()
+        self.shell('workflow_write_ruleset_payload ' + shlex.quote(str(self.ruleset)))
+        value = json.loads(self.ruleset.read_text())
+        value['id'] = 1
+        self.ruleset.write_text(json.dumps(value))
+        self.shell('workflow_check_delivery tapstate/agentic-ops hard')
+        rule = next(row for row in value['rules'] if row['type'] == 'pull_request')
+        self.assertEqual(0, rule['parameters']['required_approving_review_count'])
+        self.assertFalse(rule['parameters']['require_last_push_approval'])
+        rule['parameters']['required_review_thread_resolution'] = False
+        self.ruleset.write_text(json.dumps(value))
+        self.assertIn('release_main_protection_required', self.shell('workflow_check_delivery tapstate/agentic-ops hard', check=False).stderr)
 
 
-    def test_hard_recovery_checks_protection_and_approval_before_tag_without_auto_merge(self):
+    def test_hard_recovery_checks_protection_and_objections_before_tag_without_auto_merge(self):
         self.write('.githooks/pre-commit', '# trust-root candidate\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'trust-root')
@@ -771,8 +790,8 @@ os.execv(path,[path]+args)
         self.assertIn('release_main_protection_required', self.shell(setup + call.replace('hard', 'soft'), check=False).stderr)
         self.ruleset.write_text(good_rules)
         good_reviews = self.reviews.read_text()
-        self.reviews.write_text('[[]]')
-        self.assertIn('release_independent_approval_required', self.shell(setup + call, check=False).stderr)
+        self.reviews.write_text(json.dumps([[dict(json.loads(good_reviews)[0][0], state='CHANGES_REQUESTED')]]))
+        self.assertIn('release_review_changes_requested', self.shell(setup + call, check=False).stderr)
         self.assertEqual('', self.git('tag', root=bare))
         self.reviews.write_text(good_reviews)
         plan = self.shell(setup + call, check=False)

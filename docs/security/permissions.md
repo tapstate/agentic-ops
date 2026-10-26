@@ -39,13 +39,13 @@ Git SSH 是 Git 传输的替代凭据方式，不是 AgenticOps 的任务授权�
 
 ### 3. 服务器侧强制（不可绕过的硬门禁）
 
-- **Rulesets / 分支保护**（`main`、`develop`、`release/*`）：
+- **Rulesets / 分支保护**：本仓库 `main` 的现役要求如下；其它分支及业务仓库按各自配置核验：
   - 禁止直接 push、禁止 force push、禁止删除
-  - 至少 1 个独立人工 review、最后 pusher 不能自批
-  - required status checks
+  - AgenticOps 单人维护审批与 main 保护以[维护指引](../maintenance-guide.md#6-发布与-hotfix)为准；人工确认固定提交，不要求另一 GitHub 账号批准
+  - 核验实际配置的 required status checks，不将本地测试冒充远端 CI
   - 无 bypass 名单（agent 的账号绝不在 bypass 里）
   - 服务端保护能力需按实际仓库配置核验；未配置时不能宣称本地检查点提供等价保护。
-- CODEOWNERS 指定关键路径必须人审。
+- 如项目配置了 CODEOWNERS，关键路径继续按其要求人审。
 
 ### 4. GitHub MCP Server（远程，免部署）
 
