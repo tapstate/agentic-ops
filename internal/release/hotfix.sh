@@ -77,7 +77,8 @@ release_hotfix_candidate() {
   release_verify_story_gate "$repo_root" origin/main "$head" true || exit 1
   release_run_full_verification "$repo_root" "$head" ensure || exit 1
   release_check_base_unchanged "$repo_root" || exit 1
-  if [ "$RELEASE_TRUST_ROOT_CHANGED" = true ] || [ -n "$pr_rows" ]; then
+  # 已配置 main 保护时，普通修复也沿现有人工 PR 路径，不尝试被保护的直接写入。
+  if [ "$RELEASE_TRUST_ROOT_CHANGED" = true ] || [ -n "$pr_rows" ] || workflow_check_main_ruleset tapstate/agentic-ops; then
     release_push_fixed_branch "$repo_root" "$branch" "$head" || exit 1
     release_find_or_create_pr tapstate/agentic-ops "$branch" main "$head" "" hotfix "$jira_id" soft || exit 1
     release_validate_pr_binding "$RELEASE_PR_URL" "$jira_id" "$head" || exit 1

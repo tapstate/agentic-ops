@@ -233,7 +233,8 @@ def before_task(root, args, startup=False):
     if status in ('check_unavailable', 'target_unknown'):
         print('[AgenticOps][更新检查] 未能确认可用更新，沿可信当前版本继续：' + packet['reason'], file=sys.stderr)
     if status == 'update_available':
-        if packet['compatible'] and stopped:
+        same_epoch = packet['original_epoch'] == packet['target_epoch']
+        if packet['compatible'] and same_epoch and stopped:
             command = [sys.executable, str(root / 'bootstrap/installation_update.py'), '--product-root', str(root),
                        '--to-ref', packet['target_ref'], '--expected-current-ref', packet['original_ref'],
                        '--automatic', '--writers-stopped', '--expected-stations', json.dumps(packet['stations'])]
@@ -243,7 +244,13 @@ def before_task(root, args, startup=False):
             _run_product(root, ['bash', str(root / 'agenticops'), 'station', 'doctor', '--station', station])
         else:
             print(json.dumps(packet, ensure_ascii=False, indent=2), file=sys.stderr)
-            raise Busy('发现更新；可用 --update-current-ref %s --update-target-ref %s 继续本次旧版接管，或退出全部未受管会话后从启动侧更新，或选择独立安装。跨 epoch 须原版退出并 purge；本次未创建 run' % (packet['original_ref'], packet['target_ref']))
+            if not packet['compatible']:
+                guidance = '旧模式目标不兼容，须由原版退出并 purge，或选择独立安装'
+            elif not same_epoch:
+                guidance = '目标支持按功能校验；先核实全部工位在途操作及停写，再显式 update --writers-stopped；正常任务保留原 run，无需 purge'
+            else:
+                guidance = '核实全部产品调用及未受管会话停写后，从启动侧更新，或选择独立安装'
+            raise Busy('发现更新；可用 --update-current-ref %s --update-target-ref %s 继续本次旧版接管。%s；本次未创建 run' % (packet['original_ref'], packet['target_ref'], guidance))
     return cleaned + forwarded, packet
 
 
