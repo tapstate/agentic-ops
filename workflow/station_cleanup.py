@@ -82,6 +82,7 @@ def validate(plan):
 def clear_state(base, operation):
     from workflow import station_clean, station_directories
     station_clean._clear_active(base, operation)
+    task_store.clear_data_backups(base)
     root = task_store.state_path(base)
     for name in ('events.jsonl', 'git-ref-cache-v2.json', 'git-ref-cache-v2.json.lock'):
         path = root / name

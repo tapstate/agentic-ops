@@ -17,7 +17,7 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 - `station-reset.schema.json`：当前整区清理计划，格式版本以 Schema 为准；未完成旧计划须由原版本核实收尾，不在线转换。历史档案保留，不作为可恢复执行合同。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
-- `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
+- `task-state.schema.json`：任务模块拥有的 current 信封、阶段、事实、仓库和恢复状态；依赖含义、来源、修补入口及备份清理见 [任务状态依赖描述](../workflow/task-data.md)，其它功能使用 task_store 接口。
 - `jira-field-readback.schema.json`：字段同步回读输入，绑定当前本地事实摘要及 Jira 来源，不修改本地有效事实。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 

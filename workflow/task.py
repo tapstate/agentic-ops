@@ -747,6 +747,19 @@ def main():
     parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    data = sub.add_parser('data', help='任务模块的依赖诊断与受控格式修补')
+    data_children = data.add_subparsers(dest='data_action', required=True)
+    for action in ('inspect', 'preview', 'apply'):
+        child = data_children.add_parser(action)
+        child.add_argument('--dir', default='.')
+        if action != 'inspect':
+            child.add_argument('--input', required=True)
+        if action == 'apply':
+            child.add_argument('--proposal-digest', required=True)
+            child.add_argument('--decision-ref', required=True)
+            child.add_argument('--writers-stopped', action='store_true')
+        child.set_defaults(func=task_store.data_command)
+
     replan = sub.add_parser("replan", help="同一 run 内修订方案并返回 design_review，保留源码与 PR")
     children = replan.add_subparsers(dest="replan_action", required=True)
     for action in ("prepare", "apply", "abort"):

@@ -36,6 +36,22 @@ class RecordTests(unittest.TestCase):
     def cleanup_request(self):
         return {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': 'discard', 'decision_ref': '用户确认清理本地成果'}
 
+    def test_task_cleanup_uses_owner_to_remove_repair_backups(self):
+        task = self.takeover()
+        document = task_store.read_current(self.ws)
+        document['schema_version'] = 2
+        task_store._write_json_atomic(task_store.current_path(self.ws), document)
+        report = task_store.inspect_data(self.ws)
+        request = {'source_digest': report['source_digest'], 'renames': {}, 'analysis_ref': '测试已核实相同字段语义'}
+        preview = task_store.preview_data_repair(self.ws, request)
+        repaired = task_store.apply_data_repair(self.ws, request, preview['proposal_digest'], '研发确认', True)
+        self.assertTrue(Path(repaired['backup']).exists())
+        result = station_cleanup.execute(self.ws, task['issue_key'], task['run_id'], task['_revision'],
+            'op-clean-repaired-task', self.cleanup_request())
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertFalse(Path(repaired['backup']).exists())
+        self.assertIsNone(task_store.read_task(self.ws))
+
     def test_archive_resumes_after_operation_saved_before_payload(self):
         from workflow import station_clean
         self.task = self.takeover()

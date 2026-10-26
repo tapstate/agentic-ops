@@ -35,6 +35,73 @@ class StationStateTests(unittest.TestCase):
                 "pending": None, "engineering_baseline": {"status": "resolving"},
                 "task_repositories": {}, "terminal_proof": None, "archive_ref": None}
 
+    def repair_fixture(self):
+        import shutil
+        shutil.copytree(ROOT / 'contracts', self.product / 'contracts')
+        manifest = json.loads((self.product / 'contracts/station-state-compatibility.json').read_text())
+        store._write_json_atomic(self.base / '.agenticops/init.json', {'station_state_epoch': manifest['station_state_epoch']})
+        task = self.task()
+        task['facts']['confirmed_plan'] = '已确认方案'
+        task['old_phase'] = task.pop('stage')
+        old = {'schema_version': 2, 'revision': 7, 'current': task}
+        store._write_json_atomic(store.current_path(self.base), old)
+        report = store.inspect_data(self.base)
+        request = {'source_digest': report['source_digest'], 'renames': {'old_phase': 'stage'}, 'analysis_ref': '已从原合同和 Jira 核实字段含义相同'}
+        return old, request
+
+    def test_data_repair_preserves_facts_and_shared_readers_then_cleans_backup(self):
+        old, request = self.repair_fixture()
+        original = store.current_path(self.base).read_bytes()
+        self.assertFalse(store.inspect_data(self.base)['compatible'])
+        operation_path = self.base / '.agenticops/operation.json'
+        operation_path.write_text('原在途操作，修补不得重写')
+        operation_before = operation_path.read_bytes()
+        preview = store.preview_data_repair(self.base, request)
+        self.assertEqual(original, store.current_path(self.base).read_bytes())
+        with self.assertRaises(ValueError):
+            store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认')
+        result = store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认字段含义及停写', True)
+        self.assertEqual('applied', result['status'])
+        self.assertEqual(operation_before, operation_path.read_bytes())
+        task = store.read_task(self.base)
+        self.assertEqual('waiting_takeover', task['stage'])
+        self.assertEqual(old['current']['facts'], task['facts'])
+        self.assertEqual(old['current']['run_id'], engine.current_task(self.base / '.agenticops')['run_id'])
+        saved = json.loads(Path(result['backup']).read_text())
+        self.assertEqual(original.decode(), saved['original'])
+        self.assertEqual(7, store.read_current(self.base)['revision'])
+        self.assertEqual('already_applied', store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认字段含义及停写', True)['status'])
+        with store.task_state_lock(self.base, execution=False):
+            store.clear_data_backups(self.base)
+        self.assertFalse(Path(result['backup']).exists())
+        self.assertEqual('run-abc12345', store.read_task(self.base)['run_id'])
+
+    def test_data_repair_rejects_overwrite_drift_and_retains_failed_write(self):
+        from unittest import mock
+        old, request = self.repair_fixture()
+        original = store.current_path(self.base).read_bytes()
+        preview = store.preview_data_repair(self.base, request)
+        bad = dict(request, renames={'old_phase': 'outcome'})
+        with self.assertRaises(ValueError):
+            store.preview_data_repair(self.base, bad)
+        write = store._write_json_atomic
+        def failed(path, value):
+            if Path(path) == store.current_path(self.base):
+                raise OSError('模拟候选写入失败')
+            return write(path, value)
+        with mock.patch.object(store, '_write_json_atomic', side_effect=failed):
+            with self.assertRaises(OSError):
+                store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认', True)
+        self.assertEqual(original, store.current_path(self.base).read_bytes())
+        changed = copy.deepcopy(old)
+        changed['revision'] += 1
+        write(store.current_path(self.base), changed)
+        with self.assertRaisesRegex(ValueError, '已变化'):
+            store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认', True)
+        self.assertEqual(changed, json.loads(store.current_path(self.base).read_text()))
+        store.current_path(self.base).write_bytes(original)
+        self.assertEqual('applied', store.apply_data_repair(self.base, request, preview['proposal_digest'], '研发确认', True)['status'])
+
     def test_invalid_current_is_rejected_on_read_and_before_write(self):
         valid = self.task()
         invalid = [dict(valid, **{key: value}) for key, value in (
