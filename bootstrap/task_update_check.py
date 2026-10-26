@@ -17,7 +17,7 @@ from bootstrap import installation_update, product_state
 from workflow import station_context, station_operation, task_store
 
 
-def inspect(station, current_ref=None, target_ref=None):
+def inspect(station, current_ref=None, target_ref=None, check_resume=False):
     station = Path(station).resolve()
     binding = station_context.read_binding(station)
     if Path(binding['product_root']).resolve() != ROOT:
@@ -26,12 +26,14 @@ def inspect(station, current_ref=None, target_ref=None):
     with task_store.task_state_lock(station, execution=False):
         current = task_store.read_current(station)
         operation = station_operation.read(station)
-        if current['current'] is not None or operation and operation['status'] != 'done':
+        resuming = current['current'] is not None or bool(operation and operation['status'] != 'done')
+        if resuming and not check_resume:
             return {'status': 'resume', 'product_root': str(ROOT)}
     document = product_state.load(ROOT)
     if document['mode'] == 'source':
         return {'status': 'source', 'product_root': str(ROOT)}
     packet = installation_update.probe(ROOT)
+    packet['resume_existing'] = resuming
     packet['station'] = str(station)
     packet['station_id'] = binding['station_id']
     if packet['status'] != 'invalid_local_state' and str(station) not in packet.get('stations', []):
@@ -53,8 +55,9 @@ def main():
     parser.add_argument('--station', required=True)
     parser.add_argument('--current-ref')
     parser.add_argument('--target-ref')
+    parser.add_argument('--check-resume', action='store_true', help='会话启动也检查活动任务更新，不改变任务或原操作')
     args = parser.parse_args()
-    print(json.dumps(inspect(args.station, args.current_ref, args.target_ref), ensure_ascii=False))
+    print(json.dumps(inspect(args.station, args.current_ref, args.target_ref, args.check_resume), ensure_ascii=False))
 
 
 if __name__ == '__main__':

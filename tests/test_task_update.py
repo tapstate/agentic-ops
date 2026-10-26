@@ -62,12 +62,16 @@ class TaskUpdateTests(unittest.TestCase):
         return self.run_cmd(str(self.install/'agenticops'),'station','start','codex','--station',str(self.station),
                             '--non-interactive',*extra,check=check)
 
+    def approved_start(self):
+        packet = json.loads(self.run_cmd(str(self.install/'agenticops'), 'update', '--check', '--probe').stdout)
+        return self.start('--writers-stopped', '--apply-update', '--update-current-ref', packet['original_ref'], '--update-target-ref', packet['target_ref'], '--expected-stations', json.dumps(packet['stations']))
+
     def test_safe_start_updates_repairs_and_starts_new_session(self):
         second=self.root/'second'
         self.run_cmd(str(self.install/'agenticops'),'station','init','--station',str(second),'--project','tapdata','--agent','codex')
         before=(second/'.agenticops/init.json').read_bytes()
         target=self.advance()
-        result=self.start('--writers-stopped')
+        result=self.approved_start()
         self.assertEqual(before,(second/'.agenticops/init.json').read_bytes())
         self.assertIn('session-ready',result.stdout)
         self.assertEqual(target,self.state()['current_ref'])
@@ -87,7 +91,7 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertIn('session-ready',self.start('--update-current-ref',self.original,'--update-target-ref',target).stdout)
         self.assertEqual(3,self.start(check=False).returncode)
 
-    def test_feature_cross_epoch_probe_and_explicit_update_preserve_station(self):
+    def test_feature_cross_epoch_start_updates_without_epoch_barrier(self):
         before = (self.station/'.agenticops/current-task.json').read_bytes()
         origin = (self.station/'.agenticops/init.json').read_bytes()
         target = self.advance(incompatible=True)
@@ -96,18 +100,16 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertTrue(packet['compatible'])
         self.assertNotIn('incompatible_epoch', packet['blockers'])
         self.assertEqual(target, packet['target_ref'])
-        result = self.start('--writers-stopped', check=False)
-        self.assertEqual(3, result.returncode, result.stderr)
-        self.assertIn('无需 purge', result.stderr)
-        self.assertIn('显式 update', result.stderr)
-        self.assertEqual(self.original, self.state()['current_ref'])
         refused = self.run_cmd(str(self.install/'agenticops'),'update', check=False)
         self.assertNotEqual(0, refused.returncode)
         self.assertIn('writers-stopped', refused.stderr)
-        self.run_cmd(str(self.install/'agenticops'),'update','--writers-stopped')
+        result = self.approved_start()
+        self.assertIn('session-ready', result.stdout)
         self.assertEqual(target, self.state()['current_ref'])
         self.assertEqual(before, (self.station/'.agenticops/current-task.json').read_bytes())
-        self.assertEqual(origin, (self.station/'.agenticops/init.json').read_bytes())
+        refreshed = json.loads((self.station/'.agenticops/init.json').read_text())
+        self.assertEqual(json.loads(origin)['station_state_epoch'], refreshed['station_state_epoch'])
+        self.assertEqual(target, refreshed['product_ref'])
         self.assertIn('session-ready', self.start().stdout)
 
     def test_legacy_cross_epoch_keeps_incompatible_guidance(self):
@@ -146,7 +148,7 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertEqual(self.original,self.state()['current_ref'])
         proc.communicate('\n',timeout=15)
         self.assertEqual(0,proc.returncode)
-        self.start('--writers-stopped')
+        self.approved_start()
         self.assertNotEqual(self.original,self.state()['current_ref'])
 
     def test_network_failure_continues_trusted_version_without_latest_claim(self):
@@ -165,6 +167,46 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertNotEqual(0,result.returncode)
         self.assertIn('目标已变化',result.stderr)
         self.assertEqual(self.original,self.state()['current_ref'])
+
+
+    def test_stopped_writers_are_not_update_approval(self):
+        self.advance()
+        result = self.start('--writers-stopped', check=False)
+        self.assertEqual(3, result.returncode)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        self.assertIn('--apply-update', result.stderr)
+
+    def test_active_task_start_checks_update_preserves_run_and_can_continue_old(self):
+        path = self.station/'.agenticops/current-task.json'
+        document = json.loads(path.read_text())
+        document['current'] = {'issue_key':'TAP-123','run_id':'run-abc12345','task_class':'technical_task',
+            'stage':'waiting_takeover','outcome':'in_progress','facts':{},'history':[], 'pending':None,
+            'engineering_baseline':{'status':'resolving'}, 'task_repositories':{},'terminal_proof':None,'archive_ref':None}
+        path.write_text(json.dumps(document))
+        before = path.read_bytes()
+        target = self.advance(incompatible=True)
+        self.assertEqual(3, self.start(check=False).returncode)
+        self.assertIn('session-ready', self.start('--update-current-ref', self.original, '--update-target-ref', target).stdout)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        self.assertEqual(before, path.read_bytes())
+        self.assertIn('session-ready', self.approved_start().stdout)
+        self.assertEqual(target, self.state()['current_ref'])
+        self.assertEqual(before, path.read_bytes())
+
+    def test_update_approval_binds_scope_and_exact_target(self):
+        target = self.advance()
+        result = self.start('--apply-update', '--writers-stopped', '--update-current-ref', self.original,
+                            '--update-target-ref', target, '--expected-stations', '[]', check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('登记工位范围', result.stderr)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        (self.seed/'docs/fixture-update.md').write_text('third version')
+        self.commit('third')
+        result = self.start('--apply-update', '--writers-stopped', '--update-current-ref', self.original,
+                            '--update-target-ref', target, '--expected-stations', json.dumps([str(self.station)]), check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('原/目标提交', result.stderr)
+        self.assertEqual(self.original, self.state()['current_ref'])
 
     def test_existing_run_skips_network_check(self):
         path = self.station/'.agenticops/current-task.json'

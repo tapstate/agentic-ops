@@ -199,10 +199,11 @@ def prepare(root, args):
     prepare_materials(root, original, target)
     print('[AgenticOps][更新][进行] 核验版本兼容性与切换条件', file=sys.stderr)
     before = station_compatibility.manifest_at_ref(root, original)['station_state_epoch']
-    after = station_compatibility.manifest_at_ref(root, target)['station_state_epoch']
+    target_manifest = station_compatibility.manifest_at_ref(root, target)
+    after = target_manifest['station_state_epoch']
     if getattr(args, 'automatic', False):
-        if before != after or target != tip:
-            raise ValueError('自动更新目标或 epoch 已变化；重新检查，不沿用本次选择')
+        if (before != after and target_manifest.get('validation') != 'feature') or target != tip:
+            raise ValueError('自动更新目标已变化或目标不支持当前兼容模式；重新检查，不沿用本次选择')
         if not args.writers_stopped:
             raise ValueError('自动更新无法证明未受管会话停写')
         automatic_protocol(root, original)
@@ -343,7 +344,7 @@ def parser():
     p.add_argument('--source-branch')
     p.add_argument('--check', action='store_true')
     p.add_argument('--probe', action='store_true', help='配合 --check，分别报告新版、兼容性和切换阻塞')
-    p.add_argument('--automatic', action='store_true', help='启动侧同 epoch 自动更新；仍需停写事实与独占租约')
+    p.add_argument('--automatic', action='store_true', help='启动侧兼容目标自动更新；仍需停写事实与独占租约')
     p.add_argument('--expected-stations', help='启动侧绑定检查时的登记工位 JSON 数组')
     p.add_argument('--resume', action='store_true')
     p.add_argument('--writers-stopped', action='store_true', help='已按原生事实核验全部共享产品调用停写；不认证声明者')
