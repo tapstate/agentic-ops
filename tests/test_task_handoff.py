@@ -1,6 +1,7 @@
 """真实本地 Git 远端验证归档接续；Jira 仅提供显式工具回读夹具。"""
 import copy
 import json
+import shutil
 from pathlib import Path
 import sys
 import unittest
@@ -83,6 +84,115 @@ class HandoffTests(unittest.TestCase):
                              ['file.txt'], 'unit', row['expected_head'])
         self.assertEqual(row['expected_head'], self.git(self.ws / 'source/tapdata/tapdata', 'rev-parse', 'HEAD'))
         self.assertFalse(task_store.authorization_path(self.ws, 'TAP-123').exists())
+
+    def test_latest_archive_recovers_without_old_station_product_or_cache_and_cleans(self):
+        self.verify_independent_resume_and_cleanup(self.prepare_task())
+
+    def verify_independent_resume_and_cleanup(self, path):
+        first = self.archive()
+        self.archive(receipt=self.readback(first))
+        first_packet = first['archive_payload']['snapshot']['handoff']['packet']
+        (path / 'file.txt').write_text('second archived result\n')
+        self.git(path, 'add', '.')
+        self.git(path, 'commit', '-m', 'second retained result')
+        self.git(path, 'push', 'origin', self.branch)
+        self.request['handoff']['progress'] = '第二次代码成果已保存，尚需业务验证'
+        second = self.archive('op-second-progress')
+        receipt = self.readback(second, '102')
+        self.archive('op-second-progress', receipt)
+        # 新工位仅获取 Jira 原生回读正文；不读取旧 operation 或本地档案。
+        packet = json.loads(receipt['body'].split('```json\n', 1)[1].split('\n```', 1)[0])
+        self.assertNotEqual(first_packet['repositories'], packet['repositories'])
+        fresh_product = self.root / 'fresh-product'
+        for name in ('projects', 'contracts', 'policies'):
+            shutil.copytree(self.product / name, fresh_product / name)
+        shutil.rmtree(self.ws)
+        shutil.rmtree(self.product)
+        shutil.rmtree(self.root / 'pool', ignore_errors=True)
+        shutil.rmtree(self.seed)
+        self.product = fresh_product
+        self.ws = self.root / 'fresh-station'
+        for name in ('source', 'config', 'runtime', '.agenticops'):
+            (self.ws / name).mkdir(parents=True)
+        self.write(self.ws / '.agenticops/station.json', {'schema_version': 4,
+            'product_root': str(self.product), 'source_pool': str(self.root / 'fresh-pool'),
+            'project': 'tapdata', 'agents': ['codex'], 'station_id': 'b' * 32,
+            'branch_identity': {'schema_version': 1, 'git_name': 'New', 'source': 'git_global_user_name'}})
+        self.write(self.ws / '.agenticops/init.json', {
+            'station_state_epoch': json.loads((self.product / 'contracts/station-state-compatibility.json').read_text())['station_state_epoch'],
+            'cleanup': json.loads((self.product / 'policies/station-clean.json').read_text())})
+        task_store.initialize_current(self.ws)
+        coordination_proof(self.ws, packet['issue_key'])
+        continuation = task_handoff.continuation_input(packet)
+        request = {'issue_key': packet['issue_key'], 'task_class': packet['task_class'],
+            'version': 'develop', 'profile': 'full-application',
+            'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation}
+        station.takeover(self.ws, request, 'op-independent-recovery', 0)
+        task = task_store.read_task(self.ws)
+        row = continuation['tapdata/tapdata']
+        station.scope_change(self.ws, task['issue_key'], task['run_id'], task['_revision'],
+            'op-independent-scope', 'tapdata/tapdata', row['work_branch'], 'develop', ['file.txt'], 'unit', row['expected_head'])
+        self.assertEqual('second archived result\n', (self.ws / 'source/tapdata/tapdata/file.txt').read_text())
+        self.assertFalse(task_store.authorization_path(self.ws, packet['issue_key']).exists())
+        self.assertFalse((self.root / 'product').exists())
+        self.assertFalse((self.root / 'ws').exists())
+        current = task_store.read_task(self.ws)
+        from workflow import engineering_baseline
+        before_restore = task_store.current_path(self.ws).read_bytes()
+        with self.assertRaisesRegex(ValueError, '摘要不匹配'):
+            task_handoff.restore(self.ws, packet, '0' * 64, current['run_id'], current['_revision'], 'fixture:jira', '确认', [])
+        with self.assertRaisesRegex(ValueError, 'revision'):
+            task_handoff.restore(self.ws, packet, engineering_baseline.digest(packet), current['run_id'], current['_revision'] - 1, 'fixture:jira', '确认', [])
+        self.assertEqual(before_restore, task_store.current_path(self.ws).read_bytes())
+        restored = task_handoff.restore(self.ws, packet, engineering_baseline.digest(packet), current['run_id'],
+            current['_revision'], 'fixture:jira/latest-archive', '研发确认第二次归档为有效成果', [])
+        self.assertEqual('restored', restored['status'])
+        recovered = task_store.read_task(self.ws)
+        self.assertEqual(packet['plan'], recovered['facts']['handoff_resume']['plan'])
+        self.assertEqual(packet['remaining'], recovered['facts']['handoff_resume']['remaining'])
+        self.assertEqual(current['stage'], recovered['stage'])
+        retry = task_handoff.restore(self.ws, packet, engineering_baseline.digest(packet), current['run_id'],
+            current['_revision'], 'fixture:jira/latest-archive', '研发确认第二次归档为有效成果', [])
+        self.assertEqual('already_restored', retry['status'])
+        self.assertEqual(recovered['_revision'], task_store.read_task(self.ws)['_revision'])
+        self.assertFalse(task_store.authorization_path(self.ws, packet['issue_key']).exists())
+
+        (self.ws / 'config/new-input').write_text('new station configuration')
+        from workflow import station_cleanup
+        task = task_store.read_task(self.ws)
+        clean_request = {'scope': 'task', 'materials': 'preserved', 'decision_ref': '用户确认已保全成果后清理',
+            'expected_plan_digest': station_cleanup.plan(self.ws)['digest']}
+        result = station_cleanup.execute(self.ws, task['issue_key'], task['run_id'], task['_revision'],
+            'op-clean-recovered-task', clean_request)
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertEqual('new station configuration', (self.ws / 'config/new-input').read_text())
+        self.assertIsNone(task_store.read_task(self.ws))
+        station_request = {'scope': 'station', 'materials': 'discard', 'decision_ref': '测试明确丢弃全部工位用户材料',
+            'expected_plan_digest': station_cleanup.plan(self.ws, 'station')['digest']}
+        result = station_cleanup.execute(self.ws, None, task['run_id'], task_store.read_current(self.ws)['revision'],
+            'op-clean-recovered-station', station_request)
+        self.assertTrue(result['cleanup_result']['complete'])
+        self.assertFalse((self.ws / 'config/new-input').exists())
+        coordination_proof(self.ws, packet['issue_key'])
+        station.takeover(self.ws, request, 'op-retake-after-both-cleanups', task_store.read_current(self.ws)['revision'])
+        self.assertEqual(packet['issue_key'], task_store.read_task(self.ws)['issue_key'])
+
+    def test_required_evidence_is_read_and_must_match_on_restore(self):
+        self.prepare_task()
+        artifact = self.root / 'retrieved-evidence.txt'
+        artifact.write_text('persistent test evidence')
+        evidence = [{'reference': 'https://example.test/artifact/123', 'source_ref': 'fixture:native-readback', 'local_file': str(artifact)}]
+        self.request['handoff']['evidence'] = evidence
+        pending = self.archive()
+        packet = pending['archive_payload']['snapshot']['handoff']['packet']
+        self.assertEqual('agenticops-handoff-v2', packet['format'])
+        self.assertNotIn('local_file', packet['evidence'][0])
+        task_handoff.verify_evidence(evidence, packet['evidence'])
+        artifact.write_text('changed remote content')
+        with self.assertRaisesRegex(ValueError, '归档内容不一致'):
+            task_handoff.verify_evidence(evidence, packet['evidence'])
+        with self.assertRaisesRegex(ValueError, '不能仅提供链接'):
+            task_handoff.verify_evidence(['https://example.test/artifact/123'])
 
     def test_changed_material_appends_and_bad_readback_preserves_pending(self):
         self.prepare_task()

@@ -513,7 +513,7 @@ Jira 评论采用简洁可读文本。当前 Rovo addCommentToJiraIssue 的 comm
 
 `apply --expected-revision` 使用 `quality.py status` 返回的质量日志 revision，不使用任务 current 的 revision。冲突诊断同时显示 expected 与 actual，并保持未写入。
 
-新增 `execute` 操作的 `NOT_RUN` 必须提供 `execution.nonexecution_reason`，例如环境缺失的具体配置项；`failure_kind` 仍为 `none`，不能把未执行写成环境测试失败。原始结果与版本不改名，历史事件读取不补造原因。此字段改变旧版本对事件契约的读取能力，工位 epoch 提升至 10；跨代际按更新与回退指引在原版本退出并 purge，不在线转换任务。
+新增 `execute` 操作的 `NOT_RUN` 必须提供 `execution.nonexecution_reason`，例如环境缺失的具体配置项；`failure_kind` 仍为 `none`，不能把未执行写成环境测试失败。原始结果与版本不改名，历史事件读取不补造原因。该字段引入时曾提升工位 epoch 至 10，这是历史兼容记录。当前升级与旧质量事件采用遵循[更新与回退](update-and-rollback.md)，由质量功能检查实际契约，不仅因 epoch 不同强制退出，也不补造历史原因或验证结果。
 
 
 ### TapTest 的 Jira 状态依据

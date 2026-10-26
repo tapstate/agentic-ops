@@ -210,31 +210,42 @@ def before_task(root, args, startup=False):
     if bool(current_ref) != bool(target_ref):
         raise ValueError('继续旧版须同时绑定 --update-current-ref 与 --update-target-ref 完整 SHA')
     stopped = startup and '--writers-stopped' in own
+    apply_update = startup and '--apply-update' in own
+    expected_stations = _option(own, '--expected-stations', None) if startup else None
+    if apply_update and (not current_ref or not stopped or expected_stations is None):
+        raise ValueError('应用更新须明确原/目标 SHA，并核验停写：--apply-update --writers-stopped --update-current-ref <原SHA> --update-target-ref <目标SHA> --expected-stations <登记工位JSON>')
     cleaned = []
     index = 0
     while index < len(own):
         value = own[index]
-        if value in ('--update-current-ref', '--update-target-ref'):
+        if value in ('--update-current-ref', '--update-target-ref') or startup and value == '--expected-stations':
             if index + 1 == len(own):
                 raise ValueError('--update-current-ref 缺少完整 SHA')
             index += 2
             continue
-        if value.startswith(('--update-current-ref=', '--update-target-ref=')) or startup and value == '--writers-stopped':
+        if value.startswith(('--update-current-ref=', '--update-target-ref=')) or startup and value.startswith('--expected-stations=') or startup and value in ('--writers-stopped', '--apply-update'):
             index += 1
             continue
         cleaned.append(value); index += 1
     command = [sys.executable, str(root / 'bootstrap/task_update_check.py'), '--station', station]
-    if current_ref:
+    if startup:
+        command += ['--check-resume']
+    if current_ref and not apply_update:
         command += ['--current-ref', current_ref, '--target-ref', target_ref]
     packet = _run_product(root, command, capture=True)
+    if packet.get('state_requires_repair'):
+        print('[AgenticOps][任务数据] 会话可启动以分析修补；任务推进仍须原功能复查：' + packet['state_requires_repair'], file=sys.stderr)
     status = packet['status']
+    if apply_update and (packet.get('original_ref') != current_ref or packet.get('target_ref') != target_ref):
+        raise ValueError('更新确认与当前原/目标提交不一致；重新检查并确认，不沿用旧决定')
+    if apply_update and json.loads(expected_stations) != packet.get('stations'):
+        raise ValueError('登记工位范围与更新确认不一致；重新展示影响范围并确认')
     if status == 'invalid_local_state':
         raise ValueError(packet['reason'])
     if status in ('check_unavailable', 'target_unknown'):
         print('[AgenticOps][更新检查] 未能确认可用更新，沿可信当前版本继续：' + packet['reason'], file=sys.stderr)
     if status == 'update_available':
-        same_epoch = packet['original_epoch'] == packet['target_epoch']
-        if packet['compatible'] and same_epoch and stopped:
+        if packet['compatible'] and stopped and apply_update:
             command = [sys.executable, str(root / 'bootstrap/installation_update.py'), '--product-root', str(root),
                        '--to-ref', packet['target_ref'], '--expected-current-ref', packet['original_ref'],
                        '--automatic', '--writers-stopped', '--expected-stations', json.dumps(packet['stations'])]
@@ -246,11 +257,9 @@ def before_task(root, args, startup=False):
             print(json.dumps(packet, ensure_ascii=False, indent=2), file=sys.stderr)
             if not packet['compatible']:
                 guidance = '旧模式目标不兼容，须由原版退出并 purge，或选择独立安装'
-            elif not same_epoch:
-                guidance = '目标支持按功能校验；先核实全部工位在途操作及停写，再显式 update --writers-stopped；正常任务保留原 run，无需 purge'
             else:
-                guidance = '核实全部产品调用及未受管会话停写后，从启动侧更新，或选择独立安装'
-            raise Busy('发现更新；可用 --update-current-ref %s --update-target-ref %s 继续本次旧版接管。%s；本次未创建 run' % (packet['original_ref'], packet['target_ref'], guidance))
+                guidance = '研发确认此原/目标 SHA 及共享工位影响后，核实停写，加 --apply-update --writers-stopped 并同时传入上述原/目标 SHA 与 --expected-stations 的登记工位 JSON 更新；也可选择独立安装'
+            raise Busy('发现更新；可用 --update-current-ref %s --update-target-ref %s 继续当前版本处理。%s；本次未修改任务或创建 run' % (packet['original_ref'], packet['target_ref'], guidance))
     return cleaned + forwarded, packet
 
 
@@ -367,7 +376,10 @@ def shell_entry(script, args):
         root = Path(os.environ.get('AGENTIC_OPS_HOME') or default_root).resolve()
     try:
         packet = None
-        if Path(script).name == 'agenticops' and args[:2] == ['station', 'start'] and not any(v in args for v in ('--help', '-h')):
+        own = args[:args.index('--')] if '--' in args else args
+        if Path(script).name == 'agenticops' and own[:2] == ['station', 'start'] and not any(v in own for v in ('--help', '-h')):
+            if '--non-interactive' not in own and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+                raise ValueError('交互启动需要终端；自动化调用请明确使用 --non-interactive，并传入 Agent 支持的非交互参数。')
             args, packet = before_task(root, args, startup=True)
         with _entry_lease(code_root, root, _mode(script, args)) as fd:
             fresh = _fresh_loader()

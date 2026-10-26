@@ -20,23 +20,15 @@ shift
 
 version=""
 confirm_release="false"
-allow_soft_gate="false"
-wait_for_merge="true"
 merged_pr=""
 confirm_recovery=""
 RELEASE_JIRA_ID=""
-RELEASE_REPLACE_CANDIDATE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jira)
       [ "$#" -ge 2 ] || exit 1
       RELEASE_JIRA_ID="$2"
       release_validate_jira_id "$RELEASE_JIRA_ID" || exit 1
-      shift 2
-      ;;
-    --replace-candidate)
-      [ "$#" -ge 2 ] || exit 1
-      RELEASE_REPLACE_CANDIDATE="$2"
       shift 2
       ;;
     --version)
@@ -53,14 +45,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --confirm-release)
       confirm_release="true"
-      shift
-      ;;
-    --allow-soft-gate)
-      allow_soft_gate="true"
-      shift
-      ;;
-    --no-wait-for-merge)
-      wait_for_merge="false"
       shift
       ;;
     --merged-pr)
@@ -86,170 +70,88 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$wait_for_merge" = "false" ] && { [ "$command_name" != "publish" ] || [ "$allow_soft_gate" != "true" ]; }; then
-  release_fail "invalid_release_wait_option" "argument_parsing" "--no-wait-for-merge 只适用于软门禁 publish" "请与 publish --allow-soft-gate 一起使用，或移除此参数"
+if [ -n "$merged_pr" ]; then
+  case "$command_name" in
+    inspect|verify|recover) ;;
+    *) release_fail invalid_release_argument argument_parsing "该子命令不接受 --merged-pr" "指定已合并 PR 时请使用 inspect、verify 或 recover"; exit 1 ;;
+  esac
+fi
+if [ -n "$confirm_recovery" ] && [ "$command_name" != recover ]; then
+  release_fail invalid_release_argument argument_parsing "--confirm-recovery 只适用于 recover" "请使用原 recover 输出的继续命令"
   exit 1
 fi
 
-if [ -n "$RELEASE_REPLACE_CANDIDATE" ] && [ "$command_name" != prepare ]; then
-  release_fail invalid_release_argument argument_parsing "--replace-candidate 只用于本地 prepare" "重试 prepare 并指定旧候选完整 SHA"
-  exit 1
-fi
-
-RELEASE_IDENTITY="$version"
+RELEASE_IDENTITY="${version:-$RELEASE_JIRA_ID}"
 RELEASE_BASE_COMMIT=""
 if [ "$command_name" != inspect ]; then release_lock_operation "$repo_root" || exit 1; fi
 
+if { [ "$command_name" = prepare ] || [ "$command_name" = verify ]; } && [ -z "$version" ] && [ -n "$RELEASE_JIRA_ID" ]; then
+  : # Hotfix 的本地验证复用同一入口，不要求虚构版本号。
+else
+  release_validate_version "$version" || exit 1
+fi
+release_require_repo "$repo_root" || exit 1
 case "$command_name" in
   inspect)
-    release_validate_version "$version" || exit 1
-    release_require_command git || exit 1
-    release_require_command "${AGENTIC_OPS_GH_BIN:-gh}" || exit 1
-    release_require_repo "$repo_root" || exit 1
     release_inspect_state "$repo_root" "$version" "$merged_pr" || exit 1
     ;;
-  prepare)
-    release_validate_version "$version" || exit 1
-    release_require_command git || exit 1
-    release_require_repo "$repo_root" || exit 1
-    release_require_branch "$repo_root" develop || exit 1
-    release_require_synced_branch "$repo_root" develop || exit 1
-    prepare_head="$(git -C "$repo_root" rev-parse HEAD)"
-    prepare_in_main_status=0
-    release_candidate_is_in_main "$repo_root" "$prepare_head" || prepare_in_main_status=$?
-    if [ "$prepare_in_main_status" -eq 2 ]; then
-      exit 1
-    fi
-    if [ "$prepare_in_main_status" -eq 0 ]; then
-      release_print_confirmation_bundle "$repo_root" "发布候选已提前合入 main；不会准备或修改 Tag" "$version" "$prepare_head" develop main "需要通过 inspect 确认实际合并 PR，再进入受控 recover。"
-      release_fail "release_candidate_already_in_main" "state_inspection" "当前 develop 候选已经包含在 origin/main，不应重新 prepare" "请运行 internal/release/release.sh inspect --version $version 获取唯一下一命令"
-      exit 1
-    fi
-    protection_mode="hard"
-    if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
-    release_require_version_tag_available "$repo_root" "$version" || exit 1
-    release_check_fixed_branch "$repo_root" "release/$version" "$prepare_head" || exit 1
-    release_preflight_candidate "$repo_root" "$prepare_head" || exit 1
-    release_verify_story_gate "$repo_root" origin/main "$prepare_head" true "" || exit 1
-    release_run_full_verification "$repo_root" "$prepare_head" || exit 1
-    release_branch="release/$version"
-    release_prepare_fixed_branch "$repo_root" "$release_branch" "$prepare_head" || exit 1
-    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_prepare","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布准备已完成，等待人工审阅范围","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"reviewer","action":"review_release_scope","question":"请审阅发布范围后再继续发布","choices":[{"id":"review","label":"审阅发布范围","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","release_branch":"%s","verified_at":"%s","tag_scope":"main_merge_commit","protection_mode":"%s","delivery":"product_source","delivery_checks":"pending"}\n' \
-      "$version" "$prepare_head" "$release_branch" "$RELEASE_VERIFIED_AT" "$protection_mode"
-    ;;
-  publish)
-    release_validate_version "$version" || exit 1
-    release_require_command git || exit 1
-    release_require_command "${AGENTIC_OPS_GH_BIN:-gh}" || exit 1
-    release_require_repo "$repo_root" || exit 1
-    protection_mode="hard"
-    release_source_branch="release/$version"
-    release_resolve_prepared_fixed_branch "$repo_root" "$release_source_branch" || exit 1
-    release_head="$RELEASE_FIXED_HEAD"
-    if [ "$allow_soft_gate" = "true" ]; then
-      protection_mode="soft"
-    fi
-    candidate_in_main_status=0
-    release_candidate_is_in_main "$repo_root" "$release_head" || candidate_in_main_status=$?
-    if [ "$candidate_in_main_status" -eq 2 ]; then
-      exit 1
-    fi
-    if [ "$candidate_in_main_status" -eq 0 ]; then
-      release_print_confirmation_bundle "$repo_root" "发布候选已提前合入 main；不会创建 PR 或推送 Tag" "$version" "$release_head" "$release_source_branch" main "需要通过 inspect 确认状态，并使用受控 recover 绑定实际已合并 PR。"
-      release_fail "release_candidate_already_in_main" "state_inspection" "固定发布候选已经包含在 origin/main，GitHub 无法创建无差异发布 PR" "请先运行 internal/release/release.sh inspect --version $version；确认关联 PR 后运行 recover"
-      exit 1
-    fi
-    release_require_version_tag_available "$repo_root" "$version" || exit 1
-    release_preflight_candidate "$repo_root" "$release_head" || exit 1
-    release_verify_story_gate "$repo_root" origin/main "$release_head" false "" || exit 1
-    release_run_full_verification "$repo_root" "$release_head" check || exit 1
-    workflow_check_delivery tapstate/agentic-ops "$protection_mode" || exit 1
-    if [ "$protection_mode" = hard ]; then workflow_check_auto_merge tapstate/agentic-ops || exit 1; fi
-    release_confirm_publish "$repo_root" "$version" "$release_head" "$confirm_release" "$release_source_branch" main || exit 1
-    release_check_base_unchanged "$repo_root" || exit 1
-    release_push_fixed_branch "$repo_root" "$release_source_branch" "$release_head" || exit 1
-    release_repository="tapstate/agentic-ops"
-    release_find_or_create_pr "$release_repository" "$release_source_branch" main "$release_head" "$version" release "$RELEASE_JIRA_ID" "$protection_mode" || exit 1
-    release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$release_head" || exit 1
-    release_check_base_unchanged "$repo_root" || exit 1
-    if [ "$allow_soft_gate" = "true" ]; then
-      if [ "$wait_for_merge" = "true" ]; then
-        release_wait_for_soft_merge "$release_repository" "$release_head" || exit 1
-      else
-        manual_status=0
-        release_wait_for_manual_merge "$repo_root" "$release_repository" release_publish "$version" "$release_head" "$release_source_branch" || manual_status=$?
-        if [ "$manual_status" -eq 2 ]; then
-          exit 2
-        fi
-        if [ "$manual_status" -ne 0 ]; then
-          exit 1
-        fi
-      fi
-    else
-      release_enable_auto_merge "$release_repository" || exit 1
-      release_wait_for_merge "$release_repository" || exit 1
-    fi
-    release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$release_head" || exit 1
-    workflow_check_delivery tapstate/agentic-ops "$protection_mode" || exit 1
-    if [ "$protection_mode" = hard ]; then release_check_review_objections "$RELEASE_PR_NUMBER" || exit 1; fi
-    release_finish "$repo_root" "$version" "$release_head" "$RELEASE_MERGE_COMMIT" "$protection_mode" release_publish || exit 1
-    ;;
-  submit-for-review)
-    release_validate_version "$version" || exit 1
-    release_require_command git || exit 1
-    release_require_command "${AGENTIC_OPS_GH_BIN:-gh}" || exit 1
-    release_require_repo "$repo_root" || exit 1
-    protection_mode="hard"
-    if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
-    release_source_branch="release/$version"
-    release_resolve_prepared_fixed_branch "$repo_root" "$release_source_branch" || exit 1
-    release_head="$RELEASE_FIXED_HEAD"
-    candidate_in_main_status=0
-    release_candidate_is_in_main "$repo_root" "$release_head" || candidate_in_main_status=$?
-    if [ "$candidate_in_main_status" -eq 2 ]; then
-      exit 1
-    fi
-    if [ "$candidate_in_main_status" -eq 0 ]; then
-      release_fail "release_candidate_already_in_main" "state_inspection" "固定发布候选已经包含在 origin/main，不能再创建人工审查 PR" "请运行 release.sh inspect，并按输出使用 recover"
-      exit 1
-    fi
-    release_require_version_tag_available "$repo_root" "$version" || exit 1
-    release_preflight_candidate "$repo_root" "$release_head" || exit 1
-    release_submit_review "$repo_root" tapstate/agentic-ops "$version" "$release_source_branch" "$release_head" "$protection_mode" "$confirm_release" || exit 1
-    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_submit_for_review","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布候选已提交人工审查 PR，尚未合并或创建 Tag","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"reviewer","action":"review_and_merge_release_pr","question":"请先完成人工审查并核验 main 保护及必需检查；另行授权 Merge commit 合并后运行 inspect，当前未核验交付条件","choices":[{"id":"review","label":"审查并合并 PR","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","release_branch":"%s","protection_mode":"%s","delivery_checks":"pending"}\n' \
-      "$version" "$release_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$release_source_branch" "$protection_mode"
-    ;;
-  verify)
-    release_validate_version "$version" || exit 1
-    release_require_repo "$repo_root" || exit 1
+  prepare|verify)
     if [ -n "$merged_pr" ]; then
+      [ "$command_name" = verify ] || exit 1
       release_read_merged_pr "$merged_pr" || exit 1
       [ "$RELEASE_RECOVERY_PR_STATE" = MERGED ] && [ "$RELEASE_RECOVERY_PR_BASE" = main ] || exit 1
       git -C "$repo_root" fetch origin main >/dev/null 2>&1 || exit 1
-      verify_head="$RELEASE_RECOVERY_PR_HEAD"
+      head="$RELEASE_RECOVERY_PR_HEAD"
       RELEASE_BASE_COMMIT="$(git -C "$repo_root" rev-parse "$RELEASE_RECOVERY_MERGE_COMMIT^1")"
-      release_validate_pr_binding "$RELEASE_RECOVERY_PR_URL" "$version" "$verify_head" || exit 1
-      release_verify_merge_commit "$repo_root" "$verify_head" "$RELEASE_RECOVERY_MERGE_COMMIT" || exit 1
+      release_validate_pr_binding "$RELEASE_RECOVERY_PR_URL" "$RELEASE_IDENTITY" "$head" || exit 1
+      release_verify_merge_commit "$repo_root" "$head" "$RELEASE_RECOVERY_MERGE_COMMIT" || exit 1
     else
-      release_resolve_prepared_fixed_branch "$repo_root" "release/$version" || exit 1
-      verify_head="$RELEASE_FIXED_HEAD"
-      release_preflight_candidate "$repo_root" "$verify_head" || exit 1
-      release_verify_story_gate "$repo_root" origin/main "$verify_head" true "" || exit 1
+      release_require_branch "$repo_root" develop || exit 1
+      release_require_clean "$repo_root" || exit 1
+      head="$(git -C "$repo_root" rev-parse develop)"
+      # 本地验证不依赖远端同步、合并条件或版本引用是否可创建。
+      RELEASE_BASE_COMMIT="$head"
     fi
-    release_run_full_verification "$repo_root" "$verify_head" verify || exit 1
-    printf '{"ok":true,"operation":"release_verify","head":"%s","verified_at":"%s"}\n' "$verify_head" "$RELEASE_VERIFIED_AT"
+    mode=ensure
+    if [ "$command_name" = verify ]; then mode=verify; fi
+    release_run_full_verification "$repo_root" "$head" "$mode" || exit 1
+    printf '{"ok":true,"operation":"release_%s","head":"%s","source_branch":"develop","verified_at":"%s","delivery_checks":"pending"}\n' "$command_name" "$head" "$RELEASE_VERIFIED_AT"
+    ;;
+  submit-for-review|publish)
+    release_find_delivery_pr "$version" || exit 1
+    if [ "$RELEASE_PR_STATE" = MERGED ]; then
+      if [ "$command_name" = submit-for-review ]; then
+        release_fail release_candidate_already_in_main preflight "原 PR 已合并" "使用 publish --confirm-release 完成 Tag 和存档"
+        exit 1
+      fi
+      head="$RELEASE_PR_HEAD"
+      git -C "$repo_root" fetch origin main >/dev/null 2>&1 || exit 1
+      RELEASE_BASE_COMMIT="$(git -C "$repo_root" rev-parse "$RELEASE_MERGE_COMMIT^1")"
+      release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$head" || exit 1
+      release_verify_merge_commit "$repo_root" "$head" "$RELEASE_MERGE_COMMIT" || exit 1
+      release_run_full_verification "$repo_root" "$head" check || exit 1
+      workflow_check_delivery tapstate/agentic-ops hard || exit 1
+      release_check_review_objections "$RELEASE_PR_NUMBER" || exit 1
+      release_confirm_publish "$repo_root" "$version" "$head" "$confirm_release" develop main "创建版本 Tag 与存档" || exit 1
+      release_finish "$repo_root" "$version" "$head" "$RELEASE_MERGE_COMMIT" hard release_publish || exit 1
+    else
+      [ -z "$RELEASE_PR_STATE" ] || [ "$RELEASE_PR_STATE" = OPEN ] || {
+        release_fail release_pr_closed preflight "原 PR 已关闭但未合并" "核对原 PR，不自动更换候选"; exit 1;
+      }
+      release_require_branch "$repo_root" develop || exit 1
+      release_require_clean "$repo_root" || exit 1
+      release_require_synced_branch "$repo_root" develop || exit 1
+      head="$(git -C "$repo_root" rev-parse develop)"
+      release_preflight_candidate "$repo_root" "$head" || exit 1
+      release_submit_review "$repo_root" tapstate/agentic-ops "$version" develop "$head" hard "$confirm_release" || exit 1
+      printf '{"ok":true,"operation":"release_submit_for_review","status":"waiting_for_manual_merge","head":"%s","pr_number":%s,"pr_url":"%s","source_branch":"develop","protection_mode":"hard","delivery_checks":"pending","continue_command":"internal/release/release.sh publish --version %s --confirm-release"}\n' "$head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$version"
+    fi
     ;;
   recover)
-    release_validate_version "$version" || exit 1
-    release_require_command git || exit 1
-    release_require_command "${AGENTIC_OPS_GH_BIN:-gh}" || exit 1
-    release_require_repo "$repo_root" || exit 1
-    protection_mode="hard"
-    if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
-    release_recover_merged_candidate "$repo_root" "$version" "$merged_pr" "$confirm_release" "$confirm_recovery" "$protection_mode" || exit 1
+    release_recover_merged_candidate "$repo_root" "$version" "$merged_pr" "$confirm_release" "$confirm_recovery" hard || exit 1
     ;;
   *)
-    release_fail "invalid_release_command" "argument_parsing" "不支持的发布子命令 $command_name" "请使用 inspect、prepare、verify、submit-for-review、publish 或 recover"
+    release_fail invalid_release_command argument_parsing "不支持的发布子命令 $command_name" "使用 prepare、submit-for-review、publish、inspect、verify 或 recover"
     exit 1
     ;;
 esac

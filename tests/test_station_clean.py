@@ -245,7 +245,7 @@ class CleanupTests(unittest.TestCase):
             elif command[:2] == ['network', 'ls']: output = 'network-id' if state['network'] else ''
             elif command[0] == 'inspect' or command[:2] == ['network', 'inspect']:
                 labels = {'io.agenticops.station': 'wrong' if mismatch else 'a' * 32, 'com.docker.compose.project': 'ao-tapdata-' + 'a' * 32}
-                output = json.dumps([{'Id': command[-1], 'Labels': labels, 'Config': {'Labels': labels}}])
+                output = json.dumps([{'Id': command[-1], 'Labels': labels, 'Config': {'Labels': labels}, 'Mounts': []}])
             elif command[0] == 'stop': output = ''
             elif command[0] == 'rm': state['container'] = False; output = ''
             elif command[:2] == ['network', 'rm']: state['network'] = False; output = ''
@@ -325,13 +325,16 @@ class CleanupTests(unittest.TestCase):
     def test_volume_and_malformed_mounts_keep_container_for_agent(self):
         task = self.ready(); self.real_run = subprocess.run
         root, calls, run = self.docker_fixture()
-        for mounts in ([{'Type': 'volume', 'Name': 'user-data'}], ['invalid'], {}):
+        for mounts in ([{'Type': 'volume', 'Name': 'user-data'}], ['invalid'], {}, None):
             with self.subTest(mounts=mounts):
                 def observation(args, **kwargs):
                     result = run(args, **kwargs)
                     if args[:2] == ['docker', 'inspect']:
                         rows = json.loads(result.stdout)
-                        rows[0]['Mounts'] = mounts
+                        if mounts is None:
+                            rows[0].pop('Mounts', None)
+                        else:
+                            rows[0]['Mounts'] = mounts
                         return subprocess.CompletedProcess(args, 0, json.dumps(rows), '')
                     return result
                 with mock.patch.object(resources.subprocess, 'run', side_effect=observation):

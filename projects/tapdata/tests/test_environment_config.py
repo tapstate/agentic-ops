@@ -57,6 +57,32 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn('private-license', json.dumps(result))
         self.assertEqual(inventory(destination / 'tapdata-test-env'), before)
 
+    def test_invalid_saved_contract_can_prepare_draft_without_overwriting_original(self):
+        self.legacy()
+        prepared = self.env.prepare_inputs('dev')
+        draft = Path(prepared['config_file'])
+        prep = draft.parent / 'preparation.json'
+        write(prep, read(ROOT / 'projects/tapdata/templates/station/test-env-preparation.json'))
+        self.env.configure('dev', draft, prep)
+        formal = self.store.environment('dev') / 'config.json'
+        saved = read(formal)
+        saved['schema_version'] = 99
+        write(formal, saved)
+        original = formal.read_bytes()
+        repaired = self.env.prepare_inputs('dev')
+        self.assertFalse(repaired['applied'])
+        self.assertEqual(original, formal.read_bytes())
+        candidate = Path(repaired['config_file'])
+        self.assertNotEqual(candidate, formal)
+        self.assertEqual(99, read(candidate)['schema_version'])
+        # Agent 已核实字段含义且研发确认后修正草稿，再由原功能校验并发布。
+        value = read(candidate)
+        value['schema_version'] = 2
+        write(candidate, value)
+        self.env.check_inputs(candidate)
+        self.env.configure('dev', candidate)
+        self.assertEqual(2, read(formal)['schema_version'])
+
     def test_multiple_candidates_require_selection_and_preserve_existing_values(self):
         self.legacy(second=True)
         result = self.env.prepare_inputs('dev')

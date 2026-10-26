@@ -42,8 +42,7 @@ def prepare(env, name, external_tm_url=None, backup=None):
     target = store.environment(name)
     formal = target / 'config.json'
     draft = path(target, 'drafts/config.json')
-    if formal.exists():
-        env.validate_runtime(read(formal))
+    # 不合当前合同的正式输入仍是待修补材料，保留原件并沿草稿路径处理。
     if formal.exists() and not draft.exists():
         config = read(formal)
         if complete(env, config, name, draft=False):
@@ -134,6 +133,9 @@ def prepare(env, name, external_tm_url=None, backup=None):
     for key, value in defaults.items():
         if key not in config:
             config[key] = copy.deepcopy(value)
+    if contract_problem(env, config):
+        write(draft, config)
+        return result(env, name, draft, config, reused, warnings)
     for secret in env.input_secrets(config, name=name, draft=True):
         secret.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if not secret.exists():
@@ -157,10 +159,12 @@ def complete(env, config, name, draft):
 
 
 def result(env, name, file, config, reused, warnings, reused_saved=False, **kwargs):
-    candidate = copy.deepcopy(config)
-    if not candidate.get('platform'):
-        candidate['platform'] = 'linux/amd64'
-    env.validate_runtime(candidate)
+    problem = contract_problem(env, config)
+    if problem:
+        return {'environment': name, 'config_file': str(file), 'applied': False, 'reused': reused,
+                'warnings': warnings, 'missing': ['configuration_contract'], 'differences': [problem],
+                'secret_files': [], 'inputs': [],
+                'guidance': '依据本功能依赖描述和项目事实核实差异，经研发确认修补草稿后重新 check-inputs/configure；正式配置未改动'}
     missing = [key for key in ('platform', 'nodes', 'image', 'java') if not config.get(key)]
     secrets = env.input_secrets(config, name=name, draft='drafts' in file.parts)
     missing.extend(str(p) for p in secrets if not p.is_file() or not p.read_bytes().strip())
@@ -168,3 +172,14 @@ def result(env, name, file, config, reused, warnings, reused_saved=False, **kwar
             'warnings': warnings, 'missing': missing, 'secret_files': [str(p) for p in secrets],
             'inputs': [{'field': k, 'value': config.get(k)} for k in ('platform', 'nodes', 'external_tm_url', 'ports', 'java')],
             'preparation': '由 Agent 核验当前源码与工具链后提供'}
+
+
+def contract_problem(env, config):
+    candidate = copy.deepcopy(config)
+    if not candidate.get('platform'):
+        candidate['platform'] = 'linux/amd64'  # 空平台仍由 missing 展示，不隐式保存。
+    try:
+        env.validate_runtime(candidate)
+    except (ValueError, KeyError, TypeError) as error:
+        return str(error)
+    return None

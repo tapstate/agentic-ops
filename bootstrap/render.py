@@ -467,8 +467,9 @@ def check_station(install_root, station, config, init, tree):
     compatibility = load_manifest(install_root)
     require_station_can_adopt(install_root, station, compatibility)
     from workflow import station_operation, task_store
-    task_store.read_current(station)
-    station_operation.read(station)
+    if compatibility.get('validation') != 'feature':
+        task_store.read_current(station)
+        station_operation.read(station)
     for row in station_layout.load(install_root)["roots"]:
         if not row["create"]:
             continue
@@ -601,7 +602,7 @@ def main():
                     install_root, station, config, init, tree
                 )
                 print(
-                    "[AgenticOps][检查][完成] 工位检查通过\n  工位：%s\n  项目：%s\n  Agent：%s\n  版本：%s"
+                    "[AgenticOps][检查][完成] 工位接线检查通过（任务数据由所属功能核验）\n  工位：%s\n  项目：%s\n  Agent：%s\n  版本：%s"
                     % (
                         station,
                         checked_project,
@@ -634,9 +635,9 @@ def main():
             adopted_epoch = None
             if init is not None:
                 adopted_epoch = require_station_can_adopt(install_root, station)
-                # 既有状态的校验前移；首次补建空状态仍沿 initialize_current，不改变原修复合同。
+                # 旧模式保留严格前置检查；功能模式只刷新接线，已有任务材料不改写。
                 state_paths = [task_store.current_path(station)] + [task_store.state_path(station) / name for name in ("tasks", "worktrees")]
-                if any(path.exists() or path.is_symlink() for path in state_paths):
+                if load_manifest(install_root).get('validation') != 'feature' and any(path.exists() or path.is_symlink() for path in state_paths):
                     task_store.read_current(station)
             document = init_document(
                 install_root,
@@ -688,7 +689,10 @@ def main():
             for row in station_layout.load(install_root)["roots"]:
                 if row["create"]:
                     tree.path(row["path"]).mkdir(mode=0o700, exist_ok=True)
-            task_store.initialize_current(station)
+            # 接线刷新不转换任务或覆盖旧现场；数据由所属功能核验修补。
+            existing_state = [task_store.current_path(station)] + [task_store.state_path(station) / name for name in ('tasks', 'worktrees')]
+            if not any(path.exists() or path.is_symlink() for path in existing_state):
+                task_store.initialize_current(station)
         update_git_exclude(station, artifacts)
     except (ValueError, OSError) as error:
         print("[AgenticOps][%s][失败] %s（退出码=2）" % (operation, error), file=sys.stderr)

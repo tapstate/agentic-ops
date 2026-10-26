@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from workflow import engineering_baseline as baseline, project_rules, station_source as source
 
-FORMAT = 'agenticops-handoff-v1'
+FORMAT = 'agenticops-handoff-v2'
 
 
 def prepare(base, task, supplied):
@@ -14,9 +14,7 @@ def prepare(base, task, supplied):
         raise ValueError('接续材料需要 plan/progress/remaining/environment，可选 evidence/discard_repositories/unresolved_operations')
     if any(not isinstance(supplied[key], str) or not supplied[key].strip() for key in required):
         raise ValueError('接续方案、实际进度、剩余事项和环境要求必须明确；无缺项也应说明')
-    evidence = supplied.get('evidence', [])
-    if not isinstance(evidence, list) or any(not isinstance(item, str) or not item.strip() for item in evidence):
-        raise ValueError('evidence 必须为已核实的持久证据引用列表；不能用本机路径冒充持久材料')
+    evidence = verify_evidence(supplied.get('evidence', []))
     discard = supplied.get('discard_repositories', {})
     bindings = task.get('task_repositories', {})
     if not isinstance(discard, dict) or not set(discard) <= set(bindings) or any(not isinstance(ref, str) or not ref.strip() for ref in discard.values()):
@@ -93,7 +91,7 @@ def verify_readback(candidate, receipt):
 
 def continuation_input(packet):
     """只提取既有接管入口需要的代码引用，不导入阶段、授权或 PASS。"""
-    if not isinstance(packet, dict) or packet.get('format') != FORMAT or not isinstance(packet.get('repositories'), dict):
+    if not isinstance(packet, dict) or packet.get('format') not in (FORMAT, 'agenticops-handoff-v1') or not isinstance(packet.get('repositories'), dict):
         raise ValueError('接续材料格式不符，先依据当前合同核实并补齐')
     from workflow import task_store
     task_store.validate_issue_key(packet.get('issue_key'))
@@ -111,3 +109,91 @@ def continuation_input(packet):
         elif row.get('disposition') != 'discarded':
             raise ValueError('接续源码处置不明确：' + name)
     return result
+
+
+def verify_evidence(items, expected=None):
+    """Agent 原生取回材料，所属功能核对字节；不自行联网或保存材料内容。"""
+    import hashlib
+    from pathlib import Path
+    if not isinstance(items, list):
+        raise ValueError('证据回读必须为列表')
+    results = []
+    for item in items:
+        if (not isinstance(item, dict) or set(item) != {'reference', 'source_ref', 'local_file'}
+                or any(not isinstance(v, str) or not v.strip() for v in item.values())):
+            raise ValueError('必要证据须提供 reference、原生回读 source_ref 和已取回的 local_file，不能仅提供链接')
+        path = Path(item['local_file'])
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('必要证据回读必须为普通文件')
+        before = path.stat()
+        checksum = hashlib.sha256()
+        with path.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                checksum.update(chunk)
+        after = path.stat()
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise ValueError('必要证据在核验过程中变化，重新取回')
+        results.append({'reference': item['reference'], 'source_ref': item['source_ref'],
+                        'sha256': checksum.hexdigest(), 'size_bytes': after.st_size})
+    if len({row['reference'] for row in results}) != len(results):
+        raise ValueError('必要证据引用重复')
+    if expected is not None:
+        if (not isinstance(expected, list) or any(not isinstance(row, dict) for row in expected)
+                or len(expected) != len(results)):
+            raise ValueError('旧证据缺少内容身份或回读不全，先从项目核实并经研发确认补齐接续材料')
+        actual = {row['reference']: (row['sha256'], row['size_bytes']) for row in results}
+        wanted = {row.get('reference'): (row.get('sha256'), row.get('size_bytes')) for row in expected}
+        if actual != wanted or len(wanted) != len(expected):
+            raise ValueError('必要材料与归档内容不一致，不能报告恢复完成')
+    return results
+
+
+def restore(base, packet, expected_digest, expected_run_id, expected_revision, source_ref, decision_ref, evidence):
+    """将已核实成果接回当前任务；业务阶段、授权和质量结论由原入口检查。"""
+    from workflow import task_store
+    if baseline.digest(packet) != expected_digest:
+        raise ValueError('接续正文摘要不匹配，先核对 Jira 最新有效决定')
+    continuations = continuation_input(packet)
+    for key in ('plan', 'progress', 'remaining', 'environment'):
+        if not isinstance(packet.get(key), str) or not packet[key].strip():
+            raise ValueError('恢复缺少方案、进度、剩余事项或环境说明，先从项目补齐')
+    if any(not isinstance(value, str) or not value.strip() for value in (source_ref, decision_ref)):
+        raise ValueError('恢复须记录 Jira 来源及已核实最新有效成果的决定')
+    verified = verify_evidence(evidence, packet.get('evidence', []))
+    rules = project_rules.load_admission(station=base)
+    if project_rules.scan_sensitive(rules, json.dumps(packet, ensure_ascii=False)):
+        raise ValueError('恢复材料含敏感内容，先脱敏，不保存原文')
+    with task_store.task_state_lock(base):
+        task = task_store.check_expected_run(base, packet['issue_key'], expected_run_id)
+        if task['task_class'] != packet.get('task_class'):
+            raise ValueError('恢复任务类型不一致')
+        saved = task['facts'].get('handoff_resume')
+        if saved and saved.get('digest') == expected_digest:
+            return {'status': 'already_restored', 'run_id': task['run_id'], 'stage': task['stage']}
+        if saved or task['_revision'] != expected_revision:
+            raise ValueError('任务已有恢复决定或 revision 已变化，核实当前成果后再继续')
+        for name, row in continuations.items():
+            binding = task['task_repositories'].get(name)
+            entry = task['engineering_baseline']['repositories'].get(name)
+            if (not binding or not entry or binding['work_branch'] != row['work_branch']
+                    or entry['commit_sha'] != row['baseline_sha']):
+                raise ValueError('先通过正常仓库入口接回归档分支及历史基线：' + name)
+            path = source.repository_path(base, name)
+            source.identity(path, entry['origin'])
+            source.require_clean(path)
+            if (source.git(path, 'branch', '--show-current').stdout.strip() != row['work_branch']
+                    or source.git(path, 'rev-parse', 'HEAD').stdout.strip() != row['expected_head']):
+                raise ValueError('恢复代码与归档 Head 不一致，先核实后续成果：' + name)
+        record = {key: packet[key] for key in ('plan', 'progress', 'remaining', 'environment')}
+        record.update(digest=expected_digest, source_ref=source_ref, decision_ref=decision_ref,
+                      evidence=verified, repositories=packet['repositories'],
+                      pending_external=packet.get('pending_external', []),
+                      unresolved_operations=packet.get('unresolved_operations', {}))
+        if project_rules.scan_sensitive(rules, json.dumps(record, ensure_ascii=False)):
+            raise ValueError('恢复来源或证据含敏感内容，先脱敏')
+        task['facts']['handoff_resume'] = record
+        task['history'].append({'event': 'handoff_restored', 'ts': task_store.now(), 'digest': expected_digest})
+        task_store.write_task(base, task)
+        return {'status': 'restored', 'run_id': task['run_id'], 'stage': task['stage'],
+                'remaining': record['remaining'],
+                'guidance': '已接回方案与成果来源；按当前项目合同复用有效决定和验证，只补缺项，不导入旧授权或 PASS'}

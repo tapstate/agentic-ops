@@ -71,12 +71,13 @@ def operation_summary(operation):
         return None
     result = {key: operation[key] for key in (
         "operation_id", "kind", "run_id", "expected_revision", "request_digest",
-        "phase", "status", "archive_ref", "archive_result") if key in operation}
+        "phase", "status", "archive_ref", "archive_result", "cleanup_result") if key in operation}
     steps = operation.get("steps", {})
     result["completed_steps"] = [name for name, step in steps.items() if step.get("receipt") is not None]
     result["pending_steps"] = [name for name, step in steps.items()
                                if step.get("receipt") is None and not step.get("superseded_by")]
     result["superseded_steps"] = [name for name, step in steps.items() if step.get("superseded_by")]
+    result["pending_external_results"] = [row["operation_id"] for row in operation.get("retained_results", []) if row.get("result", {}).get("pending_external")]
     result["details"] = "repository context --full（读取完整操作与恢复回执）"
     return result
 
@@ -112,6 +113,16 @@ def cmd_handoff_continuations(args):
     return 0
 
 
+def cmd_handoff_restore(args):
+    from workflow import task_handoff
+    packet = station_context.read_object(args.input, '接续正文')
+    evidence = json.loads(Path(args.evidence).read_text()) if args.evidence else []
+    result = task_handoff.restore(args.dir, packet, args.expected_digest, args.expected_run_id,
+        args.expected_revision, args.source_ref, args.decision_ref, evidence)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_lifecycle(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -122,6 +133,13 @@ def cmd_lifecycle(args):
                              args.expected_revision, args.operation_id, request, jira_readback=readback)
     print(json.dumps({key: result.get(key) for key in ("operation_id", "kind", "run_id", "status", "cleanup_result", "archive_result")}, ensure_ascii=False))
     return 0 if result['status'] == 'done' else 2
+
+
+def cmd_cleanup_readback(args):
+    from workflow import station_cleanup
+    receipt = station_context.read_object(args.input, '清理成果更正回读')
+    print(json.dumps(station_cleanup.correction_readback(args.dir, args.operation_id, receipt), ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_cleanup_plan(args):
@@ -747,6 +765,19 @@ def main():
     parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    data = sub.add_parser('data', help='任务模块的依赖诊断与受控格式修补')
+    data_children = data.add_subparsers(dest='data_action', required=True)
+    for action in ('inspect', 'preview', 'apply'):
+        child = data_children.add_parser(action)
+        child.add_argument('--dir', default='.')
+        if action != 'inspect':
+            child.add_argument('--input', required=True)
+        if action == 'apply':
+            child.add_argument('--proposal-digest', required=True)
+            child.add_argument('--decision-ref', required=True)
+            child.add_argument('--writers-stopped', action='store_true')
+        child.set_defaults(func=task_store.data_command)
+
     replan = sub.add_parser("replan", help="同一 run 内修订方案并返回 design_review，保留源码与 PR")
     children = replan.add_subparsers(dest="replan_action", required=True)
     for action in ("prepare", "apply", "abort"):
@@ -782,6 +813,16 @@ def main():
     p.add_argument('--expected-digest', required=True)
     p.add_argument('--dir', default='.')
     p.set_defaults(func=cmd_handoff_continuations)
+    p = sub.add_parser('handoff-restore', help='核实源码和必要材料后接回方案进度，不复制旧阶段或 PASS')
+    p.add_argument('--input', required=True)
+    p.add_argument('--expected-digest', required=True)
+    p.add_argument('--expected-run-id', required=True)
+    p.add_argument('--expected-revision', type=int, required=True)
+    p.add_argument('--source-ref', required=True)
+    p.add_argument('--decision-ref', required=True)
+    p.add_argument('--evidence', help='原生取回必要材料后的文件引用列表')
+    p.add_argument('--dir', default='.')
+    p.set_defaults(func=cmd_handoff_restore)
     for kind in ("archive", "clean"):
         p = sub.add_parser(kind)
         p.add_argument("--issue-key", required=True)
@@ -793,6 +834,11 @@ def main():
         p.add_argument("--details", action="store_true")
         p.add_argument("--jira-readback", help="原生 Jira 回读 JSON；不执行网络写入")
         p.set_defaults(func=cmd_lifecycle)
+    p = sub.add_parser('cleanup-readback', help='核验清理成果更正的原生 Jira 回读，不重做本地清理')
+    p.add_argument('--dir', default='.')
+    p.add_argument('--operation-id', required=True)
+    p.add_argument('--input', required=True)
+    p.set_defaults(func=cmd_cleanup_readback)
     p = sub.add_parser("cleanup-plan")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--expected-run-id", required=True)

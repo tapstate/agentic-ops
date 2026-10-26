@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
-from workflow import station_context, task_store, station_operation, environment_config
+from workflow import station_context, task_store, station_operation, environment_config, station_resources
 from projects.tapdata.scripts import environment_inputs
 
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
@@ -213,18 +213,20 @@ class Environment:
     def lock(self, operation_name=None):
         # 与接管、源码刷新和退出共用锁；不创建任务或更改 current。
         read_only = operation_name in ("status", "list", "check-inputs")
-        with task_store.task_state_lock(self.station, execution=not read_only):
+        cleanup_only = operation_name == "uninstall"
+        with task_store.task_state_lock(self.station, execution=not (read_only or cleanup_only)):
             if station_context.read_binding(self.station) != self.binding:
                 raise EnvironmentError("工位绑定已变化，请重新读取现场")
-            operation = station_operation.read(self.station)
-            if operation and operation["status"] != "done":
-                read_only = operation_name in ("status", "list", "check-inputs")
-                cleanup = operation_name == "uninstall" and operation["kind"] == "clean"
-                if not (read_only or cleanup):
-                    raise EnvironmentError("工位存在未完成操作，请先恢复原操作")
             if read_only:
                 yield
                 return
+            local_identity = None
+            if cleanup_only:
+                from workflow import execution
+                local_identity = execution.enter(self.station, coordination=False)
+            operation = station_operation.read(self.station)
+            if operation and operation['status'] != 'done' and not (cleanup_only and operation['kind'] == 'clean'):
+                raise EnvironmentError('工位存在未完成操作，请先恢复原操作')
             with self.configuration_lock():
                 if self.config_dir.exists():
                     for item in list(self.config_dir.iterdir()):
@@ -232,6 +234,8 @@ class Environment:
                         if match:
                             self.store.recover(match[1])
                 yield
+            if local_identity is not None:
+                execution.touch(self.station, local_identity)
 
     @contextlib.contextmanager
     def configuration_lock(self):
@@ -375,21 +379,20 @@ class Environment:
         return state
 
     def docker_resources(self):
-        rows = call(["docker", "ps", "-a", "--filter", "label=com.docker.compose.project=" + self.project, "--format", "{{json .}}"])
-        containers = []
-        for line in rows.splitlines():
-            row = json.loads(line)
-            info = json.loads(call(["docker", "inspect", row["ID"]]))[0]
-            if info["Config"].get("Labels", {}).get(LABEL) != self.identity:
-                raise EnvironmentError("Compose 容器归属不明，停止操作")
-            containers.append(info)
-        networks = call(["docker", "network", "ls", "--filter", "label=com.docker.compose.project=" + self.project, "--format", "{{.ID}}"])
-        self.network_ids = networks.splitlines()
-        for ident in self.network_ids:
-            info = json.loads(call(["docker", "network", "inspect", ident]))[0]
-            if info.get("Labels", {}).get(LABEL) != self.identity:
-                raise EnvironmentError("Compose 网络归属不明，停止操作")
-        return containers
+        try:
+            inventory = station_resources.inspect_docker_project(
+                lambda args: call(['docker', *args]), self.project, self.identity, LABEL)
+        except ValueError as error:
+            raise EnvironmentError(str(error)) from None
+        self.network_ids = [item['Id'] for item in inventory['networks']]
+        return inventory['containers']
+
+    def release_resources(self):
+        try:
+            return station_resources.release_docker_project(
+                lambda args: call(['docker', *args]), self.project, self.identity, LABEL, stop_seconds=45)
+        except ValueError as error:
+            raise EnvironmentError(str(error)) from None
 
     def compose(self, *args, timeout=300):
         return call(["docker", "compose", "-p", self.project, "-f", str(self.root / "compose.json"), *args], timeout=timeout)
@@ -765,12 +768,7 @@ class Environment:
                     item.chmod(0o700 if item.is_dir() else 0o600)
         state["phase"] = "stopping"
         write_json(self.root / "active.json", state)
-        self.compose("down", "--remove-orphans")
-        if self.docker_resources():
-            raise EnvironmentError("容器清理未完成，保留运行现场")
-        networks = call(["docker", "network", "ls", "--filter", "label=com.docker.compose.project=" + self.project, "--format", "{{.ID}}"])
-        if networks.strip():
-            raise EnvironmentError("网络清理未完成，保留运行现场")
+        self.release_resources()
         state["phase"] = "stopped"
         write_json(self.root / "active.json", state)
         if erase:

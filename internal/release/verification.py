@@ -1,4 +1,4 @@
-"""发布专用隔离验收证据；不消费开发通过记录，不管理发布授权。"""
+"""代码验收复用与隔离补验；交付身份和合并条件由发布入口检查。"""
 from __future__ import annotations
 
 import argparse
@@ -83,6 +83,15 @@ def verifier_digest(root):
     return evidence.digest(sorted(items))
 
 
+def record_time(value):
+    """按实际 UTC 时刻比较；损坏时间不能参与通过结果复用。"""
+    try:
+        result = datetime.fromisoformat(value['verified_at'].replace('Z', '+00:00'))
+        return result.astimezone(timezone.utc) if result.tzinfo else None
+    except (KeyError, TypeError, AttributeError, ValueError, OverflowError):
+        return None
+
+
 def run_command(command, root, env, log):
     """取消时回收整个测试进程组，不能留下继续写证据的子进程。"""
     process = subprocess.Popen(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -105,11 +114,13 @@ def run_command(command, root, env, log):
 class Verification:
     def __init__(self, root, base, head, identity):
         self.root = Path(root).resolve()
-        self.base, self.head = premerge(self.root, base, head)
+        self.base = base
+        self.head = git(self.root, 'rev-parse', head + '^{commit}')
+        self.tree = evidence.candidate_tree(self.root, 'range', self.head)
         if not re.fullmatch(r'(?:v[0-9]+\.[0-9]+|[A-Z][A-Z0-9]+-[1-9][0-9]*)', identity):
             raise ValueError('无效发布版本或 Jira 编号')
         self.identity = identity
-        self.key = evidence.digest([identity, self.base, self.head])
+        self.key = self.tree
         self.path = safe_path(self.root, '.local/release/verification-' + self.key + '.json')
 
     def binding(self, snapshot, uv):
@@ -126,8 +137,7 @@ class Verification:
                 os.environ.pop('AGENTIC_OPS_INTERNAL_TEST_PYTHON', None)
             else:
                 os.environ['AGENTIC_OPS_INTERNAL_TEST_PYTHON'] = old
-        return dict(repository='tapstate/agentic-ops', identity=self.identity, base=self.base,
-                    head=self.head, tree=evidence.candidate_tree(self.root, 'range', self.head),
+        return dict(repository='tapstate/agentic-ops', tree=self.tree,
                     verifier=verifier_digest(Path(__file__).resolve().parents[2]),
                     contract=evidence.contract_digest(), environment=environment,
                     uv=subprocess.check_output([uv, '--version'], text=True).strip())
@@ -141,7 +151,7 @@ class Verification:
                 or value.get('status') != 'passed' or value.get('binding') != binding
                 or not isinstance(value.get('run_id'), str)
                 or not re.fullmatch(r'[0-9a-f]{32}', value['run_id'])
-                or not isinstance(value.get('verified_at'), str) or not value.get('verified_at')):
+                or record_time(value) is None):
             return None
         checks = value.get('checks')
         if not isinstance(checks, list) or len(checks) != len(CHECKS):
@@ -155,14 +165,36 @@ class Verification:
                 return None
         return value
 
+    def read_development(self, binding):
+        """直接读取 v6 完整验收，不复制通过状态或审批到另一份台账。"""
+        directory = safe_path(self.root, '.local/story-gate/evidence')
+        records = []
+        for path in directory.glob('*.json'):
+            safe_path(self.root, str(path.relative_to(self.root)))
+            try:
+                value = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if (isinstance(value, dict) and isinstance(value.get('binding'), dict)
+                    and value['binding'].get('candidate_tree') == self.tree):
+                records.append(value)
+        if not records:
+            return None
+        # 同树后续失败或不完整记录不能退回更早通过结果。
+        value = max(records, key=lambda item: (record_time(item) or datetime.max.replace(tzinfo=timezone.utc),
+                    not evidence.full_acceptance_matches(item, self.tree, binding['environment'])))
+        return value
+
     def execute(self, mode):
         uv = os.environ.get('AGENTIC_OPS_UV') or shutil.which('uv')
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
-        lock = safe_path(self.root, '.local/release/.verification.lock')
+        # 与开发验收共用现役锁，读取期间不能并发重验撤销正在消费的结果。
+        lock = safe_path(self.root, '.local/story-gate/runs/.verification.lock')
         with TaskLock(lock), tempfile.TemporaryDirectory(prefix='ao-release-check-') as temp:
             if mode == 'verify':
-                atomic_write_json(self.path, dict(schema_version=SCHEMA, status='running'))
+                atomic_write_json(self.path, dict(schema_version=SCHEMA, status='running',
+                                                  verified_at=datetime.now(timezone.utc).isoformat()))
             if not uv:
                 raise ValueError('缺少 uv，无法核验发布工具环境')
             snapshot = Path(temp) / 'candidate'
@@ -171,12 +203,27 @@ class Verification:
             try:
                 binding = self.binding(snapshot, uv)
                 previous = self.read(binding)
+                if mode != 'verify':
+                    development = self.read_development(binding)
+                    try:
+                        local = json.loads(self.path.read_text())
+                    except (OSError, ValueError):
+                        local = {} if not self.path.exists() else {'verified_at': '~'}
+                    local_time = record_time(local) if self.path.exists() else datetime.min.replace(tzinfo=timezone.utc)
+                    development_time = record_time(development)
+                    if development:
+                        valid = (development_time is not None and evidence.full_acceptance_matches(
+                            development, self.tree, binding['environment']))
+                        if development_time is None or (local_time is not None and development_time > local_time):
+                            previous = development if valid else None
+                        elif development_time == local_time and not valid:
+                            previous = None
                 if previous and mode != 'verify':
                     return dict(previous, reused=True)
                 if mode == 'check':
-                    raise ValueError('缺少匹配的发布完整验收证据；请执行 release.sh verify（恢复时提供 --merged-pr），不得用开发证据替代')
+                    raise ValueError('缺少匹配的完整四项验收证据；请执行 prepare 补验，verify 用于明确重验')
                 record = dict(schema_version=SCHEMA, purpose='release', status='running', binding=binding,
-                              run_id=uuid.uuid4().hex, checks=[])
+                              run_id=uuid.uuid4().hex, checks=[], verified_at=datetime.now(timezone.utc).isoformat())
                 atomic_write_json(self.path, record)
                 os.chmod(self.path, 0o600)
                 try:
@@ -188,7 +235,7 @@ class Verification:
                     record.update(status='passed', verified_at=datetime.now(timezone.utc).isoformat())
                     atomic_write_json(self.path, record)
                 except BaseException:
-                    record['status'] = 'failed'
+                    record.update(status='failed', verified_at=datetime.now(timezone.utc).isoformat())
                     atomic_write_json(self.path, record)
                     raise
                 return dict(record, reused=False)

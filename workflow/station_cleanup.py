@@ -82,6 +82,7 @@ def validate(plan):
 def clear_state(base, operation):
     from workflow import station_clean, station_directories
     station_clean._clear_active(base, operation)
+    task_store.clear_data_backups(base)
     root = task_store.state_path(base)
     for name in ('events.jsonl', 'git-ref-cache-v2.json', 'git-ref-cache-v2.json.lock'):
         path = root / name
@@ -101,8 +102,11 @@ def finish(base, operation, identity):
     from workflow import execution
     if task_store.read_current(base)['current'] is not None:
         raise ValueError('任务尚未解除，不能结束清理')
+    retained = [row for row in operation.get('retained_results', []) if row.get('result', {}).get('pending_external')]
     for key in operations.PAYLOAD_FIELDS:
         operation.pop(key, None)
+    if retained:
+        operation['retained_results'] = retained
     operation['phase'] = 'finalizing'
     operation['status'] = 'running'
     operation['cleanup_result'].update(released=True, complete=False, residuals=[])
@@ -166,16 +170,22 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
                 raise ValueError('先确认必要材料已可靠保全，或明确接受丢失')
             if cleanup_plan['source']['requires_decision'] and request['materials'] != 'discard':
                 raise ValueError('源码尚有未保全或未核实内容；先保全后重检，或明确放弃')
+            correction = prepare_correction(base, task, operation_id, request)
             if old and old['status'] != 'done':
                 operation = operations.handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan)
             else:
                 operation = operations.begin(base, 'clean', operation_id, revision, request, run_id)
             operation['cleanup_plan'] = cleanup_plan
             operation['exit_task'] = task
+            if correction:
+                operation['cleanup_result'] = {'progress_correction': correction, 'pending_external': True}
             operations.save(base, operation)
         operation['cleanup_executor'] = identity
         validate(cleanup_plan)
         result = {'released': False, 'complete': False, 'residuals': [], 'resources': []}
+        if operation.get('cleanup_result', {}).get('progress_correction'):
+            result['progress_correction'] = operation['cleanup_result']['progress_correction']
+            result['pending_external'] = pending_correction(result)
         operation['cleanup_result'] = result
         try:
             if rules.load(base)['digests'] != cleanup_plan['config']['digests']:
@@ -247,3 +257,64 @@ def cancel(base, operation_id, decision_ref):
         operations.finish(base, operation)
         execution.touch(base, identity)
         return operation
+
+
+def prepare_correction(base, task, operation_id, request):
+    """可选的成果撤回说明，与本地材料删除分开；不自动改变 Jira 状态。"""
+    text = request.get('progress_correction')
+    if text is None:
+        return None
+    if not task or not isinstance(text, str) or not text.strip():
+        raise ValueError('成果更正需要当前任务和已确认的有效进度说明')
+    from workflow import project_rules
+    policy = project_rules.load_admission(station=base)
+    if project_rules.scan_sensitive(policy, text):
+        raise ValueError('成果更正包含敏感内容，请脱敏')
+    site = project_rules.load_profile(station=base).get('jira', {}).get('site')
+    if not isinstance(site, str) or not site.startswith('https://'):
+        raise ValueError('缺少 Jira 站点，先核实更正目标')
+    body = ('AgenticOps 清理成果更正 ' + operation_id + '\n\n任务：' + task['issue_key']
+            + '\n原运行：' + task['run_id'] + '\n\n' + text.strip()
+            + '\n\n此记录纠正可恢复成果，不删除历史，也不代表任务完成。')
+    return {'status': 'pending', 'site': site.rstrip('/'), 'packet': {'issue_key': task['issue_key']},
+            'body': body, 'digest': baseline.digest(body), 'decision_ref': request['decision_ref']}
+
+
+def pending_correction(result):
+    return bool(result.get('progress_correction', {}).get('status') == 'pending')
+
+
+def correction_readback(base, operation_id, receipt):
+    """原生 Jira 写入后核对原正文；允许新任务期间收尾旧清理，不重获接管权。"""
+    from workflow import task_handoff
+    with task_store.task_state_lock(base, execution=False):
+        operation = operations.read(base)
+        if not operation:
+            raise ValueError('没有清理回读线索')
+        rows = [{'operation_id': operation['operation_id'], 'result': operation.get('cleanup_result', {})}]
+        rows += operation.get('retained_results', [])
+        found = [row['result']['progress_correction'] for row in rows
+                 if row['operation_id'] == operation_id and row.get('result', {}).get('progress_correction')]
+        if len(found) != 1:
+            raise ValueError('没有唯一匹配的清理成果更正')
+        candidate = found[0]
+        verified = task_handoff.verify_readback(candidate, receipt)
+        if verified.get('status') == 'not_sent':
+            raise ValueError('成果更正尚未保存，保留待办；不要将未发送标记为已同步')
+        if candidate.get('receipt') and candidate['receipt'] != verified:
+            raise ValueError('回读与已保存记录不同，先核实原写入')
+        candidate.update(status='saved', receipt=verified)
+        for row in rows:
+            if row['operation_id'] == operation_id:
+                row['result']['pending_external'] = False
+        operations.save(base, operation)
+        return {'operation_id': operation_id, 'progress_correction': 'saved', 'jira': verified}
+
+
+def pending_corrections(base):
+    operation = operations.read(base)
+    if not operation:
+        return []
+    rows = [{'operation_id': operation['operation_id'], 'result': operation.get('cleanup_result', {})}]
+    rows += operation.get('retained_results', [])
+    return [row['operation_id'] for row in rows if pending_correction(row.get('result', {}))]

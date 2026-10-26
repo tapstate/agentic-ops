@@ -53,6 +53,9 @@ class FakeEnvironment(mod.Environment):
     def docker_resources(self):
         return self.containers
 
+    def release_resources(self):
+        self.compose("down", "--remove-orphans")
+
     def compose(self, *args, timeout=300):
         self.history.append(args[0])
         if args[0] == "up":
@@ -78,6 +81,7 @@ class EnvironmentTests(unittest.TestCase):
     def test_read_only_query_does_not_claim_or_repair_configuration(self):
         from workflow import execution
         before = mod.task_store.current_path(self.station).read_bytes()
+        (self.station / '.agenticops/operation.json').write_text('invalid historical operation')
         old = self.env.config_dir / '.dev-previous'
         old.mkdir()
         (old / 'recoverable').write_text('keep')
@@ -88,6 +92,19 @@ class EnvironmentTests(unittest.TestCase):
         self.assertTrue((old / 'recoverable').exists())
         self.assertFalse((self.env.store.root / '.lock').exists())
 
+
+    def test_uninstall_uses_local_control_without_reclaiming_jira_task(self):
+        mod.task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
+            'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
+            'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
+            'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
+        with mock.patch('workflow.jira_coordination.require', side_effect=ValueError('Jira 已交接')) as require:
+            with self.env.lock('uninstall'):
+                self.assertEqual('run-test', mod.task_store.read_task(self.station)['run_id'])
+            require.assert_not_called()
+            with self.assertRaisesRegex(ValueError, 'Jira 已交接'):
+                with self.env.lock('configure'):
+                    self.fail('普通环境写入仍需接管检查')
 
     def test_early_database_rejection_precedes_build(self):
         with mock.patch.object(self.env, 'early_probe', return_value={'collection_count': 2}):
@@ -507,6 +524,25 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(record["commands"][0]["exit_code"], 0)
         self.assertTrue((candidate / "bundle/tapdata").is_file())
 
+    def test_failed_helper_can_use_native_artifacts_through_original_verifier(self):
+        output = self.build_fixture()  # 显式制品夹具；不冒充真实 TapData 编译。
+        real = mod.Environment(self.station)
+        self.config['build'] = [{'cwd': 'tapdata/tapdata', 'argv': [sys.executable, '-c', 'raise SystemExit(7)']}]
+        with mock.patch.object(real, 'snapshot', return_value={}):
+            with self.assertRaisesRegex(mod.EnvironmentError, '宿主机构建失败'):
+                real.build(self.config)
+        # Agent 核实原生准备结果后，配方只做实际必要检查，原功能继续验证全部装配。
+        self.config['build'] = [{'cwd': 'tapdata/tapdata', 'argv': ['test', '-s', 'output/components/tm.jar']}]
+        with mock.patch.object(real, 'snapshot', return_value={}), mock.patch.object(real, 'probe', return_value={}), mock.patch.object(mod, 'call', return_value=''):
+            candidate, record = real.build(self.config)
+        self.assertTrue(record['validated'])
+        self.assertEqual(0, record['commands'][0]['exit_code'])
+        (output / 'components/tapdata-agent.jar').unlink()
+        with mock.patch.object(real, 'snapshot', return_value={}), mock.patch.object(mod, 'call') as external:
+            with self.assertRaisesRegex(mod.EnvironmentError, '装配缺失'):
+                real.build(self.config)
+        external.assert_not_called()
+
     def test_native_bundle_is_verified_before_consumption(self):
         output = self.build_fixture()
         script = """import hashlib,json,shutil,sys
@@ -740,12 +776,41 @@ files={str(p.relative_to(destination)):hashlib.sha256(p.read_bytes()).hexdigest(
             self.env.deploy("dev")
         self.assertFalse(self.env.history)
 
+    def test_environment_release_uses_owned_identity_and_preserves_named_volumes(self):
+        real = mod.Environment(self.station)
+        state = {'container': True, 'network': True, 'volume': True}
+        calls = []
+        labels = {mod.LABEL: real.identity, 'com.docker.compose.project': real.project}
+        def docker(argv, **kwargs):
+            calls.append(argv)
+            args = argv[1:]
+            if args[0] == 'ps': return 'container-id' if state['container'] else ''
+            if args[:2] == ['network', 'ls']: return 'network-id' if state['network'] else ''
+            if args[0] == 'inspect':
+                return json.dumps([{'Id': 'container-id', 'Config': {'Labels': labels},
+                    'Mounts': [{'Type': 'volume'}] if state['volume'] else []}])
+            if args[:2] == ['network', 'inspect']: return json.dumps([{'Id': 'network-id', 'Labels': labels}])
+            if args[0] == 'stop': return ''
+            if args[0] == 'rm': state['container'] = False; return ''
+            if args[:2] == ['network', 'rm']: state['network'] = False; return ''
+            raise AssertionError(argv)
+        with mock.patch.object(mod, 'call', side_effect=docker):
+            with self.assertRaisesRegex(mod.EnvironmentError, '数据卷'):
+                real.release_resources()
+            self.assertFalse(any('stop' in row for row in calls))
+            state['volume'] = False
+            real.release_resources()
+            real.release_resources()  # 回读为空可重复收尾。
+        self.assertIn(['docker', 'stop', '--time', '45', 'container-id'], calls)
+        self.assertFalse(state['container'] or state['network'])
+        self.assertFalse(any('prune' in row or 'volume' in row or 'image' in row for row in calls))
+
     def test_unknown_container_label_rejected(self):
         real = mod.Environment(self.station)
         def docker(argv, **kwargs):
             if argv[1] == "ps":
-                return '{"ID":"unowned"}\n'
-            return json.dumps([{"Config": {"Labels": {mod.LABEL: "other-station"}}}])
+                return 'unowned\n'
+            return json.dumps([{"Id": "unowned", "Config": {"Labels": {mod.LABEL: "other-station"}}}])
         with mock.patch.object(mod, "call", side_effect=docker):
             with self.assertRaisesRegex(mod.EnvironmentError, "归属"):
                 real.docker_resources()

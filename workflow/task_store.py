@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""单任务工位状态；只保留 current-task.json，不迁移旧状态。"""
+"""单任务工位状态；所属数据的读取、校验、受控格式修补与恢复材料回收。"""
 from __future__ import annotations
 import copy
 import json
@@ -108,7 +108,7 @@ def validate_current(document):
     try:
         quality_contract.validate(document, "task-state.schema.json")
     except ValueError as error:
-        raise ValueError("工位状态结构无效：%s" % error) from error
+        raise ValueError("工位状态结构无效：%s；先用 task.py data inspect 查看所属合同和差异，Agent 核实并经研发确认后沿 data preview/apply 修补，不手改阶段或 PASS" % error) from error
     from workflow import execution
     execution.validate(document.get("execution_control"))
     from workflow import jira_coordination
@@ -467,3 +467,133 @@ def set_status(base, issue_key, status):
     task = read_task(base, issue_key)
     task["outcome"] = "completed"
     write_task(base, task)
+
+
+def inspect_data(base):
+    """任务模块的依赖诊断；不修补，不授予执行权。"""
+    import hashlib
+    from workflow import station_context
+    with task_state_lock(base, execution=False):
+        path = current_path(base)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('任务数据必须为普通文件')
+        raw = path.read_bytes()
+        document = station_context.read_object(path, '任务数据')
+        try:
+            validate_current(document)
+            differences = []
+        except ValueError as error:
+            differences = [str(error)]
+        return {'owner': 'workflow.task_store', 'contract': 'contracts/task-state.schema.json',
+                'source_digest': hashlib.sha256(raw).hexdigest(), 'source_version': document.get('schema_version'),
+                'compatible': not differences, 'differences': differences, 'document': document,
+                'guidance': '先读取任务依赖描述与项目事实，准备字段对应分析；研发确认后由 task.py data apply 应用，不能改阶段值、授权或 PASS'}
+
+
+def preview_data_repair(base, request):
+    """只做任务字段的保值改名与格式版本采用，业务缺项走所属现役入口。"""
+    from workflow import quality_contract, engineering_baseline
+    if (not isinstance(request, dict) or set(request) != {'source_digest', 'renames', 'analysis_ref'}
+            or not isinstance(request['analysis_ref'], str) or not request['analysis_ref'].strip()
+            or not isinstance(request['renames'], dict)):
+        raise ValueError('修补输入需要 source_digest、renames 和项目事实分析来源 analysis_ref')
+    report = inspect_data(base)
+    if report['source_digest'] != request['source_digest']:
+        raise ValueError('任务数据已变化；重新读取差异，不能覆盖新现场')
+    document = copy.deepcopy(report['document'])
+    if type(document.get('schema_version')) is not int or document['schema_version'] < 1:
+        raise ValueError('原格式版本含义不明，先核实原合同，不能猜测')
+    contract = json.loads((quality_contract.ROOT / 'task-state.schema.json').read_text(encoding='utf-8'))
+    fields = contract['properties']['current']['properties']
+    current = document.get('current')
+    renames = request['renames']
+    if any(not isinstance(key, str) or not isinstance(value, str) for key, value in renames.items()):
+        raise ValueError('字段对应必须是名称到名称')
+    if len(set(renames.values())) != len(renames):
+        raise ValueError('多个字段不能覆盖同一目标')
+    for old, new in renames.items():
+        if (not isinstance(old, str) or not isinstance(new, str) or not isinstance(current, dict)
+                or old in fields or old not in current or new not in fields or new in current):
+            raise ValueError('只允许未识别旧字段保值改名为缺失的任务字段，不覆盖已有事实')
+        current[new] = current.pop(old)
+    document['schema_version'] = contract['properties']['schema_version']['const']
+    validate_current(document)
+    result = {'source_digest': report['source_digest'], 'request': request,
+              'contract_digest': engineering_baseline.digest(contract), 'candidate': document}
+    result['proposal_digest'] = engineering_baseline.digest(result)
+    return result
+
+
+def apply_data_repair(base, request, proposal_digest, decision_ref, writers_stopped=False):
+    """研发确认后 CAS 应用；保留原件，原 run/op 和执行占用不变。"""
+    from workflow import execution, station_context
+    if not writers_stopped or not isinstance(decision_ref, str) or not decision_ref.strip():
+        raise ValueError('修补需研发确认差异的 decision_ref 及真实停写声明')
+    identity = execution.session_id()
+    source_digest = request.get('source_digest') if isinstance(request, dict) else None
+    if not isinstance(source_digest, str) or not re.fullmatch('[0-9a-f]{64}', source_digest):
+        raise ValueError('原数据摘要无效')
+    with task_state_lock(base, execution=False):
+        if current_path(base).is_symlink() or not current_path(base).is_file():
+            raise ValueError('任务数据必须为普通文件')
+        directory = state_path(base) / 'task-state-backups'
+        if directory.is_symlink() or directory.exists() and not directory.is_dir():
+            raise ValueError('任务修补备份目录异常，保留现场')
+        backup = directory / (source_digest + '.json')
+        if backup.exists() or backup.is_symlink():
+            if backup.is_symlink():
+                raise ValueError('任务修补备份不能是符号链接')
+            receipt = station_context.read_object(backup, '任务修补备份')
+            current = station_context.read_object(current_path(base), '任务数据')
+            if (receipt.get('proposal_digest') == proposal_digest and receipt.get('request') == request
+                    and current == receipt.get('candidate')):
+                validate_current(current)
+                return {'status': 'already_applied', 'backup': str(backup), 'proposal_digest': proposal_digest}
+        preview = preview_data_repair(base, request)
+        if preview['proposal_digest'] != proposal_digest:
+            raise ValueError('修补候选或依赖合同变化，重新展示并确认')
+        raw = current_path(base).read_text(encoding='utf-8')
+        if json.loads(raw) == preview['candidate']:
+            return {'status': 'unchanged', 'proposal_digest': proposal_digest}
+        directory.mkdir(mode=0o700, exist_ok=True)
+        receipt = dict(preview, original=raw, decision_ref=decision_ref, repairer_session=identity)
+        if backup.exists():
+            saved = station_context.read_object(backup, '任务修补备份')
+            if any(saved.get(key) != receipt[key] for key in ('original', 'request', 'candidate', 'proposal_digest')):
+                raise ValueError('原数据已有不同修补备份，核实原操作，不能覆盖')
+        else:
+            _write_json_atomic(backup, receipt)
+        # 同一工位锁保护原件与候选，版本切换另由产品共享租约保护。
+        _write_json_atomic(current_path(base), preview['candidate'])
+        validate_current(read_current(base))
+        return {'status': 'applied', 'backup': str(backup), 'proposal_digest': proposal_digest}
+
+
+def clear_data_backups(base):
+    """清理编排只调用任务模块接口，不解释修补文件。调用者须持工位锁。"""
+    directory = state_path(base) / 'task-state-backups'
+    if directory.is_symlink() or directory.exists() and not directory.is_dir():
+        raise ValueError('任务修补备份目录异常')
+    if not directory.exists():
+        return
+    paths = list(directory.iterdir())
+    if any(path.is_symlink() or not path.is_file() or not re.fullmatch('[0-9a-f]{64}\\.json', path.name) for path in paths):
+        raise ValueError('任务修补备份有未知内容，先核实保全')
+    for path in paths:
+        path.unlink()
+    directory.rmdir()
+
+
+def data_command(args):
+    if args.data_action == 'inspect':
+        result = inspect_data(args.dir)
+    else:
+        from workflow import station_context
+        request = station_context.read_object(args.input, '修补输入')
+        if args.data_action == 'preview':
+            with task_state_lock(args.dir, execution=False):
+                result = preview_data_repair(args.dir, request)
+        else:
+            result = apply_data_repair(args.dir, request, args.proposal_digest, args.decision_ref, args.writers_stopped)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0

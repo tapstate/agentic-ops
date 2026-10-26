@@ -1,10 +1,10 @@
 # TapData 工位 Docker 开发环境
 
-数据分类与生成、归档、恢复、清理责任统一遵循[数据生命周期开发规范](../../../docs/development-data-lifecycle.md)。本文项目操作仍以当前实现为准；目标两个清理操作及源码删除见[工位目标合同](../../../docs/architecture/single-task-station.md#任务生命周期目标合同)，不能用现有环境卸载或 purge 冒充已实现。
+数据分类与生成、归档、恢复、清理责任统一遵循[数据生命周期开发规范](../../../docs/development-data-lifecycle.md)。两个清理操作及源码删除以[工位合同](../../../docs/architecture/single-task-station.md#任务生命周期目标合同)列出的当前实现为准；环境卸载与 purge 各有边界，不能替代任务或工位清理。
 
 本环境用于研发本地测试和联调。现有 `tapdata-test-env` Skill、脚本、配置及运行目录标识继续兼容，用户界面与指引统一称为“开发环境”。
 
-本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不引入环境池；配置布局以工位合同为准，版本切换使用[当前升级指引](../../../docs/usage/update-and-rollback.md#目标设计与当前实现)。与任务退出、恢复及构建的职责遵循[生命周期协作规范](../../../docs/maintenance-guide.md#生命周期协作规范)，本页只定义项目操作；资源收尾职责收敛尚未实现，不代表已有统一清理接口。
+本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不引入环境池；配置布局以工位合同为准，版本切换使用[当前升级指引](../../../docs/usage/update-and-rollback.md#目标设计与当前实现)。与任务退出、恢复及构建的职责遵循[生命周期协作规范](../../../docs/maintenance-guide.md#生命周期协作规范)，本页只定义项目操作；当前源码的环境卸载与工位清理复用 station_resources 的 Docker 归属核验和释放接口，环境功能仍拥有 active.json、配置与诊断，公共清理不解释它们的业务字段。
 
 ## 空闲工位连接外部 TM 的目标设计
 
@@ -29,7 +29,7 @@ prepare-source 仅支持本场景的 develop 工程，返回逐仓分支和 SHA�
 
 ### 外部 TM 配置与协议
 
-运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；旧 epoch 的 schema 1/2 配置仅从备份转换为草稿，不直接加载。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
+运行配置 schema 2 增加可选的 external_tm_url，缺省保持现有本地 TM 模式；不符合当前需求的旧配置先保全并整理为草稿，经确认和原功能复查后采用；符合当前配置合同的材料直接复用，不以应用 epoch 判定配置失效。提供该字段时只允许 1～3 个 FE-only 节点，拒绝混合本地 TM/APIServer；地址必须是无凭据、查询参数和 fragment 的 HTTP(S) 服务根地址，本期根路径为空或 `/`，拒绝带 `/api` 或其它路径，避免重复拼接。普通配置保存服务根，生成配置统一追加 `/api/`。外部模式不生成对本地 TM 的 Compose depends_on，TM/API 映射为 null。
 
 继续使用原生 `tapdata start backend --workDir <节点工作目录>`。有效配置中的 tapdata.conf.backendUrl 经 Launcher 的 backend_url 环境变量传入 FE；配置中的 cloud.baseURLs 保持同一目标，避免两个入口指向不同 TM。不使用无参数交互初始化，不改用 Cloud token 流程。Launcher 非 Cloud 路径会访问配置的 Mongo 获取 Access Code，故必须提供目标 TM 对应的 Mongo 连接及适用认证；不能仅凭 TM URL 推导数据库地址，也不能用另一空库替代。复用受控秘密文件与目标分支原生认证，不把凭据写入普通配置、argv 或公开回执。
 
@@ -120,6 +120,14 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 
 旧路径覆盖当前命名环境布局、config/tm.yml、config/fe.yml、config/secrets 下的散放文件及 config/taptest。不兼容材料先按工位合同备份隔离，新环境不自动加载旧路径。转换的[触发时机与处理顺序](../../../docs/architecture/single-task-station.md#转换触发时机与处理顺序)统一由工位合同维护。TapData 匹配备份时核对名称、TM 地址、Mongo 目标库、组件和秘密引用，不自动把散放文件归到默认环境或判为共享。旧 schema 1 的 build/assets 与探测字段分离为 preparation 候选，并由 Agent 对当前源码重新核验；schema 2 及独立 preparation 同样不能直接冒充当前有效配方。旧 TapTest 内嵌凭据转为草稿秘密和新引用，实际原生输入仍按消费者支持生成。无法确认或转换的材料保留在备份。备份、同名冲突、兼容判断及验收沿工位合同，不在项目指引另建迁移器或计划。
 
+## 功能依赖与兼容接续
+
+本环境功能拥有运行配置（schema 2）、构建 preparation（schema 1）及活动环境记录；字段要求由 test_environment.py 的 validate/combine_config 校验维护，模板只提供草稿。结构版本随需求变化，不要求与应用 epoch 相同。路径、秘密、备份和目录发布复用 environment_config 接口，不由清理功能解释配置内容。
+
+Agent 优先从当前项目源码、已有配置和已核实环境获取字段含义、组件入口、构建方法及探测要求，向研发说明差异和缺项后修补草稿；有效正式配置直接复用。正式配置不符合当前字段合同时，prepare-inputs 保留原件并提供草稿，不因旧版本号阻断草稿准备，也不自动认定旧语义等同当前版本。损坏 JSON 或未知来源仍须保全核实。确认后的草稿沿 check-inputs/configure 重新检查，成功不等于连接、构建或部署通过。
+
+构建与部署继续复用下文现役入口，不新增原生成果导入框架。辅助构建失败时，Agent 可在授权范围内按当前源码完成编译，将已核实产物保留在受管 source 或本轮 build 区域；经研发确认后调整 preparation 的 build 为实际必要的准备/产物检查步骤，assets 指向真实产物，再由原 build/deploy 入口执行完整装配、内容/架构检查、Java/Node 与数据库预检。不能把空命令当成功证据，也不能手改 build-record.json 的 validated 或 active.json。任意外部目录和缺少来源的旧产物不直接采用；业务验证仍独立执行。该接力可复用既有能力，真实 TapData 编译与部署通过仍需单独取证。
+
 ## 配置准备与预检
 
 `prepare-inputs` 先复用完整的新配置或草稿，缺项时才查找备份并填补可确定的输入；秘密文件权限为 0600，重复调用保留已填内容。用户可修改草稿或用自然语言反馈普通输入，由 Agent 写入；秘密只在本地文件填写，不进入聊天、命令参数或日志。草稿中断后继续复用，配置操作本身不修改工位状态或 epoch。
@@ -179,3 +187,13 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 部署前已存在且与源码、配方和制品匹配的完整候选，先调用原业务入口核验工具链及复用条件，再重做连接预检，避免重复全量编译。旧的通用步骤配方没有工具链复用合同，继续执行原构建；不能根据旧目录存在就假定可复用。源码构建入口不存在时先在业务仓库适配，不在 AgenticOps 中再维护第二套业务编译命令。
 
 已有宿主机 Node 和 Launcher Mongo 驱动时，在完整编译之前只读核验 Mongo 认证、目标数据库及外部 TM 可达性；缺少独立探测依赖时仍保留构建后的容器检查。宿主机网络失败可能由容器专用域名或路由导致，记为待容器核验；已确认认证失败或需决定的目标数据库内容则在构建前停止。宿主机检查不能替代容器网络检查。目标版本、许可及 FE 容量仍由 Agent 按实际 TM 的原生只读资料在部署前核实，不把文件存在、HTTP 可达或编译成功当作许可验收。
+
+### Docker 资源所属接口
+
+资源声明的需求版本由既有 `station-clean.json` 维护；Docker CLI 的版本号本身不是门禁，所需回读必须包含对象 Id、项目与工位身份标签，释放容器还必须有可解释的 Mounts。字段缺失或归属冲突时保留对象，由 Agent 原生核实再重试，不把查询失败当作资源不存在。
+
+`station_resources.inspect_docker_project/release_docker_project` 负责本工位 Compose 项目的容器/网络身份、挂载边界、释放和回读。环境功能通过该接口查询及卸载，工位清理通过同一接口按已冻结对象范围收尾；各自保留原有操作记录与锁，不互相调用顶层清理，不新增后台或资源插件框架。环境停机保留 45 秒宽限，工位整区清理沿既有 10 秒宽限；均只处理明确归属对象，不删除镜像或卷。出现命名数据卷或身份变化时先保全核实，不能用目录已删除推断资源已消失。
+
+环境卸载仍先保存私有诊断、记录 stopping，实际资源回读完成后才记录 stopped 并回收运行目录；未知外部结果沿原现场继续，不自动回滚数据库。运行目录丢失时工位清理仍可按标签发现资源；无活动环境记录的环境部署不会擅自接管未知资源。
+
+只读 list/status/check-inputs 不依赖任务操作正文有效，也不领取执行权；所读配置或运行数据仍由本功能验证。卸载使用本地工位执行控制收尾，不重新申请已交接的 Jira 任务；其它环境写操作保持正常任务级接管检查。未完成的非清理操作仍须先核实，不能借卸载绕过未知副作用。

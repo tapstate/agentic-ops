@@ -189,6 +189,7 @@ def main(argv=None):
     parser.add_argument('--expected-plan-digest')
     parser.add_argument('--decision-ref')
     parser.add_argument('--materials', choices=('preserved', 'discard'))
+    parser.add_argument('--progress-correction-file', help='研发确认的有效进度更正；不提供则不撤回远端成果')
     parser.add_argument('--handoff-input')
     parser.add_argument('--jira-readback')
     parser.add_argument('--details', action='store_true')
@@ -225,6 +226,8 @@ def main(argv=None):
         kind = args.action
         request = {'scope': args.scope, 'expected_plan_digest': args.expected_plan_digest,
                    'decision_ref': args.decision_ref, 'materials': args.materials}
+        if args.progress_correction_file:
+            request['progress_correction'] = Path(args.progress_correction_file).read_text(encoding='utf-8')
         if kind == 'archive':
             if not task or not args.handoff_input:
                 raise ValueError('归档需要当前任务和 --handoff-input')

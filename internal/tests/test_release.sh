@@ -27,15 +27,6 @@ done
   if release_validate_jira_id ao-123 >/dev/null 2>&1; then exit 1; fi
 ) || fail "版本或 Jira 编号校验不符合合同"
 
-grep -Fq 'merge_body="$(' "$repo_root/internal/release/hotfix.sh" ||
-  fail "Hotfix 提交正文未用真实换行构造"
-grep -Fq "printf '%s\\n\\n%s\\n' \"\$merge_subject\" \"\$merge_body\"" \
-  "$repo_root/internal/release/hotfix.sh" ||
-  fail "Hotfix 未按真实换行写入提交信息"
-if grep -Fq '%b' "$repo_root/internal/release/hotfix.sh"; then
-  fail "Hotfix 不得依赖 %b 解释提交正文"
-fi
-
 fixture="$test_root/repo"
 mkdir -p \
   "$fixture/.githooks" "$fixture/internal/bin" "$fixture/internal/story_gate" \
@@ -99,6 +90,11 @@ grep -Fq "impact --change-source range --head $head_sha" "$story_log" ||
 if printf 'refs/heads/develop %s refs/heads/main %040d\n' "$head_sha" 0 |
   (cd "$fixture" && STORY_GATE_LOG="$story_log" ./.githooks/pre-push) >/dev/null 2>&1; then
   fail "pre-push 不得允许普通直推 main"
+fi
+
+if printf 'refs/heads/develop %s refs/heads/main %040d\n' "$head_sha" 0 |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix STORY_GATE_LOG="$story_log" ./.githooks/pre-push) >/dev/null 2>&1; then
+  fail "Hotfix 不得保留直推 main 的旁路"
 fi
 
 git -C "$fixture" branch -M main

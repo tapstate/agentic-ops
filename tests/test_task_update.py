@@ -62,12 +62,87 @@ class TaskUpdateTests(unittest.TestCase):
         return self.run_cmd(str(self.install/'agenticops'),'station','start','codex','--station',str(self.station),
                             '--non-interactive',*extra,check=check)
 
+    def approved_start(self):
+        packet = json.loads(self.run_cmd(str(self.install/'agenticops'), 'update', '--check', '--probe').stdout)
+        return self.start('--writers-stopped', '--apply-update', '--update-current-ref', packet['original_ref'], '--update-target-ref', packet['target_ref'], '--expected-stations', json.dumps(packet['stations']))
+
+    def test_missing_terminal_precedes_update_and_keeps_original_state(self):
+        self.advance(incompatible=True)
+        original = self.state()
+        current = (self.station / '.agenticops/current-task.json').read_bytes()
+        for extra in ([], ['--apply-update', '--writers-stopped'], ['--', '--non-interactive'], ['--', '--help']):
+            result = self.run_cmd(str(self.install / 'agenticops'), 'station', 'start', 'codex',
+                                  '--station', str(self.station), *extra, check=False)
+            self.assertEqual(2, result.returncode)
+            self.assertIn('交互启动需要终端', result.stderr)
+            self.assertNotIn('[AgenticOps][更新]', result.stderr)
+            self.assertEqual(original, self.state())
+            self.assertEqual(current, (self.station / '.agenticops/current-task.json').read_bytes())
+
+    def test_upgrade_repair_multiarchive_independent_restore_and_both_cleanups(self):
+        # 真实本地 Git 与安装切换；Agent/Jira 使用显式夹具，不冒充线上服务验收。
+        sys.path.insert(0, str(ROOT / 'tests'))
+        import test_task_handoff
+        from workflow import task_store
+        from unittest import mock
+        flow = test_task_handoff.HandoffTests()
+        flow.root = self.root / 'business-fixture'
+        flow.root.mkdir()
+        flow.ws = self.station
+        flow.product = self.seed
+        cleanup = json.loads((self.seed / 'projects/tapdata/station-clean.json').read_text())
+        cleanup['resources'] = []
+        (self.seed / 'projects/tapdata/station-clean.json').write_text(json.dumps(cleanup))
+        flow.prepare_engineering()
+        self.advance()
+        self.approved_start()
+        flow.product = self.install
+        with mock.patch("workflow.station_source.refresh_shared_references"):
+            source_path = flow.prepare_task()
+        original = task_store.read_current(self.station)
+        legacy = json.loads(json.dumps(original))
+        legacy['schema_version'] = 2
+        legacy['current']['old_phase'] = legacy['current'].pop('stage')
+        # 明确模拟旧生产者格式；产品修补不直接手改控制或业务事实。
+        task_store.current_path(self.station).write_text(json.dumps(legacy))
+        before = task_store.current_path(self.station).read_bytes()
+        operation_before = (self.station / '.agenticops/operation.json').read_bytes()
+        rejected = self.run_cmd(sys.executable, str(self.install / 'workflow/task.py'), 'takeover', '--dir', str(self.station), check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn('状态结构无效', rejected.stderr)
+        self.assertEqual(operation_before, (self.station / '.agenticops/operation.json').read_bytes())
+        target = self.advance(incompatible=True)
+        self.approved_start()
+        self.assertEqual(target, self.state()['current_ref'])
+        self.assertEqual(before, task_store.current_path(self.station).read_bytes())
+        report = task_store.inspect_data(self.station)
+        request = {'source_digest': report['source_digest'], 'renames': {'old_phase': 'stage'},
+                   'analysis_ref': '夹具原合同与项目事实核实字段语义不变'}
+        preview = task_store.preview_data_repair(self.station, request)
+        task_store.apply_data_repair(self.station, request, preview['proposal_digest'], '测试研发确认差异', True)
+        self.assertEqual(original, task_store.read_current(self.station))
+        flow.task = task_store.read_task(self.station)
+        shutil.rmtree(self.root / "pool")
+        with mock.patch("workflow.station_source.refresh_shared_references"):
+            flow.verify_independent_resume_and_cleanup(source_path)
+
+    def test_invalid_operation_allows_diagnostic_session_without_overwriting_it(self):
+        operation = self.station / '.agenticops/operation.json'
+        operation.write_text('invalid historical operation')
+        result = self.start()
+        self.assertIn('session-ready', result.stdout)
+        self.assertIn('会话可启动以分析修补', result.stderr)
+        self.assertEqual('invalid historical operation', operation.read_text())
+        rejected = self.run_cmd(sys.executable, str(self.install / 'workflow/task.py'), 'takeover', '--dir', str(self.station), check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertEqual('invalid historical operation', operation.read_text())
+
     def test_safe_start_updates_repairs_and_starts_new_session(self):
         second=self.root/'second'
         self.run_cmd(str(self.install/'agenticops'),'station','init','--station',str(second),'--project','tapdata','--agent','codex')
         before=(second/'.agenticops/init.json').read_bytes()
         target=self.advance()
-        result=self.start('--writers-stopped')
+        result=self.approved_start()
         self.assertEqual(before,(second/'.agenticops/init.json').read_bytes())
         self.assertIn('session-ready',result.stdout)
         self.assertEqual(target,self.state()['current_ref'])
@@ -87,7 +162,7 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertIn('session-ready',self.start('--update-current-ref',self.original,'--update-target-ref',target).stdout)
         self.assertEqual(3,self.start(check=False).returncode)
 
-    def test_feature_cross_epoch_probe_and_explicit_update_preserve_station(self):
+    def test_feature_cross_epoch_start_updates_without_epoch_barrier(self):
         before = (self.station/'.agenticops/current-task.json').read_bytes()
         origin = (self.station/'.agenticops/init.json').read_bytes()
         target = self.advance(incompatible=True)
@@ -96,18 +171,16 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertTrue(packet['compatible'])
         self.assertNotIn('incompatible_epoch', packet['blockers'])
         self.assertEqual(target, packet['target_ref'])
-        result = self.start('--writers-stopped', check=False)
-        self.assertEqual(3, result.returncode, result.stderr)
-        self.assertIn('无需 purge', result.stderr)
-        self.assertIn('显式 update', result.stderr)
-        self.assertEqual(self.original, self.state()['current_ref'])
         refused = self.run_cmd(str(self.install/'agenticops'),'update', check=False)
         self.assertNotEqual(0, refused.returncode)
         self.assertIn('writers-stopped', refused.stderr)
-        self.run_cmd(str(self.install/'agenticops'),'update','--writers-stopped')
+        result = self.approved_start()
+        self.assertIn('session-ready', result.stdout)
         self.assertEqual(target, self.state()['current_ref'])
         self.assertEqual(before, (self.station/'.agenticops/current-task.json').read_bytes())
-        self.assertEqual(origin, (self.station/'.agenticops/init.json').read_bytes())
+        refreshed = json.loads((self.station/'.agenticops/init.json').read_text())
+        self.assertEqual(json.loads(origin)['station_state_epoch'], refreshed['station_state_epoch'])
+        self.assertEqual(target, refreshed['product_ref'])
         self.assertIn('session-ready', self.start().stdout)
 
     def test_legacy_cross_epoch_keeps_incompatible_guidance(self):
@@ -146,7 +219,7 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertEqual(self.original,self.state()['current_ref'])
         proc.communicate('\n',timeout=15)
         self.assertEqual(0,proc.returncode)
-        self.start('--writers-stopped')
+        self.approved_start()
         self.assertNotEqual(self.original,self.state()['current_ref'])
 
     def test_network_failure_continues_trusted_version_without_latest_claim(self):
@@ -165,6 +238,46 @@ class TaskUpdateTests(unittest.TestCase):
         self.assertNotEqual(0,result.returncode)
         self.assertIn('目标已变化',result.stderr)
         self.assertEqual(self.original,self.state()['current_ref'])
+
+
+    def test_stopped_writers_are_not_update_approval(self):
+        self.advance()
+        result = self.start('--writers-stopped', check=False)
+        self.assertEqual(3, result.returncode)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        self.assertIn('--apply-update', result.stderr)
+
+    def test_active_task_start_checks_update_preserves_run_and_can_continue_old(self):
+        path = self.station/'.agenticops/current-task.json'
+        document = json.loads(path.read_text())
+        document['current'] = {'issue_key':'TAP-123','run_id':'run-abc12345','task_class':'technical_task',
+            'stage':'waiting_takeover','outcome':'in_progress','facts':{},'history':[], 'pending':None,
+            'engineering_baseline':{'status':'resolving'}, 'task_repositories':{},'terminal_proof':None,'archive_ref':None}
+        path.write_text(json.dumps(document))
+        before = path.read_bytes()
+        target = self.advance(incompatible=True)
+        self.assertEqual(3, self.start(check=False).returncode)
+        self.assertIn('session-ready', self.start('--update-current-ref', self.original, '--update-target-ref', target).stdout)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        self.assertEqual(before, path.read_bytes())
+        self.assertIn('session-ready', self.approved_start().stdout)
+        self.assertEqual(target, self.state()['current_ref'])
+        self.assertEqual(before, path.read_bytes())
+
+    def test_update_approval_binds_scope_and_exact_target(self):
+        target = self.advance()
+        result = self.start('--apply-update', '--writers-stopped', '--update-current-ref', self.original,
+                            '--update-target-ref', target, '--expected-stations', '[]', check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('登记工位范围', result.stderr)
+        self.assertEqual(self.original, self.state()['current_ref'])
+        (self.seed/'docs/fixture-update.md').write_text('third version')
+        self.commit('third')
+        result = self.start('--apply-update', '--writers-stopped', '--update-current-ref', self.original,
+                            '--update-target-ref', target, '--expected-stations', json.dumps([str(self.station)]), check=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('原/目标提交', result.stderr)
+        self.assertEqual(self.original, self.state()['current_ref'])
 
     def test_existing_run_skips_network_check(self):
         path = self.station/'.agenticops/current-task.json'

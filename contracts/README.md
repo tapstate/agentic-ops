@@ -17,7 +17,7 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 - `station-reset.schema.json`：当前整区清理计划，格式版本以 Schema 为准；未完成旧计划须由原版本核实收尾，不在线转换。历史档案保留，不作为可恢复执行合同。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
-- `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
+- `task-state.schema.json`：任务模块拥有的 current 信封、阶段、事实、仓库和恢复状态；依赖含义、来源、修补入口及备份清理见 [任务状态依赖描述](../workflow/task-data.md)，其它功能使用 task_store 接口。
 - `jira-field-readback.schema.json`：字段同步回读输入，绑定当前本地事实摘要及 Jira 来源，不修改本地有效事实。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 
@@ -26,6 +26,8 @@ Manifest v3 删除 `entrypoint`、`hook` 和 `capabilities`，不再要求 Agent
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
 工位兼容清单由同名 Schema 校验；`station_state_epoch` 保留单调递增的来源标识，`validation: feature` 将执行条件交给所属功能检查。旧客户端没有该声明时仍按其原 epoch 合同运行。`station-init.schema.json` 记录生成来源和 cleanup 清单；刷新旧工位保留来源 epoch，不用改标记代替校验。升级与回退的唯一规则见[工位合同](../docs/architecture/single-task-station.md#10-升级与恢复)，这里不另维护支持列表或逐版本转换规则。
+
+归档恢复的外部材料合同由 [task_handoff 依赖描述](../workflow/task-handoff.md) 维护；其版本独立于任务状态 schema。
 
 ## 兼容规则
 

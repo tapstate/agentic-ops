@@ -130,3 +130,40 @@ def valid_environment(value):
         key in ("internal/uv.lock", "internal/pyproject.toml") and isinstance(item, str)
         and re.fullmatch(r"[0-9a-f]{64}", item)
         for key, item in value["locks"].items())
+
+
+def full_acceptance_matches(value, tree, expected_environment):
+    """复用完整 v6 测试事实；不沿用原比较范围的审批或发布身份。"""
+    if (not isinstance(value, dict) or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION
+            or value.get("acceptance_status") != "passed" or value.get("error") != ""
+            or value.get("verification_scope") != "full"
+            or value.get("planned_checks") != list(FULL_ACCEPTANCE_CHECKS)):
+        return False
+    binding = value.get("binding")
+    if (not isinstance(binding, dict) or binding.get("candidate_tree") != tree
+            or binding.get("contract_digest") != contract_digest()
+            or binding.get("executed_checks") != list(FULL_ACCEPTANCE_CHECKS)):
+        return False
+    if (not valid_environment(value.get("environment")) or value["environment"] != expected_environment
+            or value.get("environment_digest") != digest(expected_environment)):
+        return False
+    run_id, impact_id = value.get("run_id"), value.get("impact_id")
+    if (not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id)
+            or not isinstance(impact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", impact_id)
+            or not isinstance(value.get("verified_at"), str) or not value["verified_at"]):
+        return False
+    checks = value.get("checks")
+    if not isinstance(checks, list) or len(checks) != len(FULL_ACCEPTANCE_CHECKS):
+        return False
+    previous_end = 0
+    for name, check in zip(FULL_ACCEPTANCE_CHECKS, checks):
+        if (not isinstance(check, dict) or check.get("check_id") != name or check.get("passed") is not True
+                or type(check.get("exit_code")) is not int or check["exit_code"] != 0
+                or type(check.get("log_start")) is not int or type(check.get("log_end")) is not int
+                or check["log_start"] != previous_end or check["log_end"] <= previous_end
+                or check.get("log_path") != f".local/story-gate/runs/{impact_id}/{run_id}/output.log"
+                or not isinstance(check.get("log_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", check["log_sha256"])):
+            return False
+        previous_end = check["log_end"]
+    return True

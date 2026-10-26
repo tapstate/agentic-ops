@@ -302,6 +302,54 @@ def main():
         return 2
 
 
+def inspect_docker_project(call, project, station_id, identity_label, reject_volumes=False):
+    """Docker 资源所属接口；不读业务环境文件，不推断目录缺失等于资源消失。"""
+    result = {'containers': [], 'networks': []}
+    ids = call(['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
+    networks = call(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project]).split()
+    for kind, identifiers in (('container', ids), ('network', networks)):
+        for identifier in identifiers:
+            rows = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))
+            if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict)
+                    or not isinstance(rows[0].get('Id'), str) or not rows[0]['Id'].startswith(identifier)):
+                raise ValueError('Docker 对象回读结构或身份无效，先由 Agent 核实原对象')
+            info = rows[0]
+            config = info.get('Config', {}) if kind == 'container' else info
+            labels = config.get('Labels') if isinstance(config, dict) else None
+            if not isinstance(labels, dict) or labels.get(identity_label) != station_id or labels.get('com.docker.compose.project') != project:
+                raise ValueError('Docker 对象身份标签不符（归属不明），保留')
+            if reject_volumes and kind == 'container' and 'Mounts' not in info:
+                raise ValueError('容器挂载信息缺失，先由 Agent 核实，保留原对象')
+            mounts = info.get('Mounts', []) if kind == 'container' else []
+            if not isinstance(mounts, list) or any(not isinstance(mount, dict) for mount in mounts):
+                raise ValueError('容器挂载信息格式无效，先由 Agent 核实，保留原对象')
+            if reject_volumes and any(mount.get('Type') == 'volume' for mount in mounts):
+                raise ValueError('容器关联数据卷，先由 Agent 核实保全与独占/共享关系，保留容器定位线索：' + info['Id'])
+            result['containers' if kind == 'container' else 'networks'].append(info)
+    return result
+
+
+def docker_object_refs(inventory):
+    return [{'kind': kind, 'id': item['Id']} for kind, key in (('container', 'containers'), ('network', 'networks'))
+            for item in inventory[key]]
+
+
+def release_docker_project(call, project, station_id, identity_label, expected=None, stop_seconds=10):
+    """调用方持所属锁并保全意图；按确认身份释放并复查，不删共享卷或镜像。"""
+    rows = docker_object_refs(inspect_docker_project(call, project, station_id, identity_label, reject_volumes=True))
+    if expected is not None and (not isinstance(expected, list) or any(row not in expected for row in rows)):
+        raise ValueError('资源范围发生变化，保留并交接')
+    for row in rows:
+        if row['kind'] == 'container':
+            call(['stop', '--time', str(stop_seconds), row['id']])
+            call(['rm', row['id']])
+        else:
+            call(['network', 'rm', row['id']])
+    if docker_object_refs(inspect_docker_project(call, project, station_id, identity_label)):
+        raise ValueError('Docker 资源回读仍存在')
+    return rows
+
+
 def cleanup_declared(base, config, operation, observe_only=False):
     """固定类型处理器，仅处理本工位标签的容器和网络；不删除镜像或卷。"""
     from workflow import station_context
@@ -324,28 +372,7 @@ def cleanup_declared(base, config, operation, observe_only=False):
                     and not configured.is_symlink() and step_name not in operation['steps']
                     and shutil.which('docker') is None):
                 continue
-            ids = call(['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
-            networks = call(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project]).split()
-            rows = []
-            for kind, identifiers in (('container', ids), ('network', networks)):
-                for identifier in identifiers:
-                    observation = json.loads(call(['inspect', identifier] if kind == 'container' else ['network', 'inspect', identifier]))
-                    if (not isinstance(observation, list) or len(observation) != 1
-                            or not isinstance(observation[0], dict)
-                            or not isinstance(observation[0].get('Id'), str)
-                            or not observation[0]['Id'].startswith(identifier)):
-                        raise ValueError('Docker 对象回读结构或身份无效，先由 Agent 核实原对象')
-                    info = observation[0]
-                    config_value = info.get('Config', {}) if kind == 'container' else info
-                    labels = config_value.get('Labels') if isinstance(config_value, dict) else None
-                    if not isinstance(labels, dict) or labels.get(spec['identity_label']) != station_id or labels.get('com.docker.compose.project') != project:
-                        raise ValueError('Docker 对象身份标签不符，保留')
-                    mounts = info.get('Mounts', []) if kind == 'container' else []
-                    if not isinstance(mounts, list) or any(not isinstance(mount, dict) for mount in mounts):
-                        raise ValueError('容器挂载信息格式无效，先由 Agent 核实，保留原对象')
-                    if any(mount.get('Type') == 'volume' for mount in mounts):
-                        raise ValueError('容器关联数据卷，先由 Agent 核实保全与独占/共享关系，保留容器定位线索：' + info['Id'])
-                    rows.append({'kind': kind, 'id': info['Id']})
+            rows = docker_object_refs(inspect_docker_project(call, project, station_id, spec['identity_label'], reject_volumes=True))
             if observe_only:
                 if rows:
                     raise ValueError('Docker 资源仍存在')
@@ -358,14 +385,8 @@ def cleanup_declared(base, config, operation, observe_only=False):
                     raise ValueError('资源范围发生变化，保留并交接')
             else:
                 operations.intent(base, operation, step_name, {}, {'objects': rows})
-            for row in rows:
-                if row['kind'] == 'container':
-                    call(['stop', '--time', '10', row['id']])
-                    call(['rm', row['id']])
-                else:
-                    call(['network', 'rm', row['id']])
-            if call(['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).strip() or call(['network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project]).strip():
-                raise ValueError('Docker 资源回读仍存在')
+            release_docker_project(call, project, station_id, spec['identity_label'],
+                                   expected=operation['steps'][step_name]['expected']['objects'])
             if operation['steps'][step_name]['receipt'] is None:
                 operations.receipt(base, operation, step_name, {'status': 'removed'})
         except (ValueError, OSError, subprocess.SubprocessError) as error:

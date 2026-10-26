@@ -1,6 +1,8 @@
 # AgenticOps 仓库指令
 
-涉及数据写入、归档恢复或清理的开发先读[数据生命周期开发规范](docs/development-data-lifecycle.md)及[工位目标合同](docs/architecture/single-task-station.md#任务生命周期目标合同)。规范集中维护分类与责任；两个清理操作、源码删除和 8 小时闲置接管的支持范围以工位合同及实际安装提交为准。本地源码候选已实现不代表已发布或旧工位已更新，不据此绕过当前保护。
+本文件约束 AgenticOps 源码仓库的维护工作。执行前先识别当前对象与规则作用域，按[规则适用边界](docs/maintenance-guide.md#规则适用边界)区分本项目维护、产品通用行为和受管项目要求；不能因规则文件位于本仓库就把它用于所有任务。
+
+涉及产品工位的数据写入、归档恢复或清理的开发先读[数据生命周期开发规范](docs/development-data-lifecycle.md)及[工位目标合同](docs/architecture/single-task-station.md#任务生命周期目标合同)。规范集中维护分类与责任；两个清理操作、源码删除和 8 小时闲置接管的支持范围以工位合同及实际安装提交为准。本地源码候选已实现不代表已发布或旧工位已更新，不据此绕过当前保护。
 
 ## 目标与必读文档
 
@@ -13,8 +15,10 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - 修改层间职责、目录归属或 Adapter 时读取[工程架构](docs/architecture/agenticops-v1-architecture.md)。保持单一产品内核、无状态声明式 Adapter 和薄启动入口；`internal/` 只服务本仓库，不进入产品运行层。
 - 修改工位路径、状态字段或读写语义时读取[工位合同](docs/architecture/single-task-station.md)及 `contracts/station-state-compatibility.json`，明确兼容性并保留合法状态回归。外部依赖变更遵循[开发规范](docs/maintenance-guide.md#外部依赖检查与修补继续)；目标设计与当前实现须分开。当前 epoch 判定和升级操作仍遵循工位合同及[更新与回退](docs/usage/update-and-rollback.md#目标设计与当前实现)，不得因目标设计手改状态或绕过现有保护。
 - Jira、Git、GitHub PR/CI 分别是任务、代码、审查和检查事实源；源码仓库、安装目录和业务工位必须分开。状态布局遵循工位合同，不复制中央规则或 Runtime 到工位。
-- 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。本仓库规则只约束 AgenticOps，不引入业务仓库约定；规则归属遵循工程架构。
+- 先判断规则是否适用于当前对象，再在同一作用域内按项目规则、AIAgent 规则、公司规则、个人偏好的顺序处理。该项目内排序不覆盖平台指令或用户有效授权，不将受管项目约定引入本仓库维护；规则归属遵循工程架构。
 - 旧版只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、`developer/` 工作面、`ao-work`、`ao_work`、`ao-maint`、Go Runtime、`agentic-cli` 或兼容入口。
+
+维护面以[处理原则](docs/strategy/project-goals.md#维护与项目任务的处理原则)按设计纠正实现；受管任务按其项目流程和质量检查接续，辅助脚本可替代，不把工具成功等同于成果合格。
 
 ## 流程连续性
 
@@ -40,7 +44,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - 目录和文件默认使用英文 ASCII lowercase-kebab-case。
 - 不提交 secrets、tokens、private keys、客户数据或原始敏感日志。
 - `.superpowers/` 只属于本机临时状态，不维护、不提交，也不是事实源。
-- Skill 只能指导 Agent 使用现役架构，不得承担可由 Policy 或 Runtime 强制的规则。
+- Skill 指导 Agent 使用现役架构，不代替确定性检查。产品运行检查由产品内核承担，本仓库维护检查由 `internal/` 和源码 Git Hook 承担；不为维护审批向产品 Policy 或 Workflow 增加规则。
 - 受管技能调用遵循[统一帮助合同](docs/skill-maintenance.md#技能调用与帮助)：仅提供技能名而无法确定操作，或明确请求帮助时，按合同展示帮助；已有明确行动意图时继续原技能流程。
 
 ### Markdown 排版
@@ -70,13 +74,13 @@ bash tests/test_install.sh
 bash internal/tests/test_release.sh
 ```
 
-四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。新增或升级任何 Python 第三方组件（运行时、维护工具、测试或锁文件）前，必须先向用户说明组件、用途、版本范围、许可与供应链影响，并取得明确决策；不得因实现方便而自行引入、安装或替换依赖。
+四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布由 `internal/release/release.sh` 核验完整四项结果，复用同树、同测试合同和有效环境的已有完整验收，缺失或失效时补验；不得跳过必要检查，也不因版本号或阶段变化重复测试。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。新增或升级任何 Python 第三方组件（运行时、维护工具、测试或锁文件）前，必须先向用户说明组件、用途、版本范围、许可与供应链影响，并取得明确决策；不得因实现方便而自行引入、安装或替换依赖。
 
 ## 分支与发布
 
 - 默认分支是 `main`，日常开发分支是 `develop`；`main` 禁止直接提交和普通直推。
 - 发布与 Hotfix 执行前读取[维护指引](docs/maintenance-guide.md#6-发布与-hotfix)，使用既有发布脚本；`main` 仅以 Merge commit 合入，Tag 绑定实际合并提交。
-- 发布方式按交付需要选择：正式版本使用版本 Tag，Hotfix 不创建 Tag；epoch 只说明工位数据兼容性，不决定发布方式。具体行为遵循维护指引，不改变发布授权和人工审查要求。
+- 正式发布与 Hotfix 均从 develop 完成发布验证，经 PR 合入 main；正式发布再在实际合并提交创建 Tag 和 `release/v*` 存档，Hotfix 不创建这两类产物。`release/v*` 不作为合并前候选；epoch 只说明工位数据兼容性，不决定发布方式。具体操作与恢复以维护指引为准。
 - 候选涉及信任根（Hook、Adapter Runtime/分类策略、故事门禁、注册表、锁文件或发布脚本）时，自动发布失败关闭，须经受保护 `main` 的人工审查 PR。
 
 ## 提交与授权
@@ -87,6 +91,6 @@ bash internal/tests/test_release.sh
 
 构造提交信息时读取[提交信息构造](docs/maintenance-guide.md#提交信息构造)：标题与各正文段分别使用独立 `-m`，复杂正文使用含真实换行的 `-F` 文件；执行前检查，不向 `-m` 传入字面 `\n` 或依赖二次解析。
 
-没有可确认的 Jira key 时不得提交。只有用户明确要求提交，或工作项级连续授权覆盖提交时，才可执行 `git commit`；推送同理。工作项级授权必须绑定 Jira 工作项、运行编号、仓库、工作分支、目标分支、修改范围和验证方式。所有权、范围、风险或必要验证变化时授权失效。合并、发布、Tag、直接修改 `main`、强推和历史改写始终需要新的明确授权。
+没有可确认的 Jira key 时不得提交。只有用户明确要求提交，或工作项级连续授权覆盖提交时，才可执行 `git commit`；推送同理。工作项级授权必须绑定 Jira 工作项、仓库、工作分支、目标分支、修改范围和验证方式；源码维护不要求业务 Workflow run。只有实际操作受管任务时才按其合同绑定已有 run，不为维护授权创建业务运行状态。所有权、范围、风险或必要验证变化时授权失效。合并、发布、Tag、直接修改 `main`、强推和历史改写始终需要新的明确授权。
 
 故事候选先执行按影响范围的正式验收（选择器要求时执行完整四项），再形成 commit 或 PR 供人工审查。`impact_id` 只用于内部绑定，不是用户确认对象；commit 或 PR Head 变化后旧确认立即失效。
