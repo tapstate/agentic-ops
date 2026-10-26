@@ -328,23 +328,8 @@ release_require_synced_branch() {
   return 1
 }
 
-release_require_version_tag_available() {
-  local repo_root="$1"
-  local version="$2"
+# 同树完整四项可复用开发结果；prepare 补验，交付入口只核验。
 
-  local remote_tag
-  remote_tag="$(git -C "$repo_root" ls-remote --tags --refs origin "refs/tags/$version")" || return 1
-  if [ -n "$remote_tag" ]; then
-    release_fail "release_tag_remote_exists" "tag_validation" "远端 Tag $version 已存在" "请使用新的二段式版本，禁止移动或覆盖远端 Tag"
-    return 1
-  fi
-  if git -C "$repo_root" show-ref --verify --quiet "refs/tags/$version"; then
-    release_fail "release_local_tag_exists" "tag_validation" "本地 Tag $version 已存在，但正常发布只会在 main Merge commit 后创建 Tag" "请先确认该 Tag 未发布且可安全删除，或改用新的二段式版本"
-    return 1
-  fi
-}
-
-# 发布证据与开发证据分开；prepare/verify 执行，后续入口仅核验。
 release_verification() {
   local code_root
   code_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
@@ -362,7 +347,7 @@ release_run_full_verification() {
   RELEASE_BASE_COMMIT="${RELEASE_BASE_COMMIT:-$(git -C "$repo_root" rev-parse origin/main)}"
   RELEASE_VERIFIED_AT="$(release_verification "$mode" --root "$repo_root" \
     --base "$RELEASE_BASE_COMMIT" --head "$head" --identity "$RELEASE_IDENTITY")" || {
-    release_fail release_verification_required verification "发布证据缺失、失效或验证失败" "请查看诊断；使用 prepare 或 verify 补齐发布隔离四项，恢复时带 --merged-pr"
+    release_fail release_verification_required verification "发布证据缺失、失效或验证失败" "请查看诊断；使用 prepare 核对并补齐完整四项；verify 仅用于明确重验"
     return 1
   }
 }
@@ -673,6 +658,10 @@ release_submit_review() {
   local protection_mode="$6"
   local confirmed="$7"
 
+  if git -C "$repo_root" merge-base --is-ancestor "$head" origin/main; then
+    release_fail release_candidate_already_in_main preflight "develop 没有待交付变更" "不创建空 PR；本地 prepare 仍可核验该提交"
+    return 1
+  fi
   release_verify_story_gate "$repo_root" origin/main "$head" true "" || return 1
   release_run_full_verification "$repo_root" "$head" check || return 1
   release_check_base_unchanged "$repo_root" || return 1

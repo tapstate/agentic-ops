@@ -81,11 +81,15 @@ if [ -n "$confirm_recovery" ] && [ "$command_name" != recover ]; then
   exit 1
 fi
 
-RELEASE_IDENTITY="$version"
+RELEASE_IDENTITY="${version:-$RELEASE_JIRA_ID}"
 RELEASE_BASE_COMMIT=""
 if [ "$command_name" != inspect ]; then release_lock_operation "$repo_root" || exit 1; fi
 
-release_validate_version "$version" || exit 1
+if { [ "$command_name" = prepare ] || [ "$command_name" = verify ]; } && [ -z "$version" ] && [ -n "$RELEASE_JIRA_ID" ]; then
+  : # Hotfix 的本地验证复用同一入口，不要求虚构版本号。
+else
+  release_validate_version "$version" || exit 1
+fi
 release_require_repo "$repo_root" || exit 1
 case "$command_name" in
   inspect)
@@ -99,21 +103,14 @@ case "$command_name" in
       git -C "$repo_root" fetch origin main >/dev/null 2>&1 || exit 1
       head="$RELEASE_RECOVERY_PR_HEAD"
       RELEASE_BASE_COMMIT="$(git -C "$repo_root" rev-parse "$RELEASE_RECOVERY_MERGE_COMMIT^1")"
-      release_validate_pr_binding "$RELEASE_RECOVERY_PR_URL" "$version" "$head" || exit 1
+      release_validate_pr_binding "$RELEASE_RECOVERY_PR_URL" "$RELEASE_IDENTITY" "$head" || exit 1
       release_verify_merge_commit "$repo_root" "$head" "$RELEASE_RECOVERY_MERGE_COMMIT" || exit 1
     else
       release_require_branch "$repo_root" develop || exit 1
       release_require_clean "$repo_root" || exit 1
-      release_require_synced_branch "$repo_root" develop || exit 1
       head="$(git -C "$repo_root" rev-parse develop)"
-      release_require_version_tag_available "$repo_root" "$version" || exit 1
-      release_check_archive_branch "$repo_root" "$version" "" || exit 1
-      release_preflight_candidate "$repo_root" "$head" || exit 1
-      if git -C "$repo_root" merge-base --is-ancestor "$head" origin/main; then
-        release_fail release_candidate_already_in_main preflight "develop 已合入 main" "无需重复创建 PR；用 inspect 核对原发布与版本归属"
-        exit 1
-      fi
-      release_verify_story_gate "$repo_root" origin/main "$head" true "" || exit 1
+      # 本地验证不依赖远端同步、合并条件或版本引用是否可创建。
+      RELEASE_BASE_COMMIT="$head"
     fi
     mode=ensure
     if [ "$command_name" = verify ]; then mode=verify; fi
@@ -146,8 +143,6 @@ case "$command_name" in
       release_require_synced_branch "$repo_root" develop || exit 1
       head="$(git -C "$repo_root" rev-parse develop)"
       release_preflight_candidate "$repo_root" "$head" || exit 1
-      release_require_version_tag_available "$repo_root" "$version" || exit 1
-      release_check_archive_branch "$repo_root" "$version" "" || exit 1
       release_submit_review "$repo_root" tapstate/agentic-ops "$version" develop "$head" hard "$confirm_release" || exit 1
       printf '{"ok":true,"operation":"release_submit_for_review","status":"waiting_for_manual_merge","head":"%s","pr_number":%s,"pr_url":"%s","source_branch":"develop","protection_mode":"hard","delivery_checks":"pending","continue_command":"internal/release/release.sh publish --version %s --confirm-release"}\n' "$head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$version"
     fi

@@ -530,7 +530,7 @@ class StoryGateService:
         environment = payload.get("environment")
         if not verification.valid_environment(environment) or payload.get("environment_digest") != verification.digest(environment):
             return None
-        # 受信发布校验器读取历史开发事实；随后发布流程仍独立执行隔离四项。
+        # 受信发布校验器读取历史开发事实；发布消费测试结果时另核对完整树、合同与当前环境。
         if os.environ.get("AGENTIC_OPS_STORY_GATE_STAGE") != "release":
             try:
                 verification.require_material(self.root, impact)

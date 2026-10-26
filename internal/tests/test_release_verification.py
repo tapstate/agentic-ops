@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from internal.release.verification import Verification, CHECKS, epoch, merged, premerge
+from internal.story_gate import evidence
 
 ROOT = Path(__file__).resolve().parents[2]
 COMMON = ROOT / 'internal/release/lib/release-common.sh'
@@ -180,15 +181,113 @@ else: sys.exit(2)
             v.execute('check')
         self.assertEqual(4, self.count())
 
-    def test_candidate_and_identity_do_not_share_records(self):
+    def test_tree_changes_invalidate_but_identity_and_commit_metadata_reuse(self):
         self.verifier().execute('ensure')
         self.write('product.txt', 'new\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'new')
-        for v in (self.verifier(self.git('rev-parse', 'HEAD')), self.verifier(identity='AO-262')):
+        with self.assertRaises(ValueError):
+            self.verifier(self.git('rev-parse', 'HEAD')).execute('check')
+        self.assertTrue(self.verifier(identity='AO-262').execute('check')['reused'])
+        same_tree = self.git('commit-tree', self.head + '^{tree}', '-p', self.head, '-m', 'metadata only')
+        self.assertTrue(Verification(self.root, same_tree, same_tree, 'v9.9').execute('check')['reused'])
+        self.assertEqual(4, self.count())
+
+    def development_evidence(self):
+        v = self.verifier()
+        binding = v.binding(self.root, str(self.uv))
+        run_id, impact_id = 'a' * 32, 'b' * 64
+        record = dict(schema_version=6, acceptance_status='passed', error='',
+                      verification_scope='full', planned_checks=list(CHECKS),
+                      binding=dict(candidate_tree=v.tree, contract_digest=evidence.contract_digest(),
+                                   executed_checks=list(CHECKS)),
+                      environment=binding['environment'], environment_digest=evidence.digest(binding['environment']),
+                      run_id=run_id, impact_id=impact_id, verified_at='2026-10-26T00:00:00Z',
+                      checks=[dict(check_id=name, passed=True, exit_code=0, log_start=i, log_end=i+1,
+                                   log_path=f'.local/story-gate/runs/{impact_id}/{run_id}/output.log',
+                                   log_sha256='c'*64) for i, name in enumerate(CHECKS)])
+        path = self.root / '.local/story-gate/evidence' / (impact_id + '.json')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record))
+        return path, record
+
+    def test_complete_development_evidence_reused_without_test_or_copy(self):
+        path, record = self.development_evidence()
+        for identity in ('v1.4', 'v1.6', 'AO-277'):
+            v = self.verifier(identity=identity)
+            result = v.execute('check')
+            self.assertTrue(result['reused'])
+            self.assertEqual(record['run_id'], result['run_id'])
+            self.assertFalse(v.path.exists())
+        self.assertEqual(0, self.count())
+        self.verifier().execute('verify')
+        self.assertEqual(4, self.count())
+
+    def test_invalid_development_results_never_pass_or_override_failed_reverify(self):
+        path, record = self.development_evidence()
+        for delta in ({'checks': record['checks'][:3]}, {'acceptance_status': 'failed'},
+                      {'environment_digest': 'wrong'}, {'schema_version': 5},
+                      {'binding': dict(record['binding'], contract_digest='wrong')}):
+            path.write_text(json.dumps(dict(record, **delta)))
+            with self.assertRaises(ValueError):
+                self.verifier().execute('check')
+        path.write_text(json.dumps(record))
+        with patch.dict(os.environ, RELEASE_TEST_FAIL='python_runtime'):
+            with self.assertRaises(ValueError):
+                self.verifier().execute('verify')
+        with self.assertRaises(ValueError):
+            self.verifier(identity='AO-277').execute('check')
+        self.assertEqual(1, self.count())
+
+    def test_later_development_failure_revokes_release_pass_and_new_success_recovers(self):
+        self.verifier().execute('ensure')
+        path, record = self.development_evidence()
+        record['verified_at'] = '2099-01-01T00:00:00Z'
+        path.write_text(json.dumps(dict(record, acceptance_status='failed')))
+        with self.assertRaises(ValueError):
+            self.verifier().execute('check')
+        path.write_text(json.dumps(record))
+        self.assertEqual(record['run_id'], self.verifier().execute('check')['run_id'])
+        self.assertEqual(4, self.count())
+
+    def test_actual_time_and_equal_time_failure_override_pass(self):
+        v = self.verifier()
+        local = v.execute('ensure')
+        local['verified_at'] = '2026-10-26T08:00:00+08:00'
+        v.path.write_text(json.dumps(local))
+        path, record = self.development_evidence()
+        for timestamp in ('2026-10-26T00:00:01Z', '2026-10-26T00:00:00Z', 'not-a-time'):
+            path.write_text(json.dumps(dict(record, verified_at=timestamp, acceptance_status='failed')))
             with self.assertRaises(ValueError):
                 v.execute('check')
         self.assertEqual(4, self.count())
+
+    def test_development_ties_and_malformed_time_do_not_restore_old_pass(self):
+        path, record = self.development_evidence()
+        other = path.with_name('d' * 64 + '.json')
+        other.write_text(json.dumps(dict(record, acceptance_status='failed')))
+        with self.assertRaises(ValueError):
+            self.verifier().execute('check')
+        other.write_text(json.dumps(dict(record, verified_at='not-a-time')))
+        with self.assertRaises(ValueError):
+            self.verifier().execute('check')
+        self.assertEqual(0, self.count())
+
+    def test_release_consumption_respects_existing_development_lock(self):
+        from internal.story_gate.locking import TaskLock
+        from internal.story_gate.errors import StoryGateError
+        self.development_evidence()
+        with TaskLock(self.root / '.local/story-gate/runs/.verification.lock'):
+            with self.assertRaises(StoryGateError):
+                self.verifier().execute('check')
+        self.assertTrue(self.verifier().execute('check')['reused'])
+        self.assertEqual(0, self.count())
+
+    def test_empty_delivery_is_rejected_at_pr_stage(self):
+        self.git('update-ref', 'refs/remotes/origin/main', self.head)
+        result = self.shell(f'release_submit_review "$PWD" tapstate/agentic-ops v1.4 develop {self.head} hard true', check=False)
+        self.assertIn('release_candidate_already_in_main', result.stderr)
+        self.assertEqual(0, self.count())
 
     def test_maven_and_nested_skip_flags_cannot_pass(self):
         for name in ('AO_CONNECTOR_MAVEN_TEST', 'AO_JAR_MAVEN_TEST', 'AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING'):
@@ -369,6 +468,7 @@ elif a[:2]==['pr','view']:
  if fields=='body': print(body.read_text())
  elif fields=='baseRefName,headRefOid': print('main\\t'+head)
  elif fields=='baseRefName,headRefName,headRefOid,state': print('main\\tdevelop\\t'+head+'\\t'+d['state'])
+ elif fields=='number,url,state,baseRefName,headRefOid,mergeCommit': print(chr(9).join(['38','https://github.com/tapstate/agentic-ops/pull/38',d['state'],'main',head,d.get('merge','-')]))
  else: print('38')
 else: sys.exit(2)
 ''')
@@ -422,6 +522,34 @@ os.execv(path,[path]+args)
         self.assertEqual('', self.git('tag', root=bare))
         self.assertEqual(commit, self.git('rev-parse', 'develop', root=bare))
         self.assertEqual(4, self.count())
+
+    def test_merged_hotfix_missing_evidence_does_not_run_tests(self):
+        bare, state = self.hotfix_fixture()
+        self.assertEqual(2, self.hotfix_call().returncode)
+        commit = self.merge()
+        self.git('push', '-q', 'origin', commit + ':refs/heads/main')
+        state.write_text(json.dumps(dict(state='MERGED', head=self.head, merge=commit)))
+        self.verifier(identity='AO-262').path.unlink()
+        result = self.hotfix_call()
+        self.assertIn('release_verification_required', result.stderr)
+        self.assertEqual(4, self.count())
+
+        bin_dir = self.area / 'verify-bin'
+        bin_dir.mkdir()
+        wrapper = bin_dir / 'git'
+        git_bin = shutil.which('git')
+        wrapper.write_text('#!' + sys.executable + '\n' + f"import os,sys\na=sys.argv[1:]\nif a[-3:]==['config','--get-all','remote.origin.url'] or ('remote' in a and 'get-url' in a): print('https://github.com/tapstate/agentic-ops.git')\nelse: os.execv({git_bin!r},[{git_bin!r}]+a)\n")
+        wrapper.chmod(0o700)
+        self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
+        verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--jira', 'AO-262', '--merged-pr', '38'],
+                                  cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
+        self.assertEqual(8, self.count())
+        self.route_governance()
+        finished = self.hotfix_call()
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        self.assertEqual('published', json.loads(finished.stdout.splitlines()[-1])['delivery_status'])
+        self.assertEqual(8, self.count())
 
     def test_cross_epoch_hotfix_preserves_independent_review(self):
         bare, _ = self.hotfix_fixture(cross_epoch=True)
@@ -730,12 +858,6 @@ for page in (rows[:100],rows[100:]):
 
     def test_prepare_and_hard_review_do_not_query_or_configure_github_settings(self):
         bare, state = self.hotfix_fixture(cross_epoch=False)
-        shutil.rmtree(self.root / '.local/story-gate')
-        unrelated = self.area / 'unrelated-history'
-        unrelated.mkdir()
-        (self.root / '.local/story-gate').symlink_to(unrelated, target_is_directory=True)
-        # 正式版本不消费开发台账，甚至不应沿无关链接读取或写入。
-        # 本地准备没有范围验收或人工批准历史，也应执行自己的独立验收。
         # 隔离远端使用真实 bare 仓库；仅映射传输身份，不替换发布判定。
         bin_dir = self.area / 'bin'
         bin_dir.mkdir()
@@ -743,6 +865,7 @@ for page in (rows[:100],rows[100:]):
         wrapper = bin_dir / 'git'
         wrapper.write_text('#!' + sys.executable + '\n' + f'''import os,sys
 args=sys.argv[1:]
+if os.environ.get('PREPARE_OFFLINE')=='1' and any(x in args for x in ('fetch','ls-remote')): sys.exit(99)
 if args[-3:]==['config','--get-all','remote.origin.url'] or ('remote' in args and 'get-url' in args):
  print('https://github.com/tapstate/agentic-ops.git')
 else: os.execv({git_bin!r},[{git_bin!r}]+args)
@@ -762,17 +885,20 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
             self.assertIn('invalid_release_argument', rejected.stderr)
             self.assertFalse(state.exists())
         self.git('branch', 'release/v1.4', self.base)
-        conflict = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
-                                  cwd=self.root, env=self.env, capture_output=True, text=True)
-        self.assertIn('release_archive_conflict', conflict.stderr)
-        self.assertEqual(0, self.count())
-        self.git('branch', '-D', 'release/v1.4')
+        self.git('tag', 'v1.4', self.base)
+        self.env['PREPARE_OFFLINE'] = '1'
         result = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--version', 'v1.4', '--jira', 'AO-262'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         data = json.loads(result.stdout.splitlines()[-1])
         self.assertEqual('pending', data['delivery_checks'])
-        self.assertEqual('', self.git('branch', '--list', 'release/v1.4'))
+        hotfix_prepared = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--jira', 'AO-262'],
+                                        cwd=self.root, env=self.env, capture_output=True, text=True)
+        self.assertEqual(0, hotfix_prepared.returncode, hotfix_prepared.stderr)
+        self.assertEqual(4, self.count())
+        self.assertEqual(self.base, self.git('rev-parse', 'release/v1.4'))
+        self.git('tag', '-d', 'v1.4')
+        self.env.pop('PREPARE_OFFLINE')
         self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
         self.assertEqual(4, self.count())
         inspected = subprocess.run(['bash', 'internal/release/release.sh', 'inspect', '--version', 'v1.4'],
@@ -806,7 +932,6 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         self.assertEqual('OPEN', json.loads(state.read_text())['state'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual('', self.git('tag', root=bare))
-        self.assertEqual([], list(unrelated.iterdir()))
 
         # 同一固定候选经真实 Git 合并后，用公开入口完成 Tag 和版本存档。
         commit = self.merge()
@@ -819,6 +944,7 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         router.write_text('#!' + sys.executable + '\n' + f"import os,sys\na=sys.argv[1:]\np={governance!r} if a[0]=='api' and '/pulls?' not in a[1] else {pr_gh!r}\nos.execv(p,[p]+a)\n")
         router.chmod(0o700)
         self.env['AGENTIC_OPS_GH_BIN'] = str(router)
+        self.git('branch', '-D', 'release/v1.4')
         command = ['bash', 'internal/release/release.sh', 'publish', '--version', 'v1.4']
         denied = subprocess.run(command, cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertIn('release_confirmation_required', denied.stderr)

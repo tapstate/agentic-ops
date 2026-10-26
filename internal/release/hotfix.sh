@@ -20,7 +20,7 @@ release_hotfix_candidate() {
       RELEASE_BASE_COMMIT="$(git -C "$repo_root" rev-parse "$RELEASE_MERGE_COMMIT^1")"
       release_validate_pr_binding "$RELEASE_PR_URL" "$jira_id" "$head" || exit 1
       release_verify_merge_commit "$repo_root" "$head" "$RELEASE_MERGE_COMMIT" || exit 1
-      release_run_full_verification "$repo_root" "$head" ensure || exit 1
+      release_run_full_verification "$repo_root" "$head" check || exit 1
       workflow_check_delivery tapstate/agentic-ops hard || exit 1
       release_check_review_objections "$RELEASE_PR_NUMBER" || exit 1
       release_finish "$repo_root" "" "$head" "$RELEASE_MERGE_COMMIT" manual hotfix_publish
