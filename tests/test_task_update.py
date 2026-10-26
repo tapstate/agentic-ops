@@ -66,6 +66,19 @@ class TaskUpdateTests(unittest.TestCase):
         packet = json.loads(self.run_cmd(str(self.install/'agenticops'), 'update', '--check', '--probe').stdout)
         return self.start('--writers-stopped', '--apply-update', '--update-current-ref', packet['original_ref'], '--update-target-ref', packet['target_ref'], '--expected-stations', json.dumps(packet['stations']))
 
+    def test_missing_terminal_precedes_update_and_keeps_original_state(self):
+        self.advance(incompatible=True)
+        original = self.state()
+        current = (self.station / '.agenticops/current-task.json').read_bytes()
+        for extra in ([], ['--apply-update', '--writers-stopped'], ['--', '--non-interactive'], ['--', '--help']):
+            result = self.run_cmd(str(self.install / 'agenticops'), 'station', 'start', 'codex',
+                                  '--station', str(self.station), *extra, check=False)
+            self.assertEqual(2, result.returncode)
+            self.assertIn('交互启动需要终端', result.stderr)
+            self.assertNotIn('[AgenticOps][更新]', result.stderr)
+            self.assertEqual(original, self.state())
+            self.assertEqual(current, (self.station / '.agenticops/current-task.json').read_bytes())
+
     def test_upgrade_repair_multiarchive_independent_restore_and_both_cleanups(self):
         # 真实本地 Git 与安装切换；Agent/Jira 使用显式夹具，不冒充线上服务验收。
         sys.path.insert(0, str(ROOT / 'tests'))

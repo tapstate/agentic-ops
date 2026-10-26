@@ -376,7 +376,10 @@ def shell_entry(script, args):
         root = Path(os.environ.get('AGENTIC_OPS_HOME') or default_root).resolve()
     try:
         packet = None
-        if Path(script).name == 'agenticops' and args[:2] == ['station', 'start'] and not any(v in args for v in ('--help', '-h')):
+        own = args[:args.index('--')] if '--' in args else args
+        if Path(script).name == 'agenticops' and own[:2] == ['station', 'start'] and not any(v in own for v in ('--help', '-h')):
+            if '--non-interactive' not in own and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+                raise ValueError('交互启动需要终端；自动化调用请明确使用 --non-interactive，并传入 Agent 支持的非交互参数。')
             args, packet = before_task(root, args, startup=True)
         with _entry_lease(code_root, root, _mode(script, args)) as fd:
             fresh = _fresh_loader()
