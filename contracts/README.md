@@ -27,6 +27,8 @@ Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求
 
 工位兼容清单由同名 Schema 校验；`station_state_epoch` 保留单调递增的来源标识，`validation: feature` 将执行条件交给所属功能检查。旧客户端没有该声明时仍按其原 epoch 合同运行。`station-init.schema.json` 记录生成来源和 cleanup 清单；刷新旧工位保留来源 epoch，不用改标记代替校验。升级与回退的唯一规则见[工位合同](../docs/architecture/single-task-station.md#10-升级与恢复)，这里不另维护支持列表或逐版本转换规则。
 
+归档恢复的外部材料合同由 [task_handoff 依赖描述](../workflow/task-handoff.md) 维护；其版本独立于任务状态 schema。
+
 ## 兼容规则
 
 工位 epoch 36 在 current-task 信封增加可选 `execution_control`，由受管写入入口核对会话；旧客户端会忽略或丢失占用，不能用旧版执行新版状态。结构与交接行为见[执行接管](../docs/architecture/single-task-station.md#执行接管当前源码)。

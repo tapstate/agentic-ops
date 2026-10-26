@@ -109,7 +109,7 @@ def takeover(base, request, operation_id, expected_revision):
                     if observed.returncode == 0:
                         found.append(observed.stdout.strip())
                 if not found or any(head != continuation["expected_head"] for head in found):
-                    raise ValueError("续办工作分支与预期 Head 不一致")
+                    raise ValueError("续办工作分支与预期 Head 不一致；先回读远端与最新 Jira 决定，核实新增成果后整理当前 continuation-input。确需历史点时，经授权将原 SHA 保全到独立远端分支再接续，不能回退或覆盖原分支")
                 if source.git(path, "merge-base", "--is-ancestor", continuation["baseline_sha"], continuation["expected_head"], check=False).returncode:
                     raise ValueError("续办历史基线不是候选祖先")
                 resolutions[name].update(ref_kind="commit", ref_name=continuation["baseline_sha"],

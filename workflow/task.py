@@ -112,6 +112,16 @@ def cmd_handoff_continuations(args):
     return 0
 
 
+def cmd_handoff_restore(args):
+    from workflow import task_handoff
+    packet = station_context.read_object(args.input, '接续正文')
+    evidence = json.loads(Path(args.evidence).read_text()) if args.evidence else []
+    result = task_handoff.restore(args.dir, packet, args.expected_digest, args.expected_run_id,
+        args.expected_revision, args.source_ref, args.decision_ref, evidence)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_lifecycle(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -795,6 +805,16 @@ def main():
     p.add_argument('--expected-digest', required=True)
     p.add_argument('--dir', default='.')
     p.set_defaults(func=cmd_handoff_continuations)
+    p = sub.add_parser('handoff-restore', help='核实源码和必要材料后接回方案进度，不复制旧阶段或 PASS')
+    p.add_argument('--input', required=True)
+    p.add_argument('--expected-digest', required=True)
+    p.add_argument('--expected-run-id', required=True)
+    p.add_argument('--expected-revision', type=int, required=True)
+    p.add_argument('--source-ref', required=True)
+    p.add_argument('--decision-ref', required=True)
+    p.add_argument('--evidence', help='原生取回必要材料后的文件引用列表')
+    p.add_argument('--dir', default='.')
+    p.set_defaults(func=cmd_handoff_restore)
     for kind in ("archive", "clean"):
         p = sub.add_parser(kind)
         p.add_argument("--issue-key", required=True)

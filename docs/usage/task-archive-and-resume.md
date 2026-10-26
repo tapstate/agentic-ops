@@ -18,7 +18,7 @@
 
 本节对应源码候选新增的持久归档入口，安装版本必须实际包含该能力并满足机器 epoch 合同；不代表旧安装已更新。本地尽力快照不能代替 Jira 接续点的回读证明。两个清理范围和执行接管的采用边界按工位合同核验。
 
-Agent 先核实已有方案与实际进度，整理 JSON（不是要求研发填写表单）：`plan`、`progress`、`remaining`、`environment` 为必要文本；`evidence` 可提供已核实的持久引用；需放弃本次代码时 `discard_repositories` 按仓库记录明确决定来源，既不删除代码也不授权远端删除。未知外部操作须先回读，或在 `unresolved_operations` 按待办 kind 给出原操作、对象和回读线索。程序不能认证这些语义材料，Agent 仍需核对可信事实。
+Agent 先核实已有方案与实际进度，整理 JSON（不是要求研发填写表单）：`plan`、`progress`、`remaining`、`environment` 为必要文本；`evidence` 可提供必要材料的 `reference`（持久位置）、`source_ref`（原生回读来源）及 `local_file`（本轮取回的普通文件）对象列表；程序读取内容并保存摘要和大小，不把本机路径或材料正文写入归档；需放弃本次代码时 `discard_repositories` 按仓库记录明确决定来源，既不删除代码也不授权远端删除。未知外部操作须先回读，或在 `unresolved_operations` 按待办 kind 给出原操作、对象和回读线索。程序不能认证这些语义材料，Agent 仍需核对可信事实。
 
 ```sh
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --action archive --handoff-input <材料.json>
@@ -46,7 +46,15 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --resume --oper
 python3 <product-root>/workflow/task.py handoff-continuations --dir <new-station> --input <正文中的JSON.json> --expected-digest <接续点摘要>
 ```
 
-输出供现有 `takeover --continuation-input` 使用；缺失或变化的分支、历史基线与 Head 仍由接管入口核验。方案与进度由 Agent 按当前检查点补录，不能直接赋值旧阶段。放弃的代码不进入续办输入；新工位重新配置环境并补齐剩余工作。同工位继续仍沿原 run/op。
+输出供现有 `takeover --continuation-input` 使用；缺失或变化的分支、历史基线与 Head 仍由接管入口核验。方案与进度通过下述所属接口接回为可核实成果来源，再由 Agent 按当前检查点补齐业务字段，不能直接赋值旧阶段。放弃的代码不进入续办输入；新工位重新配置环境并补齐剩余工作。同工位继续仍沿原 run/op。
+
+接管与仓库登记完成后，Agent 从 Jira 核实最新有效决定，并原生取回必要材料，执行：
+
+```sh
+python3 <product-root>/workflow/task.py handoff-restore --dir <new-station> --input <正文中的JSON.json> --expected-digest <摘要> --expected-run-id <当前run> --expected-revision <当前revision> --source-ref <Jira回读来源> --decision-ref <有效成果确认来源> --evidence <材料回读列表.json>
+```
+
+没有必要材料时省略 `--evidence`。接口核对任务、源码分支和 Head、历史基线及必要材料内容，将方案、进度、剩余事项和环境要求保存到当前任务的 `facts.handoff_resume`，不导入旧阶段、授权或 PASS。Agent 使用正常项目入口复用仍有效的方案与验证、补齐环境及剩余工作；接口成功只表示成果来源已接回，不代表业务验证或部署完成。来源和确认由 Agent 核实，程序不认证 Jira 身份。格式版本和旧材料兼容边界见[归档恢复依赖描述](../../workflow/task-handoff.md)。
 
 ## 何时需要存档
 
