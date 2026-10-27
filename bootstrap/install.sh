@@ -59,11 +59,13 @@ if [ -n "$missing" ]; then
   exit 2
 fi
 
-python_version="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'; then
-  printf '[AgenticOps][安装][失败] 需要 Python 3.9+，当前为 %s（退出码=2）\n' "$python_version" >&2
+# stdin 安装尚无产品辅助模块，只做同一 3.12 基线的启动检查。
+install_python="${AGENTIC_OPS_PYTHON:-${AO_PRODUCT_PYTHON:-$(command -v python3.12 || command -v python3)}}"
+if ! "$install_python" -I -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+  printf '[AgenticOps][安装][失败] 需要 Python 3.12.x；请设置 AGENTIC_OPS_PYTHON 为已准备的解释器（退出码=2）\n' >&2
   exit 2
 fi
+python3() { "$install_python" -I "$@"; }
 
 if [ -e "$install_root" ]; then
   printf '[AgenticOps][安装][失败] 安装目录已存在：%s；请使用 agenticops update 更新（退出码=2）\n' "$install_root" >&2
@@ -94,6 +96,9 @@ git -C "$install_root" -c promisor.quiet=true checkout --quiet "$branch"
 ao_stage="保存安装配置"
 printf '[AgenticOps][安装][进行] %s\n' "$ao_stage" >&2
 current_ref="$(git -C "$install_root" rev-parse HEAD)"
+if [ -f "$install_root/bootstrap/python_runtime.py" ]; then
+  install_python="$(python3 "$install_root/bootstrap/python_runtime.py" prepare --root "$install_root")"
+fi
 source_pool="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$source_pool")"
 python3 "$install_root/bootstrap/product_state.py" \
   --product-root "$install_root" write \

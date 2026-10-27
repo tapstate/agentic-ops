@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
+. "$repo_root/internal/python-environment.sh"
 cd "$repo_root"
 
 fail() { printf '资源合同验证失败：%s\n' "$1" >&2; exit 1; }

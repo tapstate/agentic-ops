@@ -1,6 +1,6 @@
 # Git SSH 安装
 
-这是默认安装方式。需要 Git、Python 3.9+，且账号能读取 `tapstate/agentic-ops`；先按[Git SSH 授权指引](../security/git-ssh-access.md)验证身份与仓库访问。
+这是默认安装方式。需要 Git、Python 3.12.x，且账号能读取 `tapstate/agentic-ops`；先按[Git SSH 授权指引](../security/git-ssh-access.md)验证身份与仓库访问。
 
 ## 首次安装
 

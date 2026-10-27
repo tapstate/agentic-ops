@@ -5,11 +5,12 @@ set -euo pipefail
 export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
+. "$repo_root/internal/python-environment.sh"
 product_python="${AGENTIC_OPS_TEST_PYTHON:-$(command -v python3)}"
 internal_python="${AGENTIC_OPS_INTERNAL_TEST_PYTHON:-$repo_root/.local/venv/internal/bin/python}"
 
-test -x "$product_python" || { printf 'AgenticOps：缺少 Python 3.9+\n' >&2; exit 1; }
-if [ ! -x "$internal_python" ]; then internal_python="$product_python"; fi
+test -x "$product_python" || { printf 'AgenticOps：缺少 Python 3.12.x\n' >&2; exit 1; }
+test -x "$internal_python" || { printf 'AgenticOps：内部 Python 3.12 环境缺失\n' >&2; exit 1; }
 "$internal_python" -c 'import yaml' >/dev/null 2>&1 || {
   printf 'AgenticOps：内部测试依赖尚未准备，请执行 agenticops setup\n' >&2
   exit 1
@@ -24,6 +25,7 @@ run_internal() {
 }
 
 run_general_suite() {
+  run_product tests/test_python_runtime.py
   run_product tests/test_gate.py
   run_product tests/test_contracts.py
   run_product tests/test_adapter_boundary.py

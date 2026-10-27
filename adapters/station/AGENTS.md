@@ -32,8 +32,8 @@ Codex 的 `.agents/skills/`、Claude Code 的 `.claude/skills/` 链接到同一�
 任务接管与工作清理、任务清理、任务归档、release 的职责分别由工位合同定义。开始前必须先读取当前项目 `.agents/skills/` 或 `.claude/skills/` 中匹配的 Project Skill。memory 只能作为历史线索；当前产品规则和实际 CLI 是依据。Skill 缺失或越界时，提示从工位根执行 `./agenticops station repair`，不使用越界材料。若绑定产品根中的现役 Project 规则、合同、CLI 与原授权可核验，按同一成果标准接管；规则来源、权限或安全路径无法核验时，只停止受影响的副作用步骤，继续无依赖的准备，不手改状态。
 
 ```bash
-python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工位>
-python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工位>
+__AGENTIC_OPS_HOME__/.local/venv/product/bin/python __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工位>
+__AGENTIC_OPS_HOME__/.local/venv/product/bin/python __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工位>
 ```
 
 - 接管前 current 必须为空且没有未完成 operation；完成任务也必须由研发明确释放，不能自动接新任务。接管失败保留同 run、同 operation 恢复，不新建运行编号伪装重试。

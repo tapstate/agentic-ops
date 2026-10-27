@@ -98,7 +98,7 @@ if [ "$mode" = "source" ]; then
   chmod 0700 "$product_root/.local" "$product_root/.local/venv" "$product_root/.local/cache"
   if ! UV_CACHE_DIR="$product_root/.local/cache/uv" \
     UV_PROJECT_ENVIRONMENT="$product_root/.local/venv/internal" \
-      uv sync --locked --project "$product_root/internal"; then
+      uv sync --locked --project "$product_root/internal" --python "$AO_PRODUCT_PYTHON"; then
     printf '[AgenticOps][更新][失败] 源码已更新到 %s，但维护依赖同步失败；修复后重新执行 update（退出码=2）\n' "$updated_ref" >&2
     exit 2
   fi

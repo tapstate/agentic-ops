@@ -68,10 +68,10 @@ def command_for(root, name):
     command = TEST_SUITES[name]
     if command[0] not in ("python3", "internal-python"):
         return command
-    product = os.environ.get("AGENTIC_OPS_TEST_PYTHON") or shutil.which("python3") or sys.executable
+    from bootstrap import python_runtime
+    product = python_runtime.test_python(root)
     internal = os.environ.get("AGENTIC_OPS_INTERNAL_TEST_PYTHON") or str(Path(root) / ".local/venv/internal/bin/python")
-    if not os.access(internal, os.X_OK):
-        internal = product
+    python_runtime.inspect(internal)
     return ((internal if command[0] == "internal-python" else product), *command[1:])
 
 

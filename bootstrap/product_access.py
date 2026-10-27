@@ -10,6 +10,12 @@ import stat
 import subprocess
 import sys
 
+
+def _python_runtime():
+    # 解释器引导也是产品代码；读取辅助模块时遵循同一切换屏障。
+    with lease(Path(__file__).resolve().parent.parent, 'shared'):
+        return runpy.run_path(str(Path(__file__).with_name('python_runtime.py')))
+
 LEASE_ENV = 'AO_PRODUCT_LEASE'
 LOCK_NAME = '.local/product-access.lock'
 
@@ -348,6 +354,7 @@ def python_entry(script):
     if Path(script).parent.name == 'bootstrap':
         root = Path(_option(args, '--product-root', _option(args, '--install-home', root))).resolve()
     try:
+        _python_runtime()['require_current']()
         packet = None
         if Path(script).name == 'task.py' and args and args[0] == 'takeover' and not any(v in args for v in ('--help', '-h')):
             args, packet = before_task(root, args)
@@ -360,6 +367,8 @@ def python_entry(script):
             _verify_binding(root, script, args)
             _verify_preflight(root, packet)
             # 加锁后读取脚本，不恢复等待前已加载的产品模块。
+            # -I 排除调用者 PYTHONPATH；仅恢复已持租约脚本自身的可信模块目录。
+            sys.path.insert(0, str(Path(script).resolve().parent))
             runpy.run_path(script, run_name='__main__', init_globals={'_AO_PRODUCT_ENTRY': True})
         return 0
     except (ValueError, OSError) as error:
@@ -375,6 +384,16 @@ def shell_entry(script, args):
         default_root = code_root if Path(script).name == 'setup.sh' else Path.home() / '.agentic-ops'
         root = Path(os.environ.get('AGENTIC_OPS_HOME') or default_root).resolve()
     try:
+        runtime = _python_runtime()
+        selected = runtime['select'](code_root)
+        if Path(sys.executable).resolve() != Path(selected).resolve():
+            loader = str(Path(__file__).resolve())
+            command = ('import sys; from pathlib import Path; p=Path(sys.argv[1]); '
+                       's=p.read_bytes(); n={"__file__":str(p),"_AO_LOADER_SOURCE":s}; '
+                       'exec(compile(s,str(p),"exec"),n); '
+                       'raise SystemExit(n["shell_entry"](sys.argv[2],sys.argv[3:]))')
+            os.execv(selected, [selected, '-I', '-c', command, loader, script, *args])
+        runtime['require_current']()
         packet = None
         own = args[:args.index('--')] if '--' in args else args
         if Path(script).name == 'agenticops' and own[:2] == ['station', 'start'] and not any(v in own for v in ('--help', '-h')):
@@ -392,11 +411,16 @@ def shell_entry(script, args):
             begin = source.index('# AO_PRODUCT_SHELL_BEGIN')
             end = source.index('# AO_PRODUCT_SHELL_END', begin) + len('# AO_PRODUCT_SHELL_END')
             source = source[:begin] + source[end:]
+            # 函数仅存在于产品 shell，不 export；Agent/业务命令保留调用者 PATH。
+            source = source.replace('exec python3 ', 'exec "$AO_PRODUCT_PYTHON" -I ')
             source = ('export AO_PRODUCT_LEASE="$(python3 -c \'import json,os,sys; '
                       'v=json.loads(os.environ["AO_PRODUCT_LEASE"]); v["owner"]=int(sys.argv[1]); '
                       'print(json.dumps(v))\' "$$")"\n') + source
+            source = 'python3() { "$AO_PRODUCT_PYTHON" -I "$@"; }\n' + source
             # 监督进程持续持锁；shell exec Agent 后仍等待整个前台会话退出。
-            result = subprocess.run(['bash', '-c', source, script, *args], pass_fds=(fd,), env=child_environment(root))
+            environment = child_environment(root)
+            environment['AO_PRODUCT_PYTHON'] = selected
+            result = subprocess.run(['bash', '-c', source, script, *args], pass_fds=(fd,), env=environment)
             return result.returncode if result.returncode >= 0 else 128 - result.returncode
     except (ValueError, OSError) as error:
         print('[AgenticOps][产品租约][失败] %s' % error, file=sys.stderr)

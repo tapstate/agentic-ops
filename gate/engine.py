@@ -1,7 +1,7 @@
 """AgenticOps 平台无关门禁判定内核。
 
 输入必须是 AgenticOps 标准操作和可信执行上下文。本模块不理解任何平台事件、
-原生工具名或 Hook 协议。零第三方依赖，兼容 Python 3.9+。
+原生工具名或 Hook 协议。零第三方依赖，兼容 Python 3.12.x。
 """
 from __future__ import annotations
 

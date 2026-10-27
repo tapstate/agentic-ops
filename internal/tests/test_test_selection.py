@@ -13,28 +13,32 @@ from internal import test_selection
 
 
 class TestSelectionTests(unittest.TestCase):
-    def test_python_environment_defaults_overrides_and_fallback(self):
+    def test_python_environment_defaults_overrides_and_missing_internal(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {}, clear=True):
             root = Path(directory)
             internal = root / ".local/venv/internal/bin/python"
             internal.parent.mkdir(parents=True)
             internal.symlink_to(sys.executable)
-            with mock.patch.object(test_selection.shutil, "which", return_value=sys.executable):
-                self.assertEqual(test_selection.command_for(root, "story_gate")[0], str(internal))
-                self.assertEqual(test_selection.command_for(root, "quality")[0], sys.executable)
-                self.assertEqual(test_selection.command_for(root, "release"), ("bash", "internal/tests/test_release.sh"))
-                internal.unlink()
-                self.assertEqual(test_selection.command_for(root, "story_gate")[0], sys.executable)
-            with mock.patch.dict(os.environ, {"AGENTIC_OPS_TEST_PYTHON": "custom-product",
+            self.assertEqual(test_selection.command_for(root, "story_gate")[0], str(internal))
+            self.assertEqual(test_selection.command_for(root, "quality")[0], str(internal))
+            internal.unlink()
+            with self.assertRaises(ValueError):
+                test_selection.command_for(root, "story_gate")
+            with mock.patch.dict(os.environ, {"AGENTIC_OPS_TEST_PYTHON": sys.executable,
                                               "AGENTIC_OPS_INTERNAL_TEST_PYTHON": sys.executable}):
-                self.assertEqual(test_selection.command_for(root, "quality")[0], "custom-product")
+                self.assertEqual(test_selection.command_for(root, "quality")[0], sys.executable)
                 self.assertEqual(test_selection.command_for(root, "story_gate")[0], sys.executable)
+            with mock.patch.dict(os.environ, {"AGENTIC_OPS_TEST_PYTHON": "/missing/python"}):
+                with self.assertRaises(ValueError):
+                    test_selection.command_for(root, "quality")
 
     def test_preview_and_execution_share_resolved_commands(self):
         output = io.StringIO()
         root = Path.cwd().resolve()
         with mock.patch.object(sys, "argv", ["selector", "--source", "staged", "--run"]), \
                 mock.patch.object(test_selection, "changes", return_value=["internal/story_gate/service.py"]), \
+                mock.patch("bootstrap.python_runtime.test_python", return_value=sys.executable), \
+                mock.patch("bootstrap.python_runtime.inspect", return_value=(sys.executable, sys.executable)), \
                 mock.patch.object(test_selection.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
                 mock.patch.dict(os.environ, {"AGENTIC_OPS_INTERNAL_TEST_PYTHON": sys.executable, "PYTHONPATH": "previous"}), \
                 contextlib.redirect_stdout(output):
@@ -47,6 +51,8 @@ class TestSelectionTests(unittest.TestCase):
     def test_failed_suite_stops_later_execution(self):
         with mock.patch.object(sys, "argv", ["selector", "--source", "staged", "--run"]), \
                 mock.patch.object(test_selection, "changes", return_value=["internal/story_gate/service.py"]), \
+                mock.patch("bootstrap.python_runtime.test_python", return_value=sys.executable), \
+                mock.patch("bootstrap.python_runtime.inspect", return_value=(sys.executable, sys.executable)), \
                 mock.patch.object(test_selection.subprocess, "run", return_value=subprocess.CompletedProcess([], 9)) as run, \
                 contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(SystemExit) as error:

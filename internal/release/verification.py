@@ -16,6 +16,7 @@ import tempfile
 import uuid
 
 from internal.story_gate import evidence
+from bootstrap import python_runtime
 from internal.story_gate.io import atomic_write_json
 from internal.story_gate.locking import TaskLock
 from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
@@ -68,7 +69,7 @@ def epoch(root, ref):
 
 
 def verifier_digest(root):
-    paths = ['internal/release', 'internal/story_gate/evidence.py',
+    paths = ['internal/release', 'bootstrap/python_runtime.py', 'internal/python-environment.sh', 'internal/story_gate/evidence.py',
              'internal/story_gate/model.py', 'internal/story_gate/io.py',
              'internal/story_gate/locking.py', 'internal/test_selection.py']
     items = []
@@ -127,7 +128,7 @@ class Verification:
         # 测试跳过开关不能产生或消费完整四项证据。
         if os.environ.get('AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING', '0') != '0':
             raise ValueError('发布验收不能启用嵌套测试跳过开关')
-        internal_python = subprocess.check_output([uv, 'python', 'find', '3.12'], text=True).strip()
+        internal_python = python_runtime.test_python(self.root)
         old = os.environ.get('AGENTIC_OPS_INTERNAL_TEST_PYTHON')
         os.environ['AGENTIC_OPS_INTERNAL_TEST_PYTHON'] = internal_python
         try:
@@ -250,11 +251,11 @@ class Verification:
         env.update(UV_CACHE_DIR=str(snapshot / '.local/cache/uv'),
                    UV_PROJECT_ENVIRONMENT=str(snapshot / '.local/venv/internal'),
                    AGENTIC_OPS_INTERNAL_TEST_PYTHON=str(snapshot / '.local/venv/internal/bin/python'),
-                   AGENTIC_OPS_TEST_PYTHON=os.environ.get('AGENTIC_OPS_TEST_PYTHON') or shutil.which('python3') or sys.executable,
+                   AGENTIC_OPS_TEST_PYTHON=python_runtime.test_python(self.root),
                    PYTHONPATH=str(snapshot), PYTHONDONTWRITEBYTECODE='1')
         with (log_dir / 'setup.log').open('wb') as log:
             os.chmod(log.name, 0o600)
-            if run_command([uv, 'sync', '--locked', '--project', 'internal', '--python', '3.12'], snapshot, env, log):
+            if run_command([uv, 'sync', '--locked', '--project', 'internal', '--python', env['AGENTIC_OPS_TEST_PYTHON']], snapshot, env, log):
                 raise ValueError('发布隔离环境准备失败：' + str(log.name))
         for name, script in CHECKS.items():
             path = log_dir / (name + '.log')

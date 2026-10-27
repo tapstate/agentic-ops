@@ -13,7 +13,7 @@ mkdir -p "$HOME/agenticops-tapdata"
 cd "$HOME/agenticops-tapdata"
 ```
 
-开始前还要确保本机已有 Git、Python 3.9+，且 Git SSH 可以读取 `tapstate/agentic-ops` 与 TapData 项目所需仓库。具体检查见[Git SSH 授权指引](../security/git-ssh-access.md)。
+开始前还要确保本机已有 Git、Python 3.12.x，且 Git SSH 可以读取 `tapstate/agentic-ops` 与 TapData 项目所需仓库。具体检查见[Git SSH 授权指引](../security/git-ssh-access.md)。
 
 ## 2. 从该目录启动 Agent
 
@@ -26,7 +26,7 @@ cd "$HOME/agenticops-tapdata"
 ```text
 根据 https://raw.githubusercontent.com/tapstate/agentic-ops/main/docs/usage-guide.md 安装并初始化 tapdata 项目：工位为当前 cwd 目录，源码缓存由产品根自动管理。
 
-开始前先确认当前 cwd 是空目录，且它不在安装目录、源码池或业务仓库内；检查 Git、Python 3.9+ 与 Git SSH 权限。按文档中的 Git SSH 安装入口获取并执行安装脚本，安装到 ~/.agentic-ops（显式传 --install-home，避免已有 AGENTIC_OPS_HOME 改变目标），沿用脚本默认仓库，不重复指定 --repository，初始化当前 cwd 为 tapdata 工位，并执行 doctor 验证接线。不要接管 Jira 任务、准备业务仓库、修改业务代码、提交、推送或合并；遇到权限、目录冲突或外部写入确认时停下并说明原因和所需决定。
+开始前先确认当前 cwd 是空目录，且它不在安装目录、源码池或业务仓库内；检查 Git、Python 3.12.x 与 Git SSH 权限。按文档中的 Git SSH 安装入口获取并执行安装脚本，安装到 ~/.agentic-ops（显式传 --install-home，避免已有 AGENTIC_OPS_HOME 改变目标），沿用脚本默认仓库，不重复指定 --repository，初始化当前 cwd 为 tapdata 工位，并执行 doctor 验证接线。不要接管 Jira 任务、准备业务仓库、修改业务代码、提交、推送或合并；遇到权限、目录冲突或外部写入确认时停下并说明原因和所需决定。
 ```
 
 ## 完成标准

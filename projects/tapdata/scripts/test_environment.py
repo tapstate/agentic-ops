@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TapData 工位 Docker 环境生命周期；仅使用 Python 3.9 标准库。"""
+"""TapData 工位 Docker 环境生命周期；仅使用 Python 3.12 标准库。"""
 
 # 产品入口：先取得租约，再重新加载本版脚本；导入库模块不启动 CLI。
 if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
