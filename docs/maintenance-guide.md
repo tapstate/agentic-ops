@@ -241,6 +241,8 @@ internal/acceptance.sh --list
 | 完整发布 | 在 develop 确定范围并完成发布验证，创建 develop → main PR，维护者审查并授权 Merge commit 合并 | 在实际 main 合并提交创建 annotated Tag `vX.Y`，再从该提交创建并推送 `release/vX.Y` 存档分支 |
 | Hotfix | 在 develop 确定范围并完成同样的发布验证，创建 develop → main PR，维护者审查并授权 Merge commit 合并 | 无版本 Tag，无 release 存档分支 |
 
+正式发布的 PR 合并不等于发布完成，也不会触发后台 Tag 推送。执行 Agent 在合并后继续回读原 PR，沿 `publish` 或 `recover` 收尾；尚缺 Tag、存档、验收或授权时明确报告未发布及接续动作，不以 PR 已合并结束发布任务。提交审查的结果和 PR 正文保留合并后收尾指引，跨会话从原 PR 接续。
+
 `release/v*` 只保存已发布版本，不作为开发或待审候选。Tag 和存档必须指向同一个已核验的 main Merge commit，即使 main 后来前进，也不能改指最新提交。`station_state_epoch` 只说明工位状态兼容风险，不决定发布方式；升级操作仍遵循[更新与回退](usage/update-and-rollback.md)。
 
 ### 操作入口
@@ -282,11 +284,13 @@ main 交付要求必须 PR、仅 Merge commit、禁止删除及强推、撤销�
 
 当前源码候选支持上述复用；旧发布专用记录如不能满足当前绑定，不自动转换为通过。受信故事影响分析不替代实际验证，也不复制受管项目质量流程。
 
-显式重验使用 `release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <编号>`。`inspect --version vX.Y` 只查询状态，不执行测试；已有旧版本 PR 可用 `--merged-pr <编号>` 明确对象。`recover --version vX.Y --merged-pr <编号>` 不带确认时只核验并输出绑定实际事实的继续命令，不打 Tag。恢复仍对应原 PR 身份，不把旧版本 PR 自动扩展为后来 main 的全部修复，同树有效测试可复用，但不能把原 Hotfix 的授权或 PR 身份当作另一个版本的交付事实。
+显式重验使用 `release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <编号>`。`inspect --version vX.Y` 只查询状态，不执行测试；Tag 尚未创建时也核对本地与远端同名存档冲突。已合并候选缺证据时按原 PR 执行 `verify --version vX.Y --merged-pr <编号>`，不能用当前 develop 的 `prepare` 代替历史候选补验；已有旧版本 PR 可用 `--merged-pr <编号>` 明确对象。`recover --version vX.Y --merged-pr <编号>` 不带确认时只核验并输出绑定实际事实的继续命令，不打 Tag。恢复仍对应原 PR 身份，不把旧版本 PR 自动扩展为后来 main 的全部修复，同树有效测试可复用，但不能把原 Hotfix 的授权或 PR 身份当作另一个版本的交付事实。
 
 实际合并必须有两个父提交，分别为已确认的 main 基线和候选，完整树与被测候选一致，并在 main 历史中。main、PR Head 或合并结果漂移时停止受影响动作，核实范围、验收及授权。发布从固定实现快照运行，不自动提交、stash 或覆盖用户工作区。发布实现有未提交修改时先完成实现审查，不从活动工作树执行交付。
 
 版本存档阶段才检查 Tag 与存档冲突，再创建 Tag、存档并分别回读远端。已有正确对象可幂等复用；已存在且指向其它提交的 Tag 或分支不移动、不删除。存档推送使用已核验 SHA，并要求目标引用仍不存在，不能在检查后被并行创建时覆盖它。Tag 已成功而存档失败时保留现场，重试只补未完成部分，不能报告完整发布成功。旧流程留下的 `release/v*` 候选不是新版存档，保留不影响本地验证；创建同名存档前由维护者决定处置，不静默迁移。没有代码差异时不制造空 PR 或重复合并来绕过旧记录冲突。
+
+旧候选经维护者明确授权后，可用 `recover --version vX.Y --merged-pr <编号> --migrate-legacy-archive <旧候选完整SHA>` 生成受控迁移确认包。只接纳该版本旧 `release/vX.Y` PR 的固定 Head，目标仍为原实际 Merge commit；不带确认参数不写 Tag、保全分支或存档。确认绑定旧 SHA、保全分支及本地/远端引用；执行先保全到 `codex/legacy-release-vX.Y-<旧SHA前7位>` 并回读，再补 Tag，最后快进同名 release 分支。快进前核验祖先关系，远端写入用预期旧值 lease 拒绝并发漂移，不允许非快进覆盖；本地引用按旧值原子更新且不得在工作树中检出。备份失败不打 Tag，Tag 成功后失败不撤销已有产物，重新生成确认包只补未完成部分。此显式迁移例外不改变普通发布对冲突引用的拒绝，也不删除旧提交或改写 main/develop。
 
 收尾再将实际交付的 Merge commit 快进同步到 develop；并行开发无法快进时保留提交并报告 `pending_integration`，本地不能安全同步时报告 `local_pending`，外部写入结果未知先回读。同步待办不撤销正确的 Tag 或存档，也不重新发布。Git、GitHub PR 与远端引用仍是事实源，本地证据和操作锁不提供跨 clone 锁或防篡改保证。
 
