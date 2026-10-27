@@ -129,7 +129,7 @@ case "$command_name" in
       RELEASE_BASE_COMMIT="$(git -C "$repo_root" rev-parse "$RELEASE_MERGE_COMMIT^1")"
       release_validate_pr_binding "$RELEASE_PR_URL" "$version" "$head" || exit 1
       release_verify_merge_commit "$repo_root" "$head" "$RELEASE_MERGE_COMMIT" || exit 1
-      release_run_full_verification "$repo_root" "$head" check || exit 1
+      release_run_full_verification "$repo_root" "$head" check "$RELEASE_PR_NUMBER" || exit 1
       workflow_check_delivery tapstate/agentic-ops hard || exit 1
       release_check_review_objections "$RELEASE_PR_NUMBER" || exit 1
       release_confirm_publish "$repo_root" "$version" "$head" "$confirm_release" develop main "创建版本 Tag 与存档" || exit 1
@@ -144,7 +144,8 @@ case "$command_name" in
       head="$(git -C "$repo_root" rev-parse develop)"
       release_preflight_candidate "$repo_root" "$head" || exit 1
       release_submit_review "$repo_root" tapstate/agentic-ops "$version" develop "$head" hard "$confirm_release" || exit 1
-      printf '{"ok":true,"operation":"release_submit_for_review","status":"waiting_for_manual_merge","head":"%s","pr_number":%s,"pr_url":"%s","source_branch":"develop","protection_mode":"hard","delivery_checks":"pending","continue_command":"internal/release/release.sh publish --version %s --confirm-release"}\n' "$head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$version"
+      payload="$(printf '{"ok":true,"operation":"release_submit_for_review","status":"waiting_for_manual_merge","head":"%s","pr_number":%s,"pr_url":"%s","source_branch":"develop","protection_mode":"hard","delivery_checks":"pending","continue_command":"internal/release/release.sh publish --version %s --confirm-release"}\n' "$head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$version")"
+      release_result_json "$payload"
     fi
     ;;
   recover)

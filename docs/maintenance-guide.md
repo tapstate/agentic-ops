@@ -241,6 +241,8 @@ internal/acceptance.sh --list
 | 完整发布 | 在 develop 确定范围并完成发布验证，创建 develop → main PR，维护者审查并授权 Merge commit 合并 | 在实际 main 合并提交创建 annotated Tag `vX.Y`，再从该提交创建并推送 `release/vX.Y` 存档分支 |
 | Hotfix | 在 develop 确定范围并完成同样的发布验证，创建 develop → main PR，维护者审查并授权 Merge commit 合并 | 无版本 Tag，无 release 存档分支 |
 
+正式发布的 PR 合并不等于发布完成，也不会触发后台 Tag 推送。执行 Agent 在合并后继续回读原 PR，沿 `publish` 或 `recover` 收尾；尚缺 Tag、存档、验收或授权时明确报告未发布及接续动作，不以 PR 已合并结束发布任务。提交审查的结果和 PR 正文保留合并后收尾指引，跨会话从原 PR 接续。
+
 `release/v*` 只保存已发布版本，不作为开发或待审候选。Tag 和存档必须指向同一个已核验的 main Merge commit，即使 main 后来前进，也不能改指最新提交。`station_state_epoch` 只说明工位状态兼容风险，不决定发布方式；升级操作仍遵循[更新与回退](usage/update-and-rollback.md)。
 
 ### 操作入口
@@ -282,7 +284,7 @@ main 交付要求必须 PR、仅 Merge commit、禁止删除及强推、撤销�
 
 当前源码候选支持上述复用；旧发布专用记录如不能满足当前绑定，不自动转换为通过。受信故事影响分析不替代实际验证，也不复制受管项目质量流程。
 
-显式重验使用 `release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <编号>`。`inspect --version vX.Y` 只查询状态，不执行测试；已有旧版本 PR 可用 `--merged-pr <编号>` 明确对象。`recover --version vX.Y --merged-pr <编号>` 不带确认时只核验并输出绑定实际事实的继续命令，不打 Tag。恢复仍对应原 PR 身份，不把旧版本 PR 自动扩展为后来 main 的全部修复，同树有效测试可复用，但不能把原 Hotfix 的授权或 PR 身份当作另一个版本的交付事实。
+显式重验使用 `release.sh verify --version vX.Y`；已合并候选附加 `--merged-pr <编号>`。`inspect --version vX.Y` 只查询状态，不执行测试；Tag 尚未创建时也核对本地与远端同名存档冲突。已合并候选缺证据时按原 PR 执行 `verify --version vX.Y --merged-pr <编号>`，不能用当前 develop 的 `prepare` 代替历史候选补验；已有旧版本 PR 可用 `--merged-pr <编号>` 明确对象。`recover --version vX.Y --merged-pr <编号>` 不带确认时只核验并输出绑定实际事实的继续命令，不打 Tag。恢复仍对应原 PR 身份，不把旧版本 PR 自动扩展为后来 main 的全部修复，同树有效测试可复用，但不能把原 Hotfix 的授权或 PR 身份当作另一个版本的交付事实。
 
 实际合并必须有两个父提交，分别为已确认的 main 基线和候选，完整树与被测候选一致，并在 main 历史中。main、PR Head 或合并结果漂移时停止受影响动作，核实范围、验收及授权。发布从固定实现快照运行，不自动提交、stash 或覆盖用户工作区。发布实现有未提交修改时先完成实现审查，不从活动工作树执行交付。
 

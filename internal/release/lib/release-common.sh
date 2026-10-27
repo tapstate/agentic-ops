@@ -343,11 +343,19 @@ release_verification() {
 }
 
 release_run_full_verification() {
-  local repo_root="$1" head="$2" mode="${3:-ensure}"
+  local repo_root="$1" head="$2" mode="${3:-ensure}" merged_pr="${4:-}" advice
   RELEASE_BASE_COMMIT="${RELEASE_BASE_COMMIT:-$(git -C "$repo_root" rev-parse origin/main)}"
   RELEASE_VERIFIED_AT="$(release_verification "$mode" --root "$repo_root" \
     --base "$RELEASE_BASE_COMMIT" --head "$head" --identity "$RELEASE_IDENTITY")" || {
-    release_fail release_verification_required verification "发布证据缺失、失效或验证失败" "请查看诊断；使用 prepare 核对并补齐完整四项；verify 仅用于明确重验"
+    advice="请查看诊断；使用 prepare 核对并补齐完整四项；verify 仅用于明确重验"
+    if [ -n "$merged_pr" ]; then
+      if [ -n "${RELEASE_JIRA_ID:-}" ] && [ "$RELEASE_IDENTITY" = "$RELEASE_JIRA_ID" ]; then
+        advice="原 PR 已合并；执行 internal/release/release.sh verify --jira $RELEASE_IDENTITY --merged-pr $merged_pr 补验原候选，然后重试原收尾命令"
+      else
+        advice="原 PR 已合并；执行 internal/release/release.sh verify --version $RELEASE_IDENTITY --merged-pr $merged_pr 补验原候选，然后重试原收尾命令"
+      fi
+    fi
+    release_fail release_verification_required verification "发布证据缺失、失效或验证失败" "$advice"
     return 1
   }
 }
@@ -837,7 +845,7 @@ release_check_archive_branch() {
 }
 
 release_inspect_state() {
-  local root="$1" version="$2" requested_pr="${3:-}" rows local_tag main_head develop_head state next_command="" sync=not_applicable delivery=not_published head="" merge="" number="" url="" pr_state="" local_develop
+  local root="$1" version="$2" requested_pr="${3:-}" rows local_tag main_head develop_head state next_command="" sync=not_applicable delivery=not_published head="" merge="" number="" url="" pr_state="" local_develop archive local_archive
   git -C "$root" fetch origin main develop >/dev/null 2>&1 || return 1
   main_head="$(git -C "$root" rev-parse origin/main)"
   develop_head="$(git -C "$root" rev-parse origin/develop)"
@@ -862,17 +870,26 @@ release_inspect_state() {
     release_verify_merge_commit "$root" "$head" "$merge" || return 1
     state=release_candidate_already_in_main
     next_command="internal/release/release.sh recover --version $version --merged-pr $number"
+    archive="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+    archive="${archive%%[[:space:]]*}"
+    local_archive="$(git -C "$root" rev-parse --verify "refs/heads/release/$version" 2>/dev/null || true)"
+    if { [ -n "$archive" ] && [ "$archive" != "$merge" ]; } ||
+       { [ -n "$local_archive" ] && [ "$local_archive" != "$merge" ]; }; then
+      state=release_archive_conflict
+      next_command=""
+    fi
     if [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
       if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != true ] || [ "$RELEASE_REMOTE_TAG_COMMIT" != "$merge" ]; then
         state=release_remote_tag_conflict; next_command=""
       else
-        archive="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
-        archive="${archive%%[[:space:]]*}"
-        if [ "$archive" != "$merge" ]; then
-          state=release_archive_pending
-          next_command="internal/release/release.sh recover --version $version --merged-pr $number"
-          if [ -n "$archive" ]; then state=release_archive_conflict; next_command=""; fi
-          printf '{"ok":true,"operation":"release_inspect","state":"%s","delivery_status":"tag_only","version":"%s","merge_commit":"%s","archive_commit":"%s","next_command":"%s"}\n' "$state" "$version" "$merge" "$archive" "$next_command"
+        if [ "$archive" != "$merge" ] || [ "$state" = release_archive_conflict ]; then
+          if [ "$state" != release_archive_conflict ]; then
+            state=release_archive_pending
+            next_command="internal/release/release.sh recover --version $version --merged-pr $number"
+          fi
+          delivery=tag_only
+          [ "$archive" != "$merge" ] || delivery=published
+          printf '{"ok":true,"operation":"release_inspect","state":"%s","delivery_status":"%s","version":"%s","merge_commit":"%s","archive_commit":"%s","local_archive_commit":"%s","next_command":"%s"}\n' "$state" "$delivery" "$version" "$merge" "$archive" "$local_archive" "$next_command"
           return 0
         fi
         delivery=published
@@ -896,8 +913,8 @@ release_inspect_state() {
     state=release_develop_candidate
     next_command="internal/release/release.sh prepare --version $version"
   fi
-  printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","delivery_status":"%s","develop_sync_status":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","next_command":"%s"}\n' \
-    "$version" "$state" "$delivery" "$sync" "$develop_head" "$main_head" "$local_tag" "${RELEASE_REMOTE_TAG_COMMIT:-}" "$number" "$url" "$head" "$merge" "$next_command"
+  printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","delivery_status":"%s","develop_sync_status":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","archive_commit":"%s","local_archive_commit":"%s","next_command":"%s"}\n' \
+    "$version" "$state" "$delivery" "$sync" "$develop_head" "$main_head" "$local_tag" "${RELEASE_REMOTE_TAG_COMMIT:-}" "$number" "$url" "$head" "$merge" "${archive:-}" "${local_archive:-}" "$next_command"
 }
 
 release_recover_merged_candidate() {
@@ -932,7 +949,7 @@ release_recover_merged_candidate() {
     release_fail "release_remote_tag_conflict" "recovery_validation" "远端同名 Tag 已存在但不是正确的 annotated main Merge commit Tag" "禁止删除或覆盖远端 Tag，请人工核查"
     return 1
   fi
-  release_run_full_verification "$repo_root" "$candidate" check || return 1
+  release_run_full_verification "$repo_root" "$candidate" check "$pr_number" || return 1
   release_check_archive_branch "$repo_root" "$version" "$merge_commit" || return 1
   workflow_check_delivery tapstate/agentic-ops hard || return 1
   release_check_review_objections "$pr_number" || return 1
@@ -997,6 +1014,14 @@ $protection_warning
 
 以上命令全部通过。
 EOF
+  if [ -n "$version" ]; then
+    cat >> "$body_file" <<EOF
+
+### 合并后收尾
+
+本 PR 合并仅完成代码交付，正式发布尚需版本 Tag 与存档。合并后运行 \`internal/release/release.sh inspect --version $version\`，核对原 PR 与实际 Merge commit；取得 Tag 与存档授权后运行 \`internal/release/release.sh publish --version $version --confirm-release\`。仅在回读远端 annotated Tag 和 \`release/$version\` 均指向该 Merge commit 后报告正式发布完成；中断或证据缺失按原 PR 恢复，不改用最新 main。
+EOF
+  fi
 }
 
 release_find_or_create_pr() {
@@ -1169,11 +1194,11 @@ value.update(schema_version='step-result/v2', retry_safe=True,
                             action='hotfix_completed' if value['operation'] == 'hotfix_publish' else 'release_completed', call=None))
 if waiting or pending:
     value['next_step'] = dict(kind='decision', scope='flow', mode='manual', executor='human',
-                             action='review_and_merge_hotfix_pr' if waiting else 'resolve_develop_sync',
+                             action=('review_and_merge_hotfix_pr' if value['operation'] == 'hotfix_publish' else 'review_and_merge_release_pr') if waiting else 'resolve_develop_sync',
                              question=remaining[0], choices=[dict(id='resolve', label='处理待办', recommended=True)],
                              submit=dict(operation='submit_decision', effect='record_only'),
                              call=dict(operation='submit_decision', argv=[]))
-if value.get('version'):
+if value.get('version') and not waiting:
     value['tag_commit'] = value.get('merge_commit', '')
     value['archive_branch'] = 'release/' + value['version']
     value['archive_commit'] = value.get('merge_commit', '')

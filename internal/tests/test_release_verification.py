@@ -543,6 +543,7 @@ os.execv(path,[path]+args)
         self.verifier(identity='AO-262').path.unlink()
         result = self.hotfix_call()
         self.assertIn('release_verification_required', result.stderr)
+        self.assertIn('verify --jira AO-262 --merged-pr 38', result.stderr)
         self.assertEqual(4, self.count())
 
         bin_dir = self.area / 'verify-bin'
@@ -710,6 +711,52 @@ for page in (rows[:100],rows[100:]):
         self.assertEqual('release_archive_conflict', conflict['state'])
         self.assertEqual('', conflict['next_command'])
         self.assertEqual(0, self.count())
+
+    def test_formal_pr_carries_post_merge_completion_instructions(self):
+        body = self.area / 'body.md'
+        self.shell(f'RELEASE_BASE_COMMIT={self.base} RELEASE_VERIFIED_AT=fixture\n'
+                   f'release_write_pr_body {shlex.quote(str(body))} v1.4 develop main {self.head}')
+        text = body.read_text()
+        self.assertIn('inspect --version v1.4', text)
+        self.assertIn('publish --version v1.4 --confirm-release', text)
+        self.assertIn('回读远端 annotated Tag', text)
+        self.shell(f'RELEASE_BASE_COMMIT={self.base} RELEASE_VERIFIED_AT=fixture\n'
+                   f'release_write_pr_body {shlex.quote(str(body))} "" develop main {self.head} AO-262')
+        self.assertNotIn('合并后收尾', body.read_text())
+
+    def test_inspect_reports_legacy_archive_conflict_before_tag_exists(self):
+        commit = self.merge()
+        bare = self.remote(commit)
+        self.fake_gh(commit)
+        for location in (self.root, bare):
+            with self.subTest(location=location):
+                self.git('update-ref', 'refs/heads/release/v1.4', self.head, root=location)
+                data = json.loads(self.shell('release_inspect_state "$PWD" v1.4 38').stdout)
+                self.assertEqual('release_archive_conflict', data['state'])
+                self.assertEqual('not_published', data['delivery_status'])
+                self.assertEqual('', data['next_command'])
+                field = 'local_archive_commit' if location == self.root else 'archive_commit'
+                self.assertEqual(self.head, data[field])
+                self.assertEqual('', self.git('tag', root=bare))
+                self.git('update-ref', '-d', 'refs/heads/release/v1.4', root=location)
+        self.assertEqual(0, self.count())
+
+    def test_merged_recovery_missing_evidence_guides_original_pr_verification(self):
+        commit = self.merge()
+        bare = self.remote(commit)
+        self.fake_gh(commit)
+        # develop 已前进；恢复必须补验原 PR，不能引导 prepare 当前分支。
+        self.write('later.txt', 'later change')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'later')
+        result = self.shell('RELEASE_IDENTITY=v1.4\n'
+                            'release_recover_merged_candidate "$PWD" v1.4 38 false "" hard', check=False)
+        self.assertNotEqual(0, result.returncode)
+        error = json.loads(result.stderr.splitlines()[-1])
+        self.assertIn('verify --version v1.4 --merged-pr 38', error['required_human_action'])
+        self.assertNotIn('prepare', error['required_human_action'])
+        self.assertEqual(0, self.count())
+        self.assertEqual('', self.git('tag', root=bare))
 
     def test_cancelled_explicit_run_revokes_pass_and_reaps_children(self):
         script = next(iter(CHECKS.values()))
@@ -939,7 +986,13 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         result = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--jira', 'AO-262', '--confirm-release'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual('hard', json.loads(result.stdout.splitlines()[-1])['protection_mode'])
+        submitted = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual('hard', submitted['protection_mode'])
+        self.assertEqual('blocked', submitted['result']['status'])
+        self.assertEqual('review_and_merge_release_pr', submitted['next_step']['action'])
+        self.assertIn('publish --version v1.4', submitted['continue_command'])
+        self.assertNotIn('tag_commit', submitted)
+
         self.assertEqual('OPEN', json.loads(state.read_text())['state'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual('', self.git('tag', root=bare))
