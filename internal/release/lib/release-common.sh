@@ -844,6 +844,85 @@ release_check_archive_branch() {
   fi
 }
 
+# 仅显式 recover 使用：旧发布 PR 的候选经保全后转为同一 Merge commit 的存档。
+# 无本地迁移台账；确认与重试直接绑定 Git/PR 事实。
+release_check_legacy_archive() {
+  local root="$1" version="$2" old="$3" merge="$4" pr="$5" require_backup="${6:-false}" source local_ref remote_ref local_backup remote_backup
+  [[ "$old" =~ ^[0-9a-f]{40}$ ]] && [ "$old" != "$merge" ] || return 1
+  [ "$old" = "${RELEASE_RECOVERY_PR_HEAD:-}" ] || {
+    release_fail release_legacy_head_mismatch recovery_validation "旧候选不是原 PR 的固定 Head" "核对完整旧 SHA，不接受其它祖先提交"
+    return 1
+  }
+  source="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr" --repo tapstate/agentic-ops --json headRefName --jq .headRefName)" || return 1
+  [ "$source" = "release/$version" ] || {
+    release_fail release_legacy_source_mismatch recovery_validation "原 PR 不是该版本的旧 release 候选" "普通 develop 发布不使用旧候选迁移选项"
+    return 1
+  }
+  git -C "$root" merge-base --is-ancestor "$old" "$merge" || return 1
+  RELEASE_LEGACY_BACKUP="codex/legacy-release-$version-${old:0:7}"
+  # 不更新任何 worktree 正在检出的分支，也不跟随符号引用。
+  if git -C "$root" worktree list --porcelain | grep -Fxq "branch refs/heads/release/$version"; then
+    release_fail release_legacy_checked_out recovery_validation "旧候选分支仍在工作树中检出" "先保全工作并退出该分支，再重试"
+    return 1
+  fi
+  for source in "release/$version" "$RELEASE_LEGACY_BACKUP"; do
+    if git -C "$root" symbolic-ref -q "refs/heads/$source" >/dev/null 2>&1; then return 1; fi
+  done
+  local_ref="$(git -C "$root" show-ref --hash --verify "refs/heads/release/$version" 2>/dev/null || true)"
+  local_backup="$(git -C "$root" show-ref --hash --verify "refs/heads/$RELEASE_LEGACY_BACKUP" 2>/dev/null || true)"
+  remote_ref="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+  remote_ref="${remote_ref%%[[:space:]]*}"
+  remote_backup="$(git -C "$root" ls-remote --heads origin "refs/heads/$RELEASE_LEGACY_BACKUP")" || return 1
+  remote_backup="${remote_backup%%[[:space:]]*}"
+  if { [ -n "$local_ref" ] && [ "$local_ref" != "$old" ] && [ "$local_ref" != "$merge" ]; } ||
+     { [ "$remote_ref" != "$old" ] && [ "$remote_ref" != "$merge" ]; } ||
+     { [ -n "$local_backup" ] && [ "$local_backup" != "$old" ]; } ||
+     { [ -n "$remote_backup" ] && [ "$remote_backup" != "$old" ]; } ||
+     { [ "$remote_ref" = "$merge" ] && [ "$remote_backup" != "$old" ]; } ||
+     { [ "$require_backup" = true ] && { [ "$local_backup" != "$old" ] || [ "$remote_backup" != "$old" ]; }; }; then
+    release_fail release_legacy_ref_conflict recovery_validation "旧候选或保全引用不符合预期" "保留全部引用，核查漂移；不覆盖同名对象"
+    return 1
+  fi
+  RELEASE_LEGACY_STATE="$local_ref|$remote_ref|$local_backup|$remote_backup"
+}
+
+release_migrate_legacy_archive() {
+  local root="$1" version="$2" old="$3" merge="$4" pr="$5" remote local_ref backup
+  release_check_legacy_archive "$root" "$version" "$old" "$merge" "$pr" || return 1
+  backup="$RELEASE_LEGACY_BACKUP"
+  release_push_fixed_branch "$root" "$backup" "$old" || return 1
+  [ "$(git -C "$root" show-ref --hash --verify "refs/heads/$backup")" = "$old" ] || return 1
+  release_check_legacy_archive "$root" "$version" "$old" "$merge" "$pr" true || return 1
+  # 备份已回读；先 Tag，再迁移存档。Tag 成功后的失败保留现场，不回滚。
+  release_create_and_push_version_tag "$root" "$version" "$merge" || return 1
+  release_check_legacy_archive "$root" "$version" "$old" "$merge" "$pr" true || return 1
+  remote="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+  remote="${remote%%[[:space:]]*}"
+  if [ "$remote" = "$old" ]; then
+    # 已证明 old 是 merge 的祖先；lease 只做远端旧值 CAS，不允许改写历史。
+    AGENTIC_OPS_SPECIAL_PUSH=release git -C "$root" push --force-with-lease="refs/heads/release/$version:$old" \
+      origin "$merge:refs/heads/release/$version" || true
+  elif [ "$remote" != "$merge" ]; then
+    release_fail release_legacy_ref_conflict archive_migration "存档引用已变化" "保留 Tag 与备份，核查远端后重试"
+    return 1
+  fi
+  remote="$(git -C "$root" ls-remote --heads origin "refs/heads/release/$version")" || return 1
+  [ "${remote%%[[:space:]]*}" = "$merge" ] || {
+    release_fail release_legacy_archive_pending archive_migration "Tag 已补齐，旧分支尚未确认迁移成功" "保留 Tag 与备份，重新生成同一 PR 的恢复确认后补齐存档"
+    return 1
+  }
+  release_check_legacy_archive "$root" "$version" "$old" "$merge" "$pr" true || return 1
+  local_ref="$(git -C "$root" show-ref --hash --verify "refs/heads/release/$version" 2>/dev/null || true)"
+  if [ "$local_ref" != "$merge" ]; then
+    if [ -n "$local_ref" ] && [ "$local_ref" != "$old" ]; then
+      release_fail release_legacy_ref_conflict archive_migration "本地旧候选已变化" "远端成果保留，核查本地并行修改"
+      return 1
+    fi
+    git -C "$root" update-ref --no-deref "refs/heads/release/$version" "$merge" "${local_ref:-0000000000000000000000000000000000000000}" || return 1
+  fi
+  release_check_archive_branch "$root" "$version" "$merge" || return 1
+}
+
 release_inspect_state() {
   local root="$1" version="$2" requested_pr="${3:-}" rows local_tag main_head develop_head state next_command="" sync=not_applicable delivery=not_published head="" merge="" number="" url="" pr_state="" local_develop archive local_archive
   git -C "$root" fetch origin main develop >/dev/null 2>&1 || return 1
@@ -918,8 +997,8 @@ release_inspect_state() {
 }
 
 release_recover_merged_candidate() {
-  local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode=hard
-  local candidate merge_commit pr_url local_tag material digest
+  local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode=hard legacy_head="${7:-}"
+  local candidate merge_commit pr_url local_tag material digest legacy_args="" legacy_state=""
   if ! printf '%s\n' "$pr_number" | grep -Eq '^[1-9][0-9]*$'; then
     release_fail "invalid_release_merged_pr" "recovery_validation" "恢复发布必须提供正整数 --merged-pr" "请先运行 release.sh inspect 确认关联的已合并 PR 编号"
     return 1
@@ -950,15 +1029,29 @@ release_recover_merged_candidate() {
     return 1
   fi
   release_run_full_verification "$repo_root" "$candidate" check "$pr_number" || return 1
-  release_check_archive_branch "$repo_root" "$version" "$merge_commit" || return 1
+  if [ -n "$legacy_head" ]; then
+    release_check_legacy_archive "$repo_root" "$version" "$legacy_head" "$merge_commit" "$pr_number" || return 1
+    legacy_args=" --migrate-legacy-archive $legacy_head"
+    legacy_state="|$legacy_head|$RELEASE_LEGACY_BACKUP|$RELEASE_LEGACY_STATE"
+  else
+    release_check_archive_branch "$repo_root" "$version" "$merge_commit" || return 1
+  fi
   workflow_check_delivery tapstate/agentic-ops hard || return 1
   release_check_review_objections "$pr_number" || return 1
   local_tag="$(git -C "$repo_root" rev-parse --verify "$version^{}" 2>/dev/null || true)"
-  material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
+  if [ -n "$legacy_head" ] && [ -n "$local_tag" ] &&
+     { [ "$local_tag" != "$merge_commit" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version")" != tag ]; }; then
+    release_fail release_local_tag_conflict recovery_validation "本地同名 Tag 与原合并提交不符" "停止迁移，保留引用并人工核查"
+    return 1
+  fi
+  material="$version|$pr_number|$candidate|$merge_commit|$protection_mode|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}$legacy_state"
   digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
   release_print_confirmation_bundle "$repo_root" "恢复已合并候选的 Tag 与版本存档" "$version" "$candidate" "PR #$pr_number" main "候选已由 PR 合入；只补齐同一合并提交的 Tag 与版本存档，不覆盖冲突引用。" "$pr_url" "$merge_commit"
+  if [ -n "$legacy_head" ]; then
+    printf '%s\n' "- 旧候选迁移：${legacy_head}；先保全到 ${RELEASE_LEGACY_BACKUP}（本地及远端），再补 Tag，最后快进 release/$version 到 ${merge_commit}；引用状态=$RELEASE_LEGACY_STATE" >&2
+  fi
   if [ "$confirmed" != "true" ]; then
-    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改 Tag 或存档" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number --confirm-release --confirm-recovery $digest"
+    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改 Tag 或存档" "确认上述内容后执行 internal/release/release.sh recover --version $version --merged-pr $pr_number$legacy_args --confirm-release --confirm-recovery $digest"
     return 1
   fi
   if [ "$confirmation_digest" != "$digest" ]; then
@@ -968,7 +1061,7 @@ release_recover_merged_candidate() {
   RELEASE_PR_NUMBER="$pr_number"
   RELEASE_PR_URL="$pr_url"
   RELEASE_MERGE_COMMIT="$merge_commit"
-  release_finish "$repo_root" "$version" "$candidate" "$merge_commit" "$protection_mode" release_recover || return 1
+  release_finish "$repo_root" "$version" "$candidate" "$merge_commit" "$protection_mode" release_recover "$legacy_head" || return 1
 
 }
 
@@ -1215,13 +1308,17 @@ PY
 }
 
 release_finish() {
-  local root="$1" version="$2" head="$3" commit="$4" protection="$5" operation="$6" payload status=completed
+  local root="$1" version="$2" head="$3" commit="$4" protection="$5" operation="$6" legacy_head="${7:-}" payload status=completed
   release_verify_remote_contains "$root" "$commit" || return 1
   release_verify_merge_commit "$root" "$head" "$commit" || return 1
   if [ -n "$version" ]; then
-    release_check_archive_branch "$root" "$version" "$commit" || return 1
-    release_create_and_push_version_tag "$root" "$version" "$commit" || return 1
-    release_push_fixed_branch "$root" "release/$version" "$commit" || return 1
+    if [ -n "$legacy_head" ]; then
+      release_migrate_legacy_archive "$root" "$version" "$legacy_head" "$commit" "$RELEASE_PR_NUMBER" || return 1
+    else
+      release_check_archive_branch "$root" "$version" "$commit" || return 1
+      release_create_and_push_version_tag "$root" "$version" "$commit" || return 1
+      release_push_fixed_branch "$root" "release/$version" "$commit" || return 1
+    fi
   fi
   release_sync_develop_to_main "$root" "$commit" || RELEASE_DEVELOP_SYNC=unknown
   if [ "$RELEASE_DEVELOP_SYNC" != synced ]; then status=completed_with_pending_sync; fi

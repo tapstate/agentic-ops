@@ -117,6 +117,7 @@ else: sys.exit(2)
                       "if a[1]=='api': print('main' if a[-1]=='.default_branch' else 'true')\n" +
                       "elif '--json' in a and a[a.index('--json')+1]=='body': print(body)\n" +
                       f"elif a[a.index('--json')+1]=='baseRefName,headRefOid': print('main\\t{self.head}')\n" +
+                      "elif a[a.index('--json')+1]=='headRefName': print('release/v1.4')\n" +
                       f"else: print('38\\thttps://github.com/tapstate/agentic-ops/pull/38\\tMERGED\\tmain\\t{self.head}\\t{commit}')\n")
         gh.chmod(0o700)
         self.env['AGENTIC_OPS_GH_BIN'] = str(gh)
@@ -395,6 +396,135 @@ else: sys.exit(2)
         self.assertEqual(commit, self.git('rev-parse', 'v1.4^{}', root=bare))
         self.assertEqual(4, self.count())
 
+
+    def legacy_fixture(self):
+        self.verifier().execute('ensure')
+        commit = self.merge()
+        bare = self.remote(commit)
+        self.fake_gh(commit)
+        self.route_governance()
+        self.git('branch', 'release/v1.4', self.head)
+        self.git('push', '-q', 'origin', 'release/v1.4')
+        backup = 'codex/legacy-release-v1.4-' + self.head[:7]
+        call = ('RELEASE_IDENTITY=v1.4\nrelease_recover_merged_candidate "$PWD" '
+                f'v1.4 38 false "" hard {self.head}')
+        return commit, bare, backup, call
+
+    def legacy_confirmation(self, call):
+        result = self.shell(call, check=False)
+        errors = [json.loads(x) for x in result.stderr.splitlines() if x.startswith('{')]
+        self.assertEqual('release_recovery_confirmation_required', errors[-1]['code'], result.stderr)
+        return errors[-1]['required_human_action'].split()[-1]
+
+    def test_legacy_migration_preserves_candidate_then_tags_before_fast_forward(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        digest = self.legacy_confirmation(call)
+        self.assertEqual('', self.git('branch', '--list', backup, root=bare))
+        self.assertEqual('', self.git('tag', root=bare))
+        # 真实远端拒绝任何未先完成保全和 Tag 的存档更新。
+        hook = bare / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\nwhile read old new ref; do\n'
+                        'if [ "$ref" = refs/heads/release/v1.4 ]; then\n'
+                        f'[ "$(git rev-parse refs/heads/{backup})" = {self.head} ] || exit 1\n'
+                        f'[ "$(git rev-parse v1.4^{{}})" = {commit} ] || exit 1\n'
+                        'fi\ndone\n')
+        hook.chmod(0o700)
+        result = self.shell(call.replace('false ""', 'true ' + digest))
+        self.assertEqual('published', json.loads(result.stdout.splitlines()[-1])['delivery_status'])
+        for root in (self.root, bare):
+            self.assertEqual(self.head, self.git('rev-parse', backup, root=root))
+            self.assertEqual(commit, self.git('rev-parse', 'release/v1.4', root=root))
+        tag = self.git('rev-parse', 'v1.4', root=bare)
+        digest = self.legacy_confirmation(call)
+        self.shell(call.replace('false ""', 'true ' + digest))
+        self.assertEqual(tag, self.git('rev-parse', 'v1.4', root=bare))
+        self.assertEqual(4, self.count())
+
+    def test_legacy_migration_refuses_wrong_candidate_backup_and_source(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        wrong = self.shell(call.replace('hard ' + self.head, 'hard ' + self.base), check=False)
+        self.assertIn('release_legacy_head_mismatch', wrong.stderr)
+        for root in (self.root, bare):
+            self.git('update-ref', 'refs/heads/' + backup, self.base, root=root)
+            self.assertIn('release_legacy_ref_conflict', self.shell(call, check=False).stderr)
+            self.git('update-ref', '-d', 'refs/heads/' + backup, root=root)
+        # 专用候选源名称是必要条件，不能迁移普通 develop PR。
+        gh = self.area / 'gh'
+        gh.write_text(gh.read_text().replace("print('release/v1.4')", "print('develop')"))
+        self.assertIn('release_legacy_source_mismatch', self.shell(call, check=False).stderr)
+        self.assertEqual('', self.git('tag', root=bare))
+        self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4', root=bare))
+
+    def test_legacy_migration_backup_failure_stops_before_tag_and_can_resume(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        digest = self.legacy_confirmation(call)
+        hook = bare / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\nexit 1\n')
+        hook.chmod(0o700)
+        failed = self.shell(call.replace('false ""', 'true ' + digest), check=False)
+        self.assertIn('release_fixed_branch_push_failed', failed.stderr)
+        self.assertEqual('', self.git('tag'))
+        self.assertEqual('', self.git('tag', root=bare))
+        self.assertEqual(self.head, self.git('rev-parse', backup))
+        hook.unlink()
+        digest = self.legacy_confirmation(call)
+        self.shell(call.replace('false ""', 'true ' + digest))
+        self.assertEqual(commit, self.git('rev-parse', 'release/v1.4', root=bare))
+
+    def test_legacy_migration_archive_failure_retries_without_retagging(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        digest = self.legacy_confirmation(call)
+        hook = bare / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\nwhile read old new ref; do\n'
+                        '[ "$ref" != refs/heads/release/v1.4 ] || exit 1\ndone\n')
+        hook.chmod(0o700)
+        failed = self.shell(call.replace('false ""', 'true ' + digest), check=False)
+        self.assertIn('release_legacy_archive_pending', failed.stderr)
+        tag = self.git('rev-parse', 'v1.4', root=bare)
+        self.assertEqual(self.head, self.git('rev-parse', 'release/v1.4', root=bare))
+        self.assertEqual(self.head, self.git('rev-parse', backup, root=bare))
+        hook.unlink()
+        digest = self.legacy_confirmation(call)
+        self.shell(call.replace('false ""', 'true ' + digest))
+        self.assertEqual(tag, self.git('rev-parse', 'v1.4', root=bare))
+        self.assertEqual(commit, self.git('rev-parse', 'release/v1.4', root=bare))
+        self.assertEqual(4, self.count())
+
+    def test_legacy_migration_lease_preserves_concurrent_remote_commit(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        digest = self.legacy_confirmation(call)
+        parallel = self.git('commit-tree', self.git('rev-parse', self.head + '^{tree}'),
+                            '-p', self.head, '-m', 'parallel legacy work')
+        self.git('push', '-q', 'origin', parallel + ':refs/heads/parallel')
+        # 真实并发写入发生在最后一次回读后、迁移 push 前，不能覆盖它。
+        race = ('git() { if [[ " $* " == *" push "* && " $* " == *":refs/heads/release/v1.4"* ]]; then '
+                f'command git -C {shlex.quote(str(bare))} update-ref refs/heads/release/v1.4 {parallel}; '
+                'fi; command git "$@"; }\n')
+        result = self.shell(race + call.replace('false ""', 'true ' + digest), check=False)
+        self.assertIn('release_legacy_archive_pending', result.stderr)
+        self.assertEqual(parallel, self.git('rev-parse', 'release/v1.4', root=bare))
+        self.assertEqual(commit, self.git('rev-parse', 'v1.4^{}', root=bare))
+        self.assertEqual(self.head, self.git('rev-parse', backup, root=bare))
+
+    def test_legacy_migration_refuses_checked_out_branch_and_wrong_tag(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        self.git('checkout', '-q', 'release/v1.4')
+        self.assertIn('release_legacy_checked_out', self.shell(call, check=False).stderr)
+        self.git('checkout', '-q', 'develop')
+        self.git('tag', 'v1.4', commit)  # lightweight Tag 不能用作正式版本。
+        self.assertIn('release_local_tag_conflict', self.shell(call, check=False).stderr)
+        self.assertEqual('', self.git('branch', '--list', backup, root=bare))
+        self.assertEqual('', self.git('tag', root=bare))
+
+    def test_legacy_migration_confirmation_binds_ref_state(self):
+        commit, bare, backup, call = self.legacy_fixture()
+        digest = self.legacy_confirmation(call)
+        self.git('branch', backup, self.head)
+        failed = self.shell(call.replace('false ""', 'true ' + digest), check=False)
+        self.assertIn('release_recovery_confirmation_stale', failed.stderr)
+        self.assertEqual('', self.git('tag', root=bare))
+        self.git('update-ref', 'refs/heads/release/v1.4', self.base, root=bare)
+        self.assertIn('release_legacy_ref_conflict', self.shell(call, check=False).stderr)
 
     def hotfix_fixture(self, trust=True, cross_epoch=False):
         """基线运行真实 Story Gate，测试命令是提交在夹具中的独立小脚本。"""
@@ -937,7 +1067,9 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
             self.assertIn('release_configuration_separate', rejected.stderr)
             self.assertFalse(state.exists())
         for stage, option, value in [('publish', '--merged-pr', '38'), ('prepare', '--merged-pr', '38'),
-                                     ('publish', '--confirm-recovery', 'unused')]:
+                                     ('publish', '--confirm-recovery', 'unused'),
+                                     ('publish', '--migrate-legacy-archive', self.head),
+                                     ('recover', '--migrate-legacy-archive', 'short')]:
             rejected = subprocess.run(['bash', 'internal/release/release.sh', stage, '--version', 'v1.4', option, value],
                                       cwd=self.root, env=self.env, capture_output=True, text=True)
             self.assertIn('invalid_release_argument', rejected.stderr)

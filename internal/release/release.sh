@@ -22,6 +22,7 @@ version=""
 confirm_release="false"
 merged_pr=""
 confirm_recovery=""
+legacy_archive_head=""
 RELEASE_JIRA_ID=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -55,6 +56,14 @@ while [ "$#" -gt 0 ]; do
       merged_pr="$2"
       shift 2
       ;;
+    --migrate-legacy-archive)
+      if [ "$#" -lt 2 ] || ! [[ "$2" =~ ^[0-9a-f]{40}$ ]]; then
+        release_fail invalid_release_argument argument_parsing "旧候选迁移缺少完整 SHA" "提供 --migrate-legacy-archive <旧候选完整SHA>"
+        exit 1
+      fi
+      legacy_archive_head="$2"
+      shift 2
+      ;;
     --confirm-recovery)
       if [ "$#" -lt 2 ]; then
         release_fail "invalid_release_confirmation" "argument_parsing" "--confirm-recovery 缺少绑定值" "请复制上一轮 recover 输出的完整继续命令"
@@ -79,6 +88,13 @@ fi
 if [ -n "$confirm_recovery" ] && [ "$command_name" != recover ]; then
   release_fail invalid_release_argument argument_parsing "--confirm-recovery 只适用于 recover" "请使用原 recover 输出的继续命令"
   exit 1
+fi
+
+if [ -n "$legacy_archive_head" ]; then
+  if [ "$command_name" != recover ] || ! [[ "$legacy_archive_head" =~ ^[0-9a-f]{40}$ ]]; then
+    release_fail invalid_release_argument argument_parsing "旧候选迁移只接受 recover 与完整旧提交 SHA" "使用 recover --merged-pr <编号> --migrate-legacy-archive <旧候选完整SHA>"
+    exit 1
+  fi
 fi
 
 RELEASE_IDENTITY="${version:-$RELEASE_JIRA_ID}"
@@ -149,7 +165,7 @@ case "$command_name" in
     fi
     ;;
   recover)
-    release_recover_merged_candidate "$repo_root" "$version" "$merged_pr" "$confirm_release" "$confirm_recovery" hard || exit 1
+    release_recover_merged_candidate "$repo_root" "$version" "$merged_pr" "$confirm_release" "$confirm_recovery" hard "$legacy_archive_head" || exit 1
     ;;
   *)
     release_fail invalid_release_command argument_parsing "不支持的发布子命令 $command_name" "使用 prepare、submit-for-review、publish、inspect、verify 或 recover"
