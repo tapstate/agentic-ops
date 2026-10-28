@@ -255,6 +255,53 @@ class FourMarkerTests(unittest.TestCase):
                       if row['kind'] == 'agenticops_version')
         self.assertFalse(action['original_target_observed'])
 
+    def test_minute_readback_recovers_original_intent_without_rewriting_payload(self):
+        from workflow import external_sync
+        original_time = '2026-10-27T19:52:44+0800'
+        with mock.patch.object(jira_watermark, 'now', return_value=original_time):
+            record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        original_fields = record['native_request']['fields'].copy()
+        original_digest = record['payload_digest']
+        # 先留下未知回执，再沿原 run 恢复；不重新生成写入意图。
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot())
+        for value in ('2026-10-27T19:52:00.000+0800', '2026-10-27T11:52:13.987Z',
+                      '2026-10-28T01:52:59.999+1400'):
+            with self.subTest(value=value):
+                observed = self.snapshot(dict(original_fields, customfield_10366=value))
+                result = jira_watermark.prepare(self.base, 'TAP-123', observed)
+                self.assertEqual('verified', result['outcome'])
+                self.assertNotIn('native_request', result)
+                self.assertEqual(original_fields, result['expected_fields'])
+                self.assertEqual(original_digest, result['payload_digest'])
+                self.assertEqual(original_time, result['at'])
+                self.assertEqual(value, result['readback_fields']['customfield_10366'])
+                # 重新加载也使用相同规则，不能只在 complete 时放行。
+                loaded = jira_watermark.status(self.base, self.task)
+                self.assertEqual('verified', loaded['outcome'])
+                self.assertTrue(jira_watermark.summary_ready(self.base, self.task))
+                self.assertNotIn('agenticops_version', [row['kind'] for row in
+                    external_sync.actions(self.base, self.task)['sync_actions']])
+
+    def test_minute_readback_keeps_boundaries_and_other_markers_strict(self):
+        with mock.patch.object(jira_watermark, 'now', return_value='2026-10-27T19:52:44+0800'):
+            record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        cases = [('customfield_10366', value) for value in (
+            '2026-10-27T19:51:59.999+0800', '2026-10-27T19:53:00+0800',
+            '2026-10-27T19:52:00Z', None)]
+        cases += [(key, 'other') for key in ('customfield_10421', 'customfield_10462', 'customfield_10365')]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                observed = self.snapshot(dict(record['expected_fields'], **{key: value}))
+                result = jira_watermark.complete(self.base, 'TAP-123', 'unknown', observed)
+                self.assertEqual('unknown', result['outcome'])
+                self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+                self.assertEqual(record['expected_fields'], result['expected_fields'])
+                self.assertNotIn('native_request', result)
+        for value in ('2026-10-27T19:52:00', 'invalid'):
+            with self.subTest(invalid=value), self.assertRaisesRegex(ValueError, '带时区'):
+                jira_watermark.complete(self.base, 'TAP-123', 'unknown',
+                    self.snapshot(dict(record['expected_fields'], customfield_10366=value)))
+
 
     def test_previous_run_requires_bound_resolution_and_current_coordination(self):
         prior = {'customfield_10421': 'old-version', 'customfield_10366': '2026-01-01T00:00:00Z',
