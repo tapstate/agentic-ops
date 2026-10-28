@@ -22,7 +22,7 @@ import json
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -138,9 +138,12 @@ def marker_time(value):
 
 
 def markers_equal(actual, expected, time_field):
+    """回读按 UTC 分钟核验接管时间，不改写原时间或写入载荷。"""
     if set(actual) != set(expected):
         return False
-    return all((marker_time(actual[k]) == marker_time(v) if k == time_field and actual[k] else actual[k] == v)
+    return all((marker_time(actual[k]).astimezone(timezone.utc).replace(second=0, microsecond=0)
+                == marker_time(v).astimezone(timezone.utc).replace(second=0, microsecond=0)
+                if k == time_field and actual[k] else actual[k] == v)
                for k, v in expected.items())
 
 

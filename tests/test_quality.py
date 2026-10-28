@@ -3415,7 +3415,8 @@ class SyncRecoveryTests(unittest.TestCase):
         missing = next(row for row in initial['sync_actions'] if row['kind'] == 'agenticops_version')
         self.assertEqual('read_fields_then_prepare', missing['next_action'])
         initial_marker_id = initial['takeover']['markers']['operation_id']
-        with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'):
+        with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'), \
+                mock.patch.object(jira_watermark, 'now', return_value='2026-10-27T19:52:44+0800'):
             snapshot = {'source_ref': 'fixture:jira/read', 'current_user': {'accountId': 'login-user',
                 'displayName': '当前登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'},
                 'issue': {'key': self.task['issue_key'], 'fields': {'issuetype': {'id': '10011'},
@@ -3429,6 +3430,7 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(initial_marker_id, marker_id)
         self.assertEqual('complete', progress['markers']['command']['action'])
         snapshot['issue']['fields'].update(marker['expected_fields'])
+        snapshot['issue']['fields']['customfield_10366'] = '2026-10-27T11:52:00.000Z'
         jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         self.task = task_store.read_task(self.base)
         report = self.view()
@@ -3455,6 +3457,11 @@ class SyncRecoveryTests(unittest.TestCase):
         stale['issue']['fields']['customfield_10462'] = 'b' * 32
         with self.assertRaisesRegex(ValueError, '写前回读'):
             self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
+        stale = copy.deepcopy(snapshot)
+        stale['issue']['fields']['customfield_10366'] = '2026-10-27T11:53:00Z'
+        with self.assertRaisesRegex(ValueError, '写前回读'):
+            self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
+        snapshot['issue']['fields']['customfield_10366'] = '2026-10-27T11:52:13.987Z'
         record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
         self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
         pending = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
