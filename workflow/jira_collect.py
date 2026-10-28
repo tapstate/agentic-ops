@@ -33,23 +33,58 @@ def present(value):
 
 
 def require_safe(spec, value, label):
-    """定位命中叶子，不把原文、未知键名或秘密放进异常。"""
+    """完整扫描当前对象，仅汇总有界、安全的定位诊断。"""
+    findings = []
+    key_number = 0
+
+    def record(path, hits):
+        for reason in dict.fromkeys(hit[2] for hit in hits):
+            # 规则来自项目配置，但其说明也不能成为秘密回显渠道。
+            safe_reason = reason if (len(reason) <= 120 and not
+                project_rules.scan_sensitive(spec, reason)) else "命中敏感规则"
+            findings.append((path, safe_reason))
+
     def visit(node, path):
+        nonlocal key_number
         if isinstance(node, dict):
             for key, child in node.items():
-                safe_key = key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) else "<key>"
-                if project_rules.scan_sensitive(spec, str(key)):
-                    raise ValueError(label + "含敏感内容，位置：" + path + ".<key>；请提供脱敏来源引用")
-                visit(child, path + "." + safe_key)
+                key_number += 1
+                hits = project_rules.scan_sensitive(spec, str(key))
+                safe_key = (key if isinstance(key, str) and len(key) <= 64 and
+                            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) and not hits
+                            else "<key#%d>" % key_number)
+                child_path = path + "." + safe_key
+                record(child_path + "（键）", hits)
+                visit(child, child_path)
         elif isinstance(node, list):
             for index, child in enumerate(node):
                 visit(child, path + "[" + str(index) + "]")
-        elif isinstance(node, str) and project_rules.scan_sensitive(spec, node):
-            raise ValueError(label + "含敏感内容，位置：" + path + "；请提供脱敏来源引用")
-    visit(value, "$")
-    # 保留原整体规则检查，不以叶子诊断替代判定。
-    if project_rules.scan_sensitive(spec, json.dumps(value, ensure_ascii=False)):
-        raise ValueError(label + "含敏感内容，位置：$；请提供脱敏来源引用")
+        elif isinstance(node, str):
+            record(path, project_rules.scan_sensitive(spec, node))
+
+    try:
+        visit(value, "$")
+        # 保留整体检查；不能用叶子扫描替代原有阻断判定。
+        whole_hits = project_rules.scan_sensitive(spec, json.dumps(value, ensure_ascii=False))
+    except (RecursionError, TypeError, ValueError):
+        raise ValueError(label + "敏感检查未完成，仅部分覆盖；请检查输入结构后重试") from None
+    if whole_hits and not findings:
+        record("$（整体检查，无法定位叶子）", whole_hits)
+    if findings:
+        shown = findings[:50]
+        lines = []
+        for number, (path, reason) in enumerate(shown, 1):
+            if len(path) > 240:
+                path = path[:100] + "…（路径省略）…" + path[-100:]
+            lines.append("%d. 位置：%s；原因：%s" % (number, path, reason))
+        coverage = ("生成结果尚未检查" if label == "Jira 采集快照" else
+                    "Jira 采集快照已通过检查" if label == "采集结果" else "仅覆盖当前对象")
+        summary = ("%s含敏感内容；当前对象已完整扫描，共 %d 项，展示 %d 项，未展示 %d 项；%s。" %
+                   (label, len(findings), len(shown), len(findings) - len(shown), coverage))
+        guidance = "请提供脱敏来源引用后重新检查。"
+        if len(findings) > len(shown):
+            guidance += "信息量过大，修正本批后重新检查获取剩余问题。"
+        raise ValueError(summary + "\n" + "\n".join(lines) + "\n" + guidance)
 
 
 def required(condition, fields, metadata=None):

@@ -31,6 +31,86 @@ class JiraStatusTests(unittest.TestCase):
                 self.assertNotIn(text, str(error.exception))
         jira_collect.require_safe(spec, {"value": "runtime/reports/check.json"}, "采集结果")
 
+    def test_sensitive_scan_aggregates_keys_values_and_bounds_display(self):
+        from workflow import jira_collect
+        spec = json.loads((ROOT / "projects/tapdata/admission.json").read_text())
+        payload = {"password=first-secret": "Bearer fixture-token-123456",
+                   "password=second-secret": ["password=third-secret", "/Users/fixture/report"]}
+        before = json.dumps(payload)
+        with self.assertRaises(ValueError) as error:
+            jira_collect.require_safe(spec, payload, "采集结果")
+        message = str(error.exception)
+        self.assertIn("共 5 项", message)
+        self.assertIn("<key#1>（键）", message)
+        self.assertIn("<key#2>[1]", message)
+        for secret in ("first-secret", "second-secret", "third-secret", "fixture-token", "/Users/fixture"):
+            self.assertNotIn(secret, message)
+        self.assertEqual(before, json.dumps(payload))
+        for count in (50, 51):
+            with self.subTest(count=count), self.assertRaises(ValueError) as error:
+                jira_collect.require_safe(spec, ["password=hidden"] * count, "测试")
+            self.assertIn("共 %d 项，展示 50 项，未展示 %d 项" % (count, count - 50), str(error.exception))
+        with self.assertRaises(ValueError) as error:
+            jira_collect.require_safe(spec, {"x" * 500: "password=hidden"}, "测试")
+        self.assertNotIn("x" * 100, str(error.exception))
+
+    def test_sensitive_scan_deduplicates_reasons_and_hides_token_keys(self):
+        from workflow import jira_collect
+        spec = json.loads((ROOT / "projects/tapdata/admission.json").read_text())
+        key = "ghp_fixturetoken123456"
+        payload = {key: "password=first\npassword=second", "other": "password=third"}
+        with self.assertRaises(ValueError) as error:
+            jira_collect.require_safe(spec, payload, "测试")
+        self.assertIn("共 3 项", str(error.exception))
+        self.assertNotIn(key, str(error.exception))
+        del payload[key]
+        with self.assertRaisesRegex(ValueError, "共 1 项"):
+            jira_collect.require_safe(spec, payload, "测试")
+        payload["other"] = "runtime/reports/check.json"
+        jira_collect.require_safe(spec, payload, "测试")
+
+    def test_sensitive_scan_whole_fallback_and_incomplete_coverage(self):
+        from workflow import jira_collect
+        spec = {"evidence_rules": {"forbidden_patterns": [
+            {"pattern": r'"a": "b"', "reason": "跨结构规则"}]}}
+        with self.assertRaisesRegex(ValueError, "整体检查，无法定位叶子"):
+            jira_collect.require_safe(spec, {"a": "b"}, "测试")
+        cyclic = []; cyclic.append(cyclic)
+        with self.assertRaisesRegex(ValueError, "未完成，仅部分覆盖"):
+            jira_collect.require_safe(spec, cyclic, "测试")
+
+    def test_sensitive_collect_boundaries_and_recovery_are_readonly(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        original = jira_collect.collect(self.base, self.task, "design_review", snapshot)
+        snapshot["extra"] = ["password=first-secret", "password=second-secret"]
+        with mock.patch.object(jira_collect, "config") as config:
+            with self.assertRaisesRegex(ValueError, "共 2 项.*生成结果尚未检查"):
+                jira_collect.collect(self.base, self.task, "design_review", snapshot)
+            config.assert_not_called()
+        del snapshot["extra"]
+        self.task["facts"]["fix_plan"] = "password=local-secret"
+        save_station_task(self.base, self.task)
+        before = task_state_snapshot(self.base)
+        proof = {"actor": "fixture", "source": "user_message", "reference": "fixture:confirm",
+                 "at": "2026-09-20T12:00:00+08:00"}
+        actions = [
+            lambda: jira_collect.collect(self.base, self.task, "design_review", snapshot),
+            lambda: jira_collect.confirm(self.base, "TAP-123", self.task["run_id"],
+                "design_review", snapshot, {}, {}, proof),
+            lambda: jira_status.prepare(self.base, "TAP-123", "takeover", snapshot, "op-sensitive")]
+        for action in actions:
+            with self.assertRaisesRegex(ValueError, "采集结果含敏感内容") as error:
+                action()
+            message = str(error.exception)
+            self.assertIn("suggestions", message)
+            self.assertIn("dependencies", message)
+            self.assertNotIn("local-secret", message)
+            self.assertEqual(before, task_state_snapshot(self.base))
+        self.task["facts"]["fix_plan"] = "confirmed-plan"
+        save_station_task(self.base, self.task)
+        self.assertEqual(original, jira_collect.collect(self.base, self.task, "design_review", snapshot))
+
     def test_tapdata_profiles_recognize_real_jira_test_link_direction(self):
         link_type = {"id": "10009", "name": "Test", "inward": "is tested by", "outward": "tests"}
         target = {"key": "TAP-12921", "fields": {"issuetype": {"name": "Test"}}}
