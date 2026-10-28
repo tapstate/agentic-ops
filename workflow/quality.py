@@ -503,6 +503,11 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, 
     from workflow import verification
     requirements = rules.get("verification_checkpoints", {}).get(checkpoint, [])
     problems.extend(verification.problems(model, ctx, requirements, rules, check_artifacts=check_artifacts))
+    from workflow import it_manual
+    policy = it_manual.config(rules)
+    if policy and (checkpoint == rules['selection_checkpoint'] or index >= ids.index(policy['acceptance_checkpoint'])):
+        problems.extend(it_manual.closure_problems(model, ctx, rules,
+                        planning=checkpoint == rules['selection_checkpoint']))
     if requirements:
         snapshot["verification"] = {repo: {kind: entries.get(kind) for kind in requirements}
                                     for repo, entries in model.get("verification", {}).items()}

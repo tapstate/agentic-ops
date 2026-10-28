@@ -34,6 +34,9 @@ def plan_problems(rules, ctx):
             from workflow import test_coverage
             key += (row["level"],)
             errors.extend(test_coverage.plan_case_problems(row))
+            from workflow import it_manual
+            if it_manual.config(rules):
+                errors.extend(it_manual.plan_problems(row, it_manual.config(rules)))
         if key in seen:
             errors.append("验证方案范围重复：" + " / ".join(key))
         seen.add(key)
@@ -272,7 +275,8 @@ def record(model, p, ctx, rules=None):
     revisions, scope = binding(p, ctx)
     value = {"data": copy.deepcopy(p), "versions": revisions, "bindings": scope}
     contract = (rules or {}).get("verification_plan")
-    if contract and p["kind"] in contract["kinds"]:
+    from workflow import it_manual
+    if contract and (p["kind"] in contract["kinds"] or (p['kind'] == 'local' and it_manual.config(rules))):
         from workflow import quality
         value["plan_digest"] = quality.digest(plan_rows(rules, ctx))
     if p["kind"] == "ci":
@@ -290,6 +294,11 @@ def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=Tru
         return result
     p = entry["data"]
     contract = (rules or {}).get("verification_plan")
+    from workflow import it_manual
+    if kind == 'local' and it_manual.config(rules):
+        from workflow import quality
+        if entry.get('plan_digest') != quality.digest(plan_rows(rules, ctx)):
+            result.append('%s 的手动验证方案已变化，重新核对用例和 Jira 关联' % repo)
     if contract and kind in contract["kinds"]:
         from workflow import quality
         if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
@@ -305,6 +314,11 @@ def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=Tru
                 result.append("%s 的依赖 Jar 已变化或缺失，需重验" % repo)
     for item in p.get("results", []):
         if item["result"] != "PASS" and not item.get("decision"):
+            policy = it_manual.config(rules)
+            row = next((r for r in (plan_rows(rules, ctx) or []) if r['repository'] == repo
+                        and r['scope'] == item['scope'] and r['level'] == item.get('level')), None)
+            if kind == 'ci' and policy and row and it_manual.required(row, policy):
+                continue  # 手动替代由 Q4/PR Ready 核验；自动化保留 NOT_RUN，不伪造缺测决定。
             result.append("%s %s：%s 尚未解决或明确处置；请求研发确认具体缺口及后续动作，确认不等于 PASS" % (repo, item["scope"], item["result"]))
     for item in p.get("items", []):
         if item["status"] == "pending":

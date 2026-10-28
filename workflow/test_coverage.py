@@ -7,6 +7,10 @@ from workflow import verification
 
 
 def validate_config(config):
+    if isinstance(config, dict) and config.get('mode') == 'jira_manual':
+        from workflow import it_manual
+        it_manual.validate_config(config)
+        return
     if (not isinstance(config, dict) or set(config) != {'issue_min_level', 'issue_when_unsupported'}
             or type(config['issue_min_level']) is not int or config['issue_min_level'] < 0
             or type(config['issue_when_unsupported']) is not bool):
@@ -23,6 +27,8 @@ def levels(row):
 
 
 def issue_required(row, case, config):
+    if config.get('mode') == 'jira_manual':
+        return False
     return case.get('status') == 'missing' and (
         any(level >= config['issue_min_level'] for level in levels(row))
         or (config['issue_when_unsupported'] and case.get('framework_supported') is False))
@@ -115,6 +121,20 @@ def case_problems(row, result, config):
         verification.nonempty(case.get('reason'), '编写情况及覆盖依据')
         if type(case.get('framework_supported')) is not bool:
             raise ValueError('必须明确测试框架是否支持')
+        current = config.get('mode') == 'jira_manual'
+        if current:
+            from workflow import it_manual
+            if case['framework_supported'] != row.get('framework_supported'):
+                raise ValueError('框架支持结论与方案不一致，先更新方案')
+            if it_manual.required(row, config):
+                if case['status'] != 'missing' or result['result'] != 'NOT_RUN':
+                    raise ValueError('手动替代不改写自动化覆盖：必须保留 missing/NOT_RUN')
+                case_results(row, result)
+                if any(c['status'] != 'missing' for c in case['cases']):
+                    raise ValueError('框架不支持的自动化用例必须保留 missing，手动证据复用验收项')
+                return []
+            if rank and result['result'] == 'FAIL' and result.get('failure_kind') != 'environment':
+                raise ValueError('用例断言失败或归因未知须先处理，不能作为环境或 CI 未完成例外')
         if case['status'] == 'covered':
             if not rank:
                 raise ValueError('已有覆盖必须有适用级别')
@@ -124,6 +144,8 @@ def case_problems(row, result, config):
         else:
             if not rank:
                 raise ValueError('应写未写不能声明级别不适用')
+            if current:
+                raise ValueError('框架支持但应写未写，必须补齐自动化用例')
             # 编写决定与执行决定分别保留；即使其它用例 PASS 也不能漏掉编写缺口。
             level_decision(case.get('decision'), row)
             if issue_required(row, case, config):
@@ -160,7 +182,7 @@ def case_details(row, coverage):
     return ' / '.join(parts)
 
 
-def summary(plan, material, version):
+def summary(plan, material, version, model=None, policy=None):
     rows = {(r['scope'], r.get('level')): r for r in material.get('results', [])}
     lines = ['### 测试覆盖与编写情况', '', 'AgenticOps 版本 ' + text(version), '',
              '验证代码：' + text(material['head_revision']), '',
@@ -184,7 +206,16 @@ def summary(plan, material, version):
                      ('执行确认', (execution.get('proof') or {}).get('reference'))) if value) or '无待处理缺口']
         cells = [text(cell) for cell in cells]
         if issue_url(follow.get('url'), follow.get('repository')):
-            cells[-1] += '；[补测 Issue](' + follow['url'] + ')'
+            if not policy:
+                cells[-1] += '；[补测 Issue](' + follow['url'] + ')'
+        if policy:
+            from workflow import it_manual
+            cells[0] += '；框架' + ('支持' if row.get('framework_supported') else '不支持')
+            cells[0] += '；依据：' + text(row.get('framework_ref', '待核验'))
+            if it_manual.required(row, policy):
+                cells[-1] = it_manual.summary(row, model or {}, policy)
+            elif row.get('level') != 'N/A' and result.get('result') != 'PASS':
+                cells[-1] += '；测试闭环未完成（' + ('研发已明确处置' if result.get('decision') else '待研发处置') + '）'
         lines.append('| ' + ' | '.join(cells) + ' |')
     return '\n'.join(lines)
 
@@ -217,11 +248,15 @@ def publication_problems(task, packet, model, ctx, rules, version):
     if not config:
         return [], {}
     errors, summaries = [], {}
+    from workflow import it_manual
+    policy = it_manual.config(rules)
+    if policy:
+        errors.extend(it_manual.closure_problems(model, ctx, rules))
     plan_errors = verification.plan_problems(rules, ctx)
     if plan_errors:
         return plan_errors, summaries
     observed = {r['repository']: r for r in packet.get('pull_requests', [])}
-    issues = packet.get('issues', [])
+    issues = [] if policy else packet.get('issues', [])
     if not isinstance(issues, list) or any(not isinstance(i, dict) for i in issues):
         return ['Issue 回读必须为对象列表'], summaries
     by_url = {i.get('url'): i for i in issues if isinstance(i.get('url'), str)}
@@ -238,7 +273,7 @@ def publication_problems(task, packet, model, ctx, rules, version):
         if coverage_errors:
             errors.extend(coverage_errors)
             continue
-        expected = summary(plan, material, version)
+        expected = summary(plan, material, version, model, policy)
         summaries[name] = expected
         pr = observed.get(name, {})
         endpoint = repo.get('authorized_endpoint') or 'github.com/' + name

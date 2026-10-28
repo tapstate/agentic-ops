@@ -103,6 +103,6 @@ Jira 已有经办人的接管准入与原生表单决策由[统一决策包](qua
 
 任务进入实现后修订方案或增加允许的仓库，使用[同周期返工](task-authorization.md#同周期方案返工)，保留原成果并撤销旧授权；不通过退出工位重建任务。
 
-TapData 代码变更按 Wiki 与源码判断 [IT（Integration Test，TapData 集成测试）](../glossary.md) 的覆盖。多级独立验收、逐用例复用/修改/新增、测试编写缺口及 GitHub Issue 双向关联、PR 测试总结与 AgenticOps 版本标识统一由[共同验证材料](quality-checkpoints.md#共同验证材料)维护；项目分析、编写及重验见[构建、测试与本地运行](../../projects/tapdata/runbooks/build-test-and-local-run.md)。Jira 关联用例检查保留，TapTest 开发与执行仅在用户选择当前会话处理时进行，不另设测试台账。
+TapData 代码变更按 Wiki 与源码判断 [IT（Integration Test，TapData 集成测试）](../glossary.md) 的覆盖。多级独立验收、逐用例复用/修改/新增、框架缺口的手动验证及 Jira 兼容跟进、PR 测试总结与 AgenticOps 版本标识统一由[共同验证材料](quality-checkpoints.md#共同验证材料)维护；项目分析、编写及重验见[构建、测试与本地运行](../../projects/tapdata/runbooks/build-test-and-local-run.md)。Jira 关联用例检查保留，TapTest 开发与执行仅在用户选择当前会话处理时进行，不另设测试台账。
 
 [新任务前检查与更新](update-and-rollback.md#新任务前检查与更新目标设计)说明兼容自动更新、共享安装忙碌时的选择及隔离新版安装；调用互斥由工程架构定义，验收由 PROD-001 维护。新客户端已接入检查与受管启动编排，不作为旧客户端或平台热加载的承诺。

@@ -42,7 +42,7 @@ def it_case_results(result="PASS"):
 def feature_review(criterion, repository, module, item):
     return {
         'integration_tests': [{'repository': repository, 'scope': module + ':value',
-            'level': 'L1', 'knowledge_ref': 'fixture:测试合同', 'rationale': '验证调用与返回边界',
+            'level': 'L1', 'framework_supported': True, 'framework_ref': 'fixture:framework-source', 'knowledge_ref': 'fixture:测试合同', 'rationale': '验证调用与返回边界',
             'cases': it_plan_cases(), 'case_strategy': '复用 verify.py 独立断言', 'execution_plan': '本地及模拟 CI 运行 verify.py，回读报告'}],
         'reference_implementations': [{'status': 'not_found', 'search_scope': [module],
             'source_revision': 'fixture:isolated-source', 'evidence_ref': 'fixture:search', 'difference': '新增目标行为'}],
@@ -170,7 +170,7 @@ class QualityTests(unittest.TestCase):
         for name, fact in (("quality.json", "fix_plan"), ("quality-feature.json", "implementation_plan")):
             rules = json.loads((ROOT / "projects/tapdata" / name).read_text())
             rows = [{"repository": repo["repository"], "scope": "module:behavior",
-                     "level": "L1", "knowledge_ref": "fixture:wiki-path",
+                     "level": "L1", "framework_supported": True, "framework_ref": "fixture:framework-source", "knowledge_ref": "fixture:wiki-path",
                      "rationale": "变更触及模块契约", "cases": it_plan_cases(), "case_strategy": "新增边界断言，复用正常路径",
                      "execution_plan": "本地定向、模块回归及 PR 报告核对"} for repo in self.task["repositories"]]
             ctx = quality.context(self.base, self.task)
@@ -2479,7 +2479,7 @@ class FeatureFlowTests(unittest.TestCase):
                   'checks_exceptions': [], 'pull_requests': [{'repository': self.repo, 'number': 1,
                   'url': 'https://' + current['repositories'][0]['authorized_endpoint'].split('/', 1)[0] + '/' + self.repo + '/pull/1', 'headRefOid': material['head_revision'],
                   'state': 'OPEN', 'isDraft': True, 'source_ref': 'fixture:github', 'observed_at': self.proof()['at'],
-                  'body': test_coverage.summary(verification.plan_rows(rules, ctx), material, 'develop-v1.0-2-12345678')}]}
+                  'body': test_coverage.summary(verification.plan_rows(rules, ctx), material, 'develop-v1.0-2-12345678', model, rules['verification_plan']['case_coverage'])}]}
         path = task_store.interaction_path(self.ws, 'TAP-123', current['run_id'], 'pr-ready-input.json', create=True)
         path.write_text(json.dumps(packet))
 
@@ -2693,6 +2693,9 @@ class FeatureFlowTests(unittest.TestCase):
         check_state = ci.load_state(self.ws, "TAP-123", "1", self.repo)
         check_state["history"].append({"head": head, "verdict": "success"})
         ci.save_state(self.ws, "TAP-123", "1", check_state)
+        material["results"][0].update(result="PASS", report_ref="fixture:recovered-ci-report")
+        material["results"][0]["case_coverage"]["cases"] = it_case_results("PASS")
+        material["results"][0].pop("decision", None)
         self.apply("verification", material)
         # CI 重新观察使既有确认摘要失效，缺口决定不能替代重新验收。
         self.checkpoint("q3-draft")
@@ -2716,7 +2719,7 @@ class TestCoverageClosureTests(unittest.TestCase):
         self.v, self.c = verification, test_coverage
         self.rules = json.loads((ROOT / 'projects/tapdata/quality.json').read_text())
         self.repo, self.head = 'tapdata/tapdata', 'a' * 40
-        self.row = {'repository': self.repo, 'scope': '模块:行为', 'level': 'L1', 'knowledge_ref': 'fixture:wiki',
+        self.row = {'repository': self.repo, 'scope': '模块:行为', 'level': 'L1', 'framework_supported': True, 'framework_ref': 'fixture:framework-source', 'knowledge_ref': 'fixture:wiki',
                     'rationale': '跨模块边界', 'cases': it_plan_cases(), 'case_strategy': '复用正常用例，新增异常场景', 'execution_plan': 'CI'}
         self.ctx = {'repositories': {self.repo: {'live_revision': self.head, 'ci_digest': 'ci-1'}},
                     'facts': {'fix_plan': {'integration_tests': [self.row]}}, 'failures': {}}
@@ -2734,6 +2737,7 @@ class TestCoverageClosureTests(unittest.TestCase):
         self.packet = {'pull_requests': [{'repository': self.repo, 'number': 9, 'url': self.url,
                         'headRefOid': self.head, 'state': 'OPEN', 'isDraft': True,
                         'source_ref': 'fixture:github', 'observed_at': proof()['at']}], 'issues': []}
+        self.rules['verification_plan']['case_coverage'] = {'issue_min_level': 1, 'issue_when_unsupported': True}
         self.config = self.rules['verification_plan']['case_coverage']
         self.version = 'develop-v1.0-2-12345678'
         self.refresh()
@@ -2967,7 +2971,7 @@ class VerificationContractTests(unittest.TestCase):
     def integration_rules(self):
         rules = json.loads((ROOT / "projects/tapdata/quality.json").read_text())
         self.ctx["facts"] = {"fix_plan": {"integration_tests": [{"repository": "a/repo",
-            "scope": "module:behavior", "level": "L1", "knowledge_ref": "fixture:wiki",
+            "scope": "module:behavior", "level": "L1", "framework_supported": True, "framework_ref": "fixture:framework-source", "knowledge_ref": "fixture:wiki",
             "rationale": "模块对外行为", "cases": it_plan_cases(), "case_strategy": "复用正常路径，新增边界",
             "execution_plan": "本地与 CI 模块全量，回读真实报告"}]}}
         return rules
@@ -3013,7 +3017,10 @@ class VerificationContractTests(unittest.TestCase):
                         "level": "L1", "follow_up": "由研发安排补测；仅确认本次验证缺口", "proof": proof()}
             p["results"][0]["decision"] = decision
             model = {}; self.v.record(model, p, self.ctx, rules)
-            self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], rules))
+            if raw == "FAIL":
+                self.assertTrue(self.v.problems(model, self.ctx, ["ci"], rules))
+            else:
+                self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], rules))
             self.assertEqual(raw, model["verification"]["a/repo"]["ci"]["data"]["results"][0]["result"])
             p["results"][0]["decision"]["proof"]["source"] = "jira_issue"
             with self.assertRaises(ValueError): self.v.record({}, p, self.ctx, rules)

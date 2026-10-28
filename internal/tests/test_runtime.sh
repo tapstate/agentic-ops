@@ -48,6 +48,7 @@ run_general_suite() {
   run_product tests/test_task_update.py
   run_product tests/test_checkpoints.py
   run_product tests/test_quality.py
+  run_product tests/test_it_manual.py
   run_product tests/test_issue_versions.py
   run_product tests/test_jira_status.py
   run_product tests/test_jira_watermark.py
