@@ -5,6 +5,7 @@ set -euo pipefail
 export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+. "$repo_root/internal/python-environment.sh"
 test_root="$(mktemp -d)"
 test_root="$(cd "$test_root" && pwd -P)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
@@ -512,8 +513,8 @@ test ! -e "$station/.claude/skills/ao-ws-init"
 install_root_physical="$(cd "$install_root" && pwd -P)"
 grep -F '@AGENTS.md' "$station/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$station/AGENTS.md" >/dev/null
-grep -F 'python3 '"$install_root_physical"'/workflow/task.py status --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
-grep -F 'python3 '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
+grep -F "$install_root_physical"'/.local/venv/product/bin/python '"$install_root_physical"'/workflow/task.py status --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
+grep -F "$install_root_physical"'/.local/venv/product/bin/python '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
 grep -F '必须先读取当前项目 `.agents/skills/`' "$station/AGENTS.md" >/dev/null
 grep -F 'memory 只能作为历史线索' "$station/AGENTS.md" >/dev/null
 grep -F '接管或继续成功只是流程恢复点' "$station/AGENTS.md" >/dev/null

@@ -19,9 +19,27 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 先完成既有[接管协调](../architecture/single-task-station.md#jira-任务级接管协调与授权)，再读取工作项四个字段及 `issuetype.id`，明确返回 null 与未返回字段的区别。`jira_watermark.py prepare` 的输入包含 `source_ref`、原生 `issue`，以及从同一 Jira 连接读取的 `current_user`（accountId、displayName、active=true、source_ref）。已有不同工位/run 或不完整标记时，先核实原 run 归档、清理或交接，将依据放入 `previous_takeover.evidence_ref`，并以 `previous_takeover.observed_fields` 绑定本次读到的四项原值；标记本身不证明原执行者停写，也不替代现有协调要求。
 
+字段读取接受原生 `issue.fields[field_id]`，或连接器 `issue.fields.customFields` 中以 `id` 定位且显式包含 `value` 的条目。`value` 为字符串表示有值，显式 null 表示已确认空；条目只有 id、字段省略均为 `unreturned`，明确 401/403 为 `forbidden`。不能从可编辑 metadata、allowedValues 或字段名存在推断空值。读失败返回 `field_observations` 和恢复要求，不创建可发送载荷；已有 verified 标记再次回读不可读时恢复为 unknown，禁止沿旧结论发送摘要。
+
+先按输出 `takeover.markers.read_request.fields` 用同一连接显式补查。连接器仍省略值时，可经已授权原生 REST 或其它能保留实际字段值的原生读取取得原响应，保留初始响应并在输入增加 `field_readbacks`，而非把人工猜测写进原生快照。每条补查绑定 issue_key、field_id、source_ref、http_status；200 携带实际 issue.key/fields，401/403 只记录不可读。程序核对身份和显式字段值，不认证来源；Agent 必须实际读取证据。没有可用原生补查能力时保留待办，继续独立分析。
+
+```json
+{
+  "field_readbacks": [{
+    "issue_key": "TAP-123",
+    "field_id": "customfield_10365",
+    "source_ref": "实际原生读取的可回查引用",
+    "http_status": 200,
+    "issue": {"key": "TAP-123", "fields": {"customfield_10365": null}}
+  }]
+}
+```
+
+上述仅示范输入结构，不是任何真实任务为空的证据。补查仅补缺项或核对一致值；与已有明确值或其它补查冲突时拒绝合并，重新完整回读四项字段，不能以排列顺序覆盖他站标记。写前仍重新核验接管归属。
+
 `prepare` 固定四项值并返回一次 issue edit 的 `native_request.fields`。原生工具写入四项后重新读四项，由 `complete --outcome unknown` 核验一致才置为 verified；日期时间按同一时刻比较。当前连接器没有同时写评论和字段的操作，因此执行两次有依赖的请求：先整体写标记并回读，后写摘要。无全局并发锁，沿用不同进程不会在一分钟内同时接管的使用假设。
 
-同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 `complete` 回读，确认后 `prepare` 保留旧记录并补齐其余字段，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败只暂停依赖它的摘要，无依赖研发继续。
+同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 `complete` 回读，确认后 `prepare` 保留旧记录并补齐其余字段，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败只暂停依赖它的摘要，无依赖研发继续。原操作曾核验成功后，远端清空或变化不再解释为“原写入未生效”；保留首次核验来源，禁止重新发起该标记写入。类型错误、来源冲突和不可读均撤销当前 verified 结论，保留原载荷和历史核验事实。
 
 ### 摘要发送与防重
 
@@ -29,11 +47,11 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 取得评论 ID 后记 `receipt result=created`，回读目标、ID、完整正文和作者；`readback` 的 `author_account_id` 必须匹配原 Jira 登录用户。已验证评论不重发；发送意图、超时或结果不明时保留原 id、正文和 operation_id，查全相关评论并唯一定位原评论，不重新生成正文或新 id。无法唯一定位时保留未知，不能把“暂时没查到”当作未发送；不承诺跨服务严格恰好一次。旧版已发送评论仍按其原正文和回执回读，不因升级补发新版摘要。
 
-已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
+已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。deferred 或未发送的过期草稿由待办返回标准正文及 draft_command，重新按当前事实确认；标记、协调或源码未就绪时只给出补齐步骤，不附带 confirm/prepare_write。未知评论只给出原 operation 的 readback；回执已冻结则交接维护，不输出不可执行命令。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
 
 ## 同步待办与有限回执恢复
 
-TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。
+TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。`takeover` 完成视图及恢复边界见[工位合同](../architecture/single-task-station.md#接管完成视图与恢复)。水印命令也返回相同待办，标记核验后直接提供摘要 draft_command；按实际返回的下一步继续。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。
 
 Agent 在当前授权内处理动作；缺少授权时先询问对应动作范围。评论按现有 draft/confirm/prepare_write、原生调用、receipt/readback 顺序处理。稳定 id 复用原记录；尚未发送的过期草稿重新生成确认，已经发送或结果不明的记录只先回读原目标和原正文。新确认不授权重复发送。`refresh_required` 只表示当前材料变化，不撤销原外部调用事实。
 

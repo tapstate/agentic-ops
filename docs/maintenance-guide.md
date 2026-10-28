@@ -33,7 +33,7 @@ plan 固化工位身份、旧状态和接线指纹。apply 取得工位、旧状
 
 ## 1. 从零开始
 
-准备 Git、Python 3.9+ 和 uv：
+准备 Git、Python 3.12.x 和 uv：
 
 ```sh
 git clone --branch develop --single-branch git@github.com:tapstate/agentic-ops.git
@@ -52,6 +52,12 @@ cd agentic-ops
 ```
 
 `update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。本地领先远端时会继续同步维护依赖和源码 Git Hook，并明确报告领先提交数。
+
+### Python 解释器与验收复用
+
+运行环境职责见[工程架构](architecture/agenticops-v1-architecture.md#python-运行环境)。维护入口在进入 uv 或候选快照前固定产品测试解释器；`AGENTIC_OPS_TEST_PYTHON` 覆盖值也必须是 3.12.x。内部环境必须可执行且符合相同版本要求，不能缺失后借用产品环境。标准测试入口同时约束 Shell 测试中的 `python3` 及其子进程；该 PATH 设置只属于验收进程，不传递给真实业务会话。
+
+开发和发布记录实际使用的产品与内部解释器版本。同树、同合同、同环境复用现有完整验收；3.12 的补丁版本、依赖或行为开关真实变化仍需补验，不修改历史证据或以版本号标签冒充环境一致。新候选首次验收和验证器合同变更可能补验；后续入口必须复用匹配记录。
 
 ## 2. 初始化测试工位
 

@@ -1,6 +1,6 @@
 # gh 一键安装
 
-本方案面向已安装 GitHub CLI 的使用者。需要 Git、Python 3.9+，并且登录账号能读取 `tapstate/agentic-ops`。
+本方案面向已安装 GitHub CLI 的使用者。需要 Git、Python 3.12.x，并且登录账号能读取 `tapstate/agentic-ops`。
 
 先检查登录：
 

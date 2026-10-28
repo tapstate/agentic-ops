@@ -250,6 +250,11 @@ class FourMarkerTests(unittest.TestCase):
         self.assertNotIn('native_request', result)
         self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
         self.assertEqual(record['expected_fields'], result['expected_fields'])
+        from workflow import external_sync
+        action = next(row for row in external_sync.actions(self.base, self.task)['sync_actions']
+                      if row['kind'] == 'agenticops_version')
+        self.assertFalse(action['original_target_observed'])
+
 
     def test_previous_run_requires_bound_resolution_and_current_coordination(self):
         prior = {'customfield_10421': 'old-version', 'customfield_10366': '2026-01-01T00:00:00Z',
@@ -309,6 +314,126 @@ class FourMarkerTests(unittest.TestCase):
         self.assertEqual(legacy['version'], upgraded['version'])
         self.assertEqual(legacy['at'], upgraded['expected_fields']['customfield_10366'])
         self.assertIn('legacy_watermark', jira_watermark.load_state(self.base, self.task))
+
+    def test_connector_explicit_null_omission_and_native_supplement(self):
+        snapshot = self.snapshot()
+        ids = list(snapshot['issue']['fields'])[:-1]
+        snapshot['issue']['fields'] = {'issuetype': {'id': '10011'}, 'customFields': {
+            'label-' + key: {'id': key, 'value': None} for key in ids}}
+        rules = jira_watermark.config(self.base)
+        self.assertEqual(dict.fromkeys(ids), jira_watermark.marker_values({}, rules, snapshot))
+        key = ids[0]
+        del snapshot['issue']['fields']['customFields']['label-' + key]['value']
+        with self.assertRaises(jira_watermark.FieldReadError) as raised:
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertEqual('unreturned', raised.exception.observations[key]['state'])
+        self.assertEqual('missing', jira_watermark.status(self.base, self.task)['outcome'])
+        snapshot['field_readbacks'] = [{'issue_key': 'TAP-123', 'field_id': key,
+            'source_ref': 'fixture:rest/field', 'http_status': 403}]
+        with self.assertRaises(jira_watermark.FieldReadError) as raised:
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertEqual('forbidden', raised.exception.observations[key]['state'])
+        snapshot['field_readbacks'][0].update(http_status=200, issue={'key': 'TAP-123', 'fields': {key: None}})
+        prepared = jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        self.assertEqual('ready', prepared['outcome'])
+        self.assertEqual(4, len(prepared['native_request']['fields']))
+
+    def test_unreadable_after_verified_invalidates_completion_without_rewrite(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        observed = self.snapshot(record['expected_fields'])
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', observed)
+        del observed['issue']['fields']['customfield_10365']
+        with self.assertRaises(jira_watermark.FieldReadError):
+            jira_watermark.prepare(self.base, 'TAP-123', observed)
+        pending = jira_watermark.status(self.base, self.task)
+        self.assertEqual('unknown', pending['outcome'])
+        self.assertNotIn('native_request', pending)
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        self.assertEqual(record['expected_fields'], pending['expected_fields'])
+        self.assertEqual('verified', jira_watermark.complete(self.base, 'TAP-123', 'unknown',
+            self.snapshot(record['expected_fields']))['outcome'])
+
+    def test_supplement_cannot_assert_empty_without_native_value_or_other_issue(self):
+        snapshot = self.snapshot()
+        key = 'customfield_10365'
+        del snapshot['issue']['fields'][key]
+        read = {'issue_key': 'TAP-123', 'field_id': key, 'source_ref': 'fixture:rest', 'http_status': 200,
+                'issue': {'key': 'TAP-123', 'fields': {}}}
+        snapshot['field_readbacks'] = [read]
+        with self.assertRaises(jira_watermark.FieldReadError):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+        read['issue'] = {'key': 'TAP-999', 'fields': {key: None}}
+        with self.assertRaisesRegex(ValueError, '原生'):
+            jira_watermark.prepare(self.base, 'TAP-123', snapshot)
+
+    def test_supplement_cannot_mask_explicit_other_owner(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        observed = self.snapshot(dict(record['expected_fields'], customfield_10365='other-run'))
+        observed['field_readbacks'] = [{'issue_key': 'TAP-123', 'field_id': 'customfield_10365',
+            'source_ref': 'fixture:older-read', 'http_status': 200,
+            'issue': {'key': 'TAP-123', 'fields': {'customfield_10365': self.task['run_id']}}}]
+        with self.assertRaisesRegex(ValueError, '冲突'):
+            jira_watermark.complete(self.base, 'TAP-123', 'unknown', observed)
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        self.assertNotIn('native_request', jira_watermark.status(self.base, self.task))
+
+    def test_verified_then_cleared_cannot_rearm_even_after_restart(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))
+        cleared = self.snapshot()
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', cleared)
+        cleared['not_applied_ref'] = 'fixture:contradicts-observed-success'
+        for _ in range(2):
+            with self.assertRaisesRegex(ValueError, '已.*核验|曾.*核验'):
+                jira_watermark.prepare(self.base, 'TAP-123', cleared)
+            self.assertNotIn('native_request', jira_watermark.status(self.base, self.task))
+
+    def test_invalid_field_after_verified_does_not_keep_completion(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))
+        observed = self.snapshot(dict(record['expected_fields'], customfield_10365=42))
+        with self.assertRaisesRegex(ValueError, '类型'):
+            jira_watermark.complete(self.base, 'TAP-123', 'unknown', observed)
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+
+    def test_legacy_unknown_history_does_not_authorize_retry(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        state = jira_watermark.load_state(self.base, self.task)
+        del state['watermark']['verified_ref']  # 模拟本字段引入前的合法记录。
+        task_store._write_json_atomic(jira_watermark.state_path(self.base, self.task), state)
+        observed = self.snapshot()
+        observed['not_applied_ref'] = 'fixture:no-history'
+        with self.assertRaisesRegex(ValueError, '缺少核验历史'):
+            jira_watermark.prepare(self.base, 'TAP-123', observed)
+        self.assertNotIn('native_request', jira_watermark.status(self.base, self.task))
+        self.assertEqual('verified', jira_watermark.complete(self.base, 'TAP-123', 'unknown',
+            self.snapshot(record['expected_fields']))['outcome'])
+
+    def test_old_verified_preserves_success_when_new_read_is_invalid(self):
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))
+        state = jira_watermark.load_state(self.base, self.task)
+        original_ref = state['watermark'].pop('verified_ref')
+        task_store._write_json_atomic(jira_watermark.state_path(self.base, self.task), state)
+        invalid = self.snapshot(record['expected_fields'])
+        invalid['issue']['fields']['issuetype']['id'] = '99999'
+        with self.assertRaisesRegex(ValueError, '类型'):
+            jira_watermark.complete(self.base, 'TAP-123', 'unknown', invalid)
+        after = jira_watermark.status(self.base, self.task)
+        self.assertEqual('unknown', after['outcome'])
+        self.assertEqual(original_ref, after['verified_ref'])
+
+    def test_verified_legacy_routes_to_prepare_new_markers(self):
+        from workflow import external_sync
+        rules = jira_watermark.config(self.base)
+        legacy_rules = dict(rules, schema_version=1)
+        legacy_rules.pop('marker_fields')
+        with mock.patch.object(jira_watermark, 'config', return_value=legacy_rules):
+            record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot({'customfield_10421': record['version']}))
+        self.task = task_store.read_task(self.base)
+        view = external_sync.actions(self.base, self.task)
+        self.assertEqual('prepare', view['takeover']['markers']['command']['action'])
 
     def test_terminal_readback_confirms_only_original_four_fields(self):
         record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())

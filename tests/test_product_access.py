@@ -21,6 +21,7 @@ class ProductAccessTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         (self.root / 'bootstrap').mkdir()
         shutil.copyfile(ROOT / 'bootstrap/product_access.py', self.root / 'bootstrap/product_access.py')
+        shutil.copyfile(ROOT / 'bootstrap/python_runtime.py', self.root / 'bootstrap/python_runtime.py')
 
     def process(self, code, *args, pass_fds=(), env=None):
         process = subprocess.Popen([sys.executable, '-u', '-c', code, str(self.root), *args],
@@ -217,7 +218,7 @@ raise SystemExit(a["shell_entry"](sys.argv[1]+"/bootstrap/station-init.sh",["--h
         for directory in ('bootstrap','workflow','gate','projects/tapdata/scripts'):
             for path in (ROOT / directory).glob('*.py'):
                 source = path.read_text()
-                if '__main__' not in source or path.name == 'product_access.py':
+                if '__main__' not in source or path.name in ('product_access.py', 'python_runtime.py'):
                     continue
                 tree = ast.parse(source)
                 first = next(n for n in tree.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) and isinstance(n.value.value,str)) and not (isinstance(n,ast.ImportFrom) and n.module=='__future__'))

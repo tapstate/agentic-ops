@@ -3411,19 +3411,33 @@ class SyncRecoveryTests(unittest.TestCase):
             'summary': '任务级资源监控', 'assignee': {'displayName': '测试研发'}}}}
         self.save_task()
         from workflow import jira_watermark
+        initial = external_sync.actions(self.base, self.task)
+        missing = next(row for row in initial['sync_actions'] if row['kind'] == 'agenticops_version')
+        self.assertEqual('read_fields_then_prepare', missing['next_action'])
+        initial_marker_id = initial['takeover']['markers']['operation_id']
         with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'):
             snapshot = {'source_ref': 'fixture:jira/read', 'current_user': {'accountId': 'login-user',
                 'displayName': '当前登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'},
                 'issue': {'key': self.task['issue_key'], 'fields': {'issuetype': {'id': '10011'},
                     'customfield_10421': None, 'customfield_10366': None, 'customfield_10462': None, 'customfield_10365': None}}}
             marker = jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
-        self.assertFalse(any(item['kind'] == 'takeover_comment' for item in external_sync.actions(self.base, self.task)['sync_actions']))
+        progress = external_sync.actions(self.base, self.task)['takeover']
+        self.assertEqual('pending', progress['status'])
+        self.assertEqual(['markers', 'summary'], progress['remaining'])
+        self.assertTrue(progress['independent_read_only_allowed'])
+        marker_id = progress['markers']['operation_id']
+        self.assertEqual(initial_marker_id, marker_id)
+        self.assertEqual('complete', progress['markers']['command']['action'])
         snapshot['issue']['fields'].update(marker['expected_fields'])
         jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         self.task = task_store.read_task(self.base)
         report = self.view()
         actions = external_sync.actions(self.base, self.task, report)['sync_actions']
         row = next(item for item in actions if item['kind'] == 'takeover_comment')
+        progress = external_sync.actions(self.base, self.task)['takeover']
+        self.assertEqual(['summary'], progress['remaining'])
+        self.assertEqual(marker_id, progress['markers']['operation_id'])
+        self.assertEqual(row['body'], row['draft_command']['payload']['body'])
         self.assertEqual('not_attempted', row['status'])
         for text in ('版本：AgenticOps v1.fixture', '操作人：当前登录研发', '任务类型：defect_fix',
                      self.task['run_id'], '仓库分支列表：', 'tapdata/tapdata：develop'):
@@ -3433,6 +3447,9 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(report, self.view())
         self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])
         record = self.apply('draft', {'id': row['id'], 'body': row['body']})['publications'][row['id']]
+        action = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
+        self.assertEqual('confirm', action['quality_command']['action'])
+
         self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
         stale = copy.deepcopy(snapshot)
         stale['issue']['fields']['customfield_10462'] = 'b' * 32
@@ -3442,6 +3459,10 @@ class SyncRecoveryTests(unittest.TestCase):
         self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
         pending = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
         self.assertEqual('readback', pending['next_action'])
+        self.assertEqual('readback', pending['quality_command']['action'])
+        progress = external_sync.actions(self.base, self.task)['takeover']
+        self.assertEqual('pending', progress['status'])
+        self.assertEqual(record['operation_id'], progress['summary']['operation_id'])
         self.assertEqual(row['body'], pending['record']['body'])
         with self.assertRaisesRegex(ValueError, '作者'):
             self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
@@ -3451,10 +3472,103 @@ class SyncRecoveryTests(unittest.TestCase):
             'issue_key': self.task['issue_key'], 'comment_id': 'takeover-comment', 'body': row['body'],
             'source_ref': 'fixture:jira/takeover-comment', 'author_account_id': 'login-user'})
         self.assertFalse(any(item['id'] == row['id'] for item in external_sync.actions(self.base, self.task)['sync_actions']))
+        self.assertEqual('complete', external_sync.actions(self.base, self.task)['takeover']['status'])
+        from workflow import jira_coordination
+        state = jira_coordination.state(self.base)
+        state['proof']['valid'] = False
+        jira_coordination.save(self.base, state)
+        progress = external_sync.actions(self.base, self.task)['takeover']
+        self.assertEqual('pending', progress['status'])
+        self.assertEqual(['coordination'], progress['remaining'])
+        self.assertTrue(progress['independent_read_only_allowed'])
+        with self.assertRaisesRegex(ValueError, '接管'):
+            jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
+
+
+    def takeover_fixture(self):
+        from workflow import external_sync, jira_watermark
+        self.task['source_prepared'] = True
+        self.save_task()
+        snapshot = {'source_ref': 'fixture:read', 'issue': {'key': self.task['issue_key'], 'fields': {
+            'issuetype': {'id': '10011'}, 'customfield_10421': None, 'customfield_10366': None,
+            'customfield_10462': None, 'customfield_10365': None}},
+            'current_user': {'accountId': 'login-user', 'displayName': '研发', 'active': True, 'source_ref': 'fixture:myself'}}
+        with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'):
+            marker = jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
+        snapshot['issue']['fields'].update(marker['expected_fields'])
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
+        self.task = task_store.read_task(self.base)
+        row = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['kind'] == 'takeover_comment')
+        return snapshot, row
+
+    def test_takeover_deferred_and_stale_drafts_have_executable_resume(self):
+        from workflow import external_sync
+        snapshot, row = self.takeover_fixture()
+        record = self.apply('draft', row['draft_command']['payload'])['publications'][row['id']]
+        self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
+        self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'deferred', 'reason': '请求未发送'})
+        action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
+        self.assertIn('draft_command', action)
+        self.apply('draft', action['draft_command']['payload'])
+        self.task['facts']['problem_symptom'] = '新的准入事实'
+        self.save_task()
+        action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
+        self.assertIn('draft_command', action)
+        self.assertNotIn('quality_command', action)
+        self.apply('draft', action['draft_command']['payload'])
+
+    def test_takeover_blocked_markers_do_not_offer_prepare_write(self):
+        from workflow import external_sync, jira_watermark
+        snapshot, row = self.takeover_fixture()
+        record = self.apply('draft', row['draft_command']['payload'])['publications'][row['id']]
+        self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
+        changed = copy.deepcopy(snapshot)
+        changed['issue']['fields']['customfield_10365'] = 'other-run'
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', changed)
+        action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
+        self.assertEqual('verify_takeover_markers', action['next_action'])
+        self.assertNotIn('quality_command', action)
+        self.assertNotIn('draft_command', action)
+
+    def test_takeover_lost_coordination_and_frozen_receipts_offer_no_commands(self):
+        from workflow import external_sync, jira_coordination, archive_store
+        snapshot, row = self.takeover_fixture()
+        record = self.apply('draft', row['draft_command']['payload'])['publications'][row['id']]
+        self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
+        coord = jira_coordination.state(self.base)
+        invalid = copy.deepcopy(coord)
+        invalid['proof']['valid'] = False
+        jira_coordination.save(self.base, invalid)
+        action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
+        self.assertEqual('manual_handoff', action['next_action'])
+        self.assertNotIn('quality_command', action)
+        self.assertNotIn('draft_command', action)
+        jira_coordination.save(self.base, coord)
+        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
+        self.terminal()
+        target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
+        (target / 'record.json').write_text('{}')
+        action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
+        self.assertEqual('maintenance_handoff', action['next_action'])
+        self.assertNotIn('quality_command', action)
+        self.assertNotIn('draft_command', action)
+
+    def test_non_checkpoint_mode_does_not_invent_unfinishable_summary(self):
+        from workflow import external_sync
+        snapshot, row = self.takeover_fixture()
+        rules = dict(quality.config(self.base, self.task), publication_mode='deferred-summary')
+        with mock.patch.object(quality, 'config', return_value=rules):
+            view = external_sync.actions(self.base, self.task)
+        self.assertFalse(view['takeover']['summary']['required'])
+        self.assertEqual('complete', view['takeover']['status'])
+        self.assertFalse(any(w['kind'] == 'takeover_summary' for w in view['warnings']))
 
     def test_takeover_summary_is_not_emitted_before_source_prepared(self):
         from workflow import external_sync
         self.task['source_prepared'] = False
+        marker = next(row for row in external_sync.actions(self.base, self.task)['sync_actions'] if row['kind'] == 'agenticops_version')
+        self.assertEqual('prepare_source', marker['next_action'])
         self.assertFalse(any(item['kind'] == 'takeover_comment'
             for item in external_sync.actions(self.base, self.task)['sync_actions']))
 

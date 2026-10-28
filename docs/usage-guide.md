@@ -2,7 +2,7 @@
 
 这篇只带你完成一条使用路径：安装 AgenticOps、明确选择产品项目、创建工位并接管第一个 Jira 任务。项目、工位路径和任务号须按实际情况填写；其它选项可沿用产品默认值。
 
-开始前准备：Git、Python 3.9+，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。Jira/Atlassian 插件在首次实际使用时按[必需 MCP 配置](usage/mcp-setup.md)引导安装和登录，不是首次启动的前置条件；GitHub 工具由 Agent 按任务自行选择。不熟悉术语时查看[术语表](glossary.md)。
+开始前准备：Git、Python 3.12.x，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。Jira/Atlassian 插件在首次实际使用时按[必需 MCP 配置](usage/mcp-setup.md)引导安装和登录，不是首次启动的前置条件；GitHub 工具由 Agent 按任务自行选择。不熟悉术语时查看[术语表](glossary.md)。
 
 ## 1. 安装
 

@@ -52,11 +52,73 @@ def marker_digest(fields):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
-def marker_values(fields, rules):
+def field_observations(snapshot, rules):
+    """读取原生字段及连接器映射；补查保留原响应，不把省略解释为空。"""
+    fields, _ = issue_from(snapshot, snapshot["issue"]["key"])
     ids = [rules["field_id"], *rules["marker_fields"].values()]
-    if any(key not in fields for key in ids):
-        raise ValueError("Jira 四项接管字段回读不完整；缺字段不能视为空值")
-    values = {key: fields[key] for key in ids}
+    result = {}
+    for key in ids:
+        candidates = []
+        if key in fields:
+            candidates.append((fields[key], snapshot.get("source_ref", "")))
+        mapped = fields.get("customFields", {})
+        entries = mapped.values() if isinstance(mapped, dict) else mapped if isinstance(mapped, list) else []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("id") == key:
+                candidates.append((entry, snapshot.get("source_ref", "")))
+        observations = []
+        for value, source in candidates:
+            if isinstance(value, dict) and value.get("id") == key:
+                if "value" not in value:
+                    observations.append({"state": "unreturned", "source_ref": source})
+                    continue
+                value = value["value"]
+            observations.append({"state": "empty" if value is None else "value", "value": value, "source_ref": source})
+        known = [row for row in observations if "value" in row]
+        if known and any(row["value"] != known[0]["value"] for row in known):
+            raise ValueError("Jira 字段原生值与映射值冲突：" + key)
+        result[key] = known[0] if known else {"state": "unreturned", "source_ref": snapshot.get("source_ref", "")}
+    known_values = {key: row["value"] for key, row in result.items() if "value" in row}
+    # 补查只补缺项；冲突不能靠输入顺序覆盖，更不能混成其它工位的旧快照。
+    for read in snapshot.get("field_readbacks", []):
+        if (not isinstance(read, dict) or not isinstance(read.get("source_ref"), str)
+                or not read["source_ref"].strip() or read.get("issue_key") != snapshot["issue"]["key"]):
+            raise ValueError("字段补查必须绑定同一任务和原生 source_ref")
+        key = read.get("field_id")
+        if key not in result:
+            raise ValueError("字段补查不属于接管标记")
+        if read.get("http_status") in (401, 403):
+            result[key] = {"state": "forbidden", "source_ref": read["source_ref"]}
+            continue
+        issue = read.get("issue", {})
+        if (read.get("http_status") != 200 or issue.get("key") != read["issue_key"]
+                or not isinstance(issue.get("fields"), dict)):
+            raise ValueError("字段补查需要原生 HTTP 200 issue/fields 或明确 401/403")
+        if key not in issue["fields"]:
+            result[key] = {"state": "unreturned", "source_ref": read["source_ref"]}
+            continue
+        value = issue["fields"][key]
+        if isinstance(value, dict):
+            raise ValueError("接管文本字段补查必须保留原生值，不能用 metadata 证明空值")
+        if key in known_values and known_values[key] != value:
+            raise ValueError("Jira 字段补查与已有观察冲突；重新完整回读四项字段：" + key)
+        known_values[key] = value
+        result[key] = {"state": "empty" if value is None else "value", "value": value, "source_ref": read["source_ref"]}
+    return result
+
+
+class FieldReadError(ValueError):
+    def __init__(self, observations):
+        self.observations = observations
+        super().__init__("Jira 四项接管字段回读不完整；缺字段或无权限不能视为空值")
+
+
+def marker_values(fields, rules, snapshot=None):
+    snapshot = snapshot or {"issue": {"key": "observation", "fields": dict(fields, issuetype={"id": "observation"})}}
+    observations = field_observations(snapshot, rules)
+    if any(row["state"] not in ("value", "empty") for row in observations.values()):
+        raise FieldReadError(observations)
+    values = {key: row["value"] for key, row in observations.items()}
     if any(value is not None and (not isinstance(value, str) or not value.strip()) for value in values.values()):
         raise ValueError("Jira 接管字段类型或内容无效")
     value = values[rules["marker_fields"]["begin_at"]]
@@ -108,10 +170,14 @@ def validate_record(record):
                 or not all(isinstance(actor.get(k), str) and actor[k].strip() for k in ("accountId", "displayName", "source_ref"))):
             raise ValueError("Jira 四项接管标记或登录用户记录无效")
         marker_time(fields[mapping["begin_at"]])
+    if record.get("verified_ref") is not None and (not isinstance(record["verified_ref"], str) or not record["verified_ref"].strip()):
+        raise ValueError("Jira 标记首次核验来源无效")
     outcome = record["outcome"]
     if outcome not in ("ready", "verified", "unknown", "failed", "stale"):
         raise ValueError("Jira 接管水印记录 outcome 无效")
     if outcome == "ready":
+        if record.get("verified_ref"):
+            raise ValueError("已核验过的标记不能重新成为待写意图")
         expected = {"issue_key": record.get("issue_key"), "fields": record.get("expected_fields", {record["field_id"]: record["version"]})}
         native_request = record.get("native_request")
         if (not isinstance(native_request, dict) or
@@ -154,8 +220,10 @@ def save_state(base, task, state, recovery=None):
             sync_recovery.require_receipt(base, current)
             if load_state(base, current).get("watermark") != recovery:
                 raise ValueError("原水印意图已变化，拒绝过期回执")
+            if recovery.get("verified_ref") and state["watermark"].get("verified_ref") != recovery["verified_ref"]:
+                raise ValueError("不得撤销或改写首次核验来源")
             sync_recovery.validate_update(recovery, state["watermark"],
-                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields"})
+                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields", "verified_ref"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 水印回执")
         task_store._write_json_atomic(state_path(base, task), state)
@@ -255,10 +323,10 @@ def complete(base, issue_key, outcome, snapshot, message=""):
     original = copy.deepcopy(record)
     fields, issue_type_id = issue_from(snapshot, issue_key)
     rules = config(base)
-    if issue_type_id != record["issue_type_id"] or issue_type_id not in rules["issue_type_ids"]:
-        raise ValueError("Jira 工作项类型已变化或不再适用接管版本水印")
     if record.get("marker_version") == 2:
         return complete_markers(base, task, state, snapshot, outcome, message)
+    if issue_type_id != record["issue_type_id"] or issue_type_id not in rules["issue_type_ids"]:
+        raise ValueError("Jira 工作项类型已变化或不再适用接管版本水印")
     product_root = project_rules.product_root_from_station(base)
     current_version = product_version.describe(product_root)
     if current_version != record["version"]:
@@ -296,16 +364,18 @@ def complete(base, issue_key, outcome, snapshot, message=""):
 def prepare_markers(base, task, state, snapshot):
     rules = config(base)
     fields, issue_type = issue_from(snapshot, task["issue_key"])
-    if issue_type not in rules["issue_type_ids"]:
-        raise ValueError("Jira 事务类型未配置接管标记")
     if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(snapshot, ensure_ascii=False)):
         raise ValueError("Jira 初始快照含敏感内容，请先脱敏")
-    actual = marker_values(fields, rules)
     previous = state.get("watermark")
     if previous:
         # 每次恢复都读远端；未知写入只回读原意图，不重新生成写请求。
         result = complete_markers(base, task, state, snapshot, "unknown", "")
+        actual = marker_values(fields, rules, snapshot)
         if result["outcome"] != "verified" and snapshot.get("not_applied_ref"):
+            if "verified_ref" not in result:
+                raise ValueError("旧标记缺少核验历史，不能证明原操作从未成功；仅回读或交接，不重复写入")
+            if result.get("verified_ref"):
+                raise ValueError("原标记曾经核验成功；当前变化不能解释为原写入未生效，禁止重复写入")
             jira_coordination.require(base, task["issue_key"])
             if (not isinstance(snapshot["not_applied_ref"], str) or not snapshot["not_applied_ref"].strip()
                     or actual != previous["previous_fields"]):
@@ -314,7 +384,10 @@ def prepare_markers(base, task, state, snapshot):
                           native_request={"issue_key": task["issue_key"], "fields": result["expected_fields"]})
             save_state(base, task, state)
         return dict(result, repeated=True)
+    if issue_type not in rules["issue_type_ids"]:
+        raise ValueError("Jira 事务类型未配置接管标记")
     jira_coordination.require(base, task["issue_key"])
+    actual = marker_values(fields, rules, snapshot)
     actor = snapshot.get("current_user", {})
     if (not isinstance(actor, dict) or actor.get("active") is not True or
             not all(isinstance(actor.get(k), str) and actor[k].strip() for k in ("accountId", "displayName", "source_ref"))):
@@ -345,10 +418,11 @@ def prepare_markers(base, task, state, snapshot):
               "issue_type_id": issue_type, "version": expected[rules["field_id"]], "write_mode": "overwrite",
               "marker_version": 2, "marker_fields": mapping, "expected_fields": expected, "actor": actor,
               "previous_fields": actual, "previous_takeover": snapshot.get("previous_takeover"),
-              "payload_digest": marker_digest(expected)}
+              "payload_digest": marker_digest(expected), "verified_ref": None}
     if markers_equal(actual, expected, mapping["begin_at"]):
         record.update(outcome="verified", reason="already_current", completed_at=now(),
-                      readback_ref=snapshot["source_ref"], readback_fields=actual, readback_value=record["version"])
+                      readback_ref=snapshot["source_ref"], readback_fields=actual, readback_value=record["version"],
+                      verified_ref=snapshot["source_ref"])
     else:
         record.update(outcome="ready", reason="markers_prepared", native_request={"issue_key": task["issue_key"], "fields": expected})
     facts = task.setdefault("facts", {})
@@ -364,13 +438,25 @@ def complete_markers(base, task, state, snapshot, outcome, message):
     record = state["watermark"]
     original = copy.deepcopy(record)
     fields, issue_type = issue_from(snapshot, task["issue_key"])
-    if issue_type != record["issue_type_id"]:
-        raise ValueError("Jira 工作项类型已变化")
-    actual = marker_values(fields, record)
+    # 兼容旧 verified 记录：在覆盖最新观察前保全已发生的核验事实。
+    if original["outcome"] == "verified" and not record.get("verified_ref"):
+        record["verified_ref"] = original["readback_ref"]
+    try:
+        if issue_type != record["issue_type_id"] or issue_type not in config(base)["issue_type_ids"]:
+            raise ValueError("Jira 工作项类型已变化或不再适用接管标记")
+        actual = marker_values(fields, record, snapshot)
+    except ValueError:
+        record.update(outcome="unknown", reason="markers_unreadable", completed_at=now(),
+                      readback_ref=snapshot["source_ref"], readback_fields={}, readback_value=None)
+        record.pop("native_request", None)
+        save_state(base, task, state, recovery=original)
+        raise
     record.update(completed_at=now(), readback_ref=snapshot["source_ref"], readback_fields=actual,
                   readback_value=actual[record["field_id"]])
     record.pop("native_request", None)
     if markers_equal(actual, record["expected_fields"], record["marker_fields"]["begin_at"]):
+        if not record.get("verified_ref"):
+            record["verified_ref"] = snapshot["source_ref"]
         record.update(outcome="verified", reason="markers_read_back")
         record.pop("guidance", None)
     else:
@@ -450,8 +536,18 @@ def main():
                 result = complete(args.dir, issue_key, args.outcome, read_input(args.input), args.message)
             else:
                 result = status(args.dir, task)
+        from workflow import external_sync
+        current = task_store.read_task(args.dir, issue_key)
+        result = dict(result, **external_sync.safe_actions(args.dir, current))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
+    except FieldReadError as error:
+        from workflow import external_sync
+        result = external_sync.safe_actions(args.dir, task_store.read_task(args.dir, issue_key))
+        result.update(field_observations=error.observations, error=str(error),
+                      recovery="用同一连接显式读取所列字段；连接器仍省略时提供 field_readbacks 原生补查，禁止猜 null")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 2
     except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2

@@ -814,7 +814,7 @@ def apply(base, issue, run_id, revision, command):
                 snapshot = command["payload"].get("takeover_snapshot", {})
                 fields, issue_type = jira_watermark.issue_from(snapshot, issue)
                 if (not snapshot.get("source_ref") or issue_type != marker["issue_type_id"]
-                        or not jira_watermark.markers_equal(jira_watermark.marker_values(fields, marker),
+                        or not jira_watermark.markers_equal(jira_watermark.marker_values(fields, marker, snapshot),
                             marker["expected_fields"], marker["marker_fields"]["begin_at"])
                         or snapshot.get("current_user", {}).get("accountId") != marker["actor"]["accountId"]):
                     raise ValueError("接管摘要写前回读标记或 Jira 登录用户已变化，先核实归属")

@@ -13,6 +13,7 @@ import sys
 
 from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
 from internal import test_selection
+from bootstrap import python_runtime
 
 EVIDENCE_SCHEMA_VERSION = 6
 SLOW_CHECK_SECONDS = 600
@@ -93,10 +94,11 @@ def environment(root):
         return (result.stdout or result.stderr).strip()
 
     root = Path(root)
-    product_python = os.environ.get("AGENTIC_OPS_TEST_PYTHON") or shutil.which("python3") or sys.executable
+    product_python = python_runtime.test_python(root)
     default_internal = root / ".local/venv/internal/bin/python"
     internal_python = os.environ.get("AGENTIC_OPS_INTERNAL_TEST_PYTHON") or (
-        str(default_internal) if default_internal.is_file() else product_python)
+        str(default_internal))
+    python_runtime.inspect(internal_python)
     opa = shutil.which("opa")
     locks = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
              for name in ("internal/uv.lock", "internal/pyproject.toml")}

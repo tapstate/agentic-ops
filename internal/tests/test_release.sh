@@ -5,6 +5,7 @@ set -euo pipefail
 export AGENTICOPS_EXECUTION_ID=0123456789abcdef0123456789abcdef
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
+. "$repo_root/internal/python-environment.sh"
 test_root="$(mktemp -d)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 
@@ -58,7 +59,10 @@ mkdir -p "$fixture/adapters/agents/codex" "$fixture/adapters/tools"
 printf 'hook\n' > "$fixture/adapters/agents/codex/hook.py"
 printf 'runtime\n' > "$fixture/adapters/runtime.py"
 printf 'classifier\n' > "$fixture/adapters/tools/classifier.py"
-git -C "$fixture" add adapters
+mkdir -p "$fixture/bootstrap"
+printf 'python runtime\n' > "$fixture/bootstrap/python_runtime.py"
+printf 'python environment\n' > "$fixture/internal/python-environment.sh"
+git -C "$fixture" add adapters bootstrap internal/python-environment.sh
 git -C "$fixture" commit -qm adapter-trust-root
 trust_head="$(git -C "$fixture" rev-parse HEAD)"
 trust_changes="$(
@@ -68,7 +72,9 @@ trust_changes="$(
 for trust_path in \
   adapters/agents/codex/hook.py \
   adapters/runtime.py \
-  adapters/tools/classifier.py; do
+  adapters/tools/classifier.py \
+  bootstrap/python_runtime.py \
+  internal/python-environment.sh; do
   printf '%s\n' "$trust_changes" | grep -Fxq "$trust_path" ||
     fail "Agent Hook 分类策略未纳入发布信任根：$trust_path"
 done
@@ -117,7 +123,7 @@ if printf '%s %040d refs/heads/main\n' "$head_sha" 0 |
 fi
 
 release_python="${AGENTIC_OPS_INTERNAL_TEST_PYTHON:-$repo_root/.local/venv/internal/bin/python}"
-if [ ! -x "$release_python" ]; then release_python="$(command -v python3)"; fi
+test -x "$release_python" || fail "内部 Python 3.12 环境缺失"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" "$release_python" -m unittest internal.tests.test_release_verification -q
 
 printf 'AgenticOps 发布工作流验证通过\n'

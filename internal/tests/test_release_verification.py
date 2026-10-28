@@ -534,7 +534,10 @@ else: sys.exit(2)
         for directory in ('internal/story_gate', 'internal/bin', 'internal/release'):
             shutil.copytree(ROOT / directory, self.root / directory, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns('__pycache__'))
-        shutil.copyfile(ROOT / 'internal/test_selection.py', self.root / 'internal/test_selection.py')
+        for name in ('internal/test_selection.py', 'internal/python-environment.sh', 'bootstrap/python_runtime.py'):
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
         self.write('.agentic-ops-source', 'source\n')
         self.write('AGENTS.md', '# Fixture\n')
         self.write('docs/strategy/project-goals.md', '# Fixture\n')
@@ -569,17 +572,7 @@ stories:
         result = service.verify('range', base=self.base, head=self.head, scope='full')
         service.approve('range', result['impact_id'], 'user-confirmation:AO-262:commit:' + self.head,
                         base=self.base, head=self.head)
-        # 这些交付用例验证发布补验及其后续复用，明确让 uv 返回不同的工具版本。
-        # 不能依赖宿主 Python 恰好不同；开发证据直接复用由专门用例覆盖。
-        release_python = self.area / 'release-python'
-        release_python.write_text('#!' + sys.executable + '\n' +
-                                  'import os,sys\n' +
-                                  "if sys.argv[1:] == ['--version']: print('Python release fixture')\n" +
-                                  f'else: os.execv({sys.executable!r}, [{sys.executable!r}] + sys.argv[1:])\n')
-        release_python.chmod(0o700)
-        self.uv.write_text(self.uv.read_text().replace(
-            "elif sys.argv[1:3] == ['python','find']: print(sys.executable)",
-            f"elif sys.argv[1:3] == ['python','find']: print({str(release_python)!r})"))
+        # 开发与发布固定同一 3.12；初次交付及同树重试应直接复用开发验收。
         self.counter.write_text('')  # 独立统计发布执行，不把真实开发验收算作发布验收。
         bare = self.remote(self.base)
         gh = self.area / 'hotfix-gh'
@@ -628,7 +621,7 @@ else: sys.exit(2)
         self.assertEqual(2, first.returncode, first.stderr)
         self.assertEqual('waiting_for_manual_merge', json.loads(first.stdout.splitlines()[-1])['status'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
         commit = self.merge()
         self.git('push', '-q', 'origin', commit + ':refs/heads/main')
         state.write_text(json.dumps(dict(state='MERGED', head=self.head, merge=commit)))
@@ -662,7 +655,7 @@ os.execv(path,[path]+args)
         self.assertEqual('', data['tag'])
         self.assertEqual('', self.git('tag', root=bare))
         self.assertEqual(commit, self.git('rev-parse', 'develop', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
     def test_merged_hotfix_missing_evidence_does_not_run_tests(self):
         bare, state = self.hotfix_fixture()
@@ -670,11 +663,12 @@ os.execv(path,[path]+args)
         commit = self.merge()
         self.git('push', '-q', 'origin', commit + ':refs/heads/main')
         state.write_text(json.dumps(dict(state='MERGED', head=self.head, merge=commit)))
-        self.verifier(identity='AO-262').path.unlink()
+        for path in (self.root / '.local/story-gate/evidence').glob('*.json'):
+            path.unlink()
         result = self.hotfix_call()
         self.assertIn('release_verification_required', result.stderr)
         self.assertIn('verify --jira AO-262 --merged-pr 38', result.stderr)
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
         bin_dir = self.area / 'verify-bin'
         bin_dir.mkdir()
@@ -686,19 +680,19 @@ os.execv(path,[path]+args)
         verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--jira', 'AO-262', '--merged-pr', '38'],
                                   cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
         self.route_governance()
         finished = self.hotfix_call()
         self.assertEqual(0, finished.returncode, finished.stderr)
         self.assertEqual('published', json.loads(finished.stdout.splitlines()[-1])['delivery_status'])
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
 
     def test_cross_epoch_hotfix_preserves_independent_review(self):
         bare, _ = self.hotfix_fixture(cross_epoch=True)
         result = self.hotfix_call()
         self.assertNotEqual(0, result.returncode)
         self.assertIn('waiting_for_manual_merge', result.stdout)
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
 
     def test_protected_main_ordinary_hotfix_uses_review_pr(self):
@@ -721,7 +715,7 @@ os.execv(path,[path]+args)
         self.assertEqual('', self.git('tag', root=bare))
         self.assertEqual('', self.git('branch', '--list', 'release/*', root=bare))
         self.assertIn('- 源分支：`develop`', (self.area / 'pr-body').read_text())
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
     def test_hotfix_rework_refreshes_same_pr_without_retesting_unchanged_retry(self):
         bare, state = self.hotfix_fixture(trust=False)
@@ -738,7 +732,7 @@ os.execv(path,[path]+args)
         self.assertEqual(revised, self.git('rev-parse', 'develop', root=bare))
         self.assertIn(f'agentic-ops-fixed-head:{revised}', body.read_text())
         self.assertIn('维护者补充', body.read_text())
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
         self.assertEqual('', self.git('tag', root=bare))
 
@@ -762,7 +756,7 @@ os.execv(path,[path]+args)
         self.shell(setup + call + revised + ' hard true')
         self.assertIn(f'agentic-ops-fixed-head:{revised}', (self.area / 'pr-body').read_text())
         self.assertEqual(revised, self.git('rev-parse', 'develop', root=bare))
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
 
     def test_archive_creation_refuses_concurrent_remote_ref(self):
         commit = self.merge()
@@ -976,7 +970,7 @@ for page in (rows[:100],rows[100:]):
         body = (self.area / 'pr-body').read_text()
         self.assertIn('- Jira 任务：`AO-262`', body)
         self.assertIn(f'<!-- agentic-ops-release:v1.4:{self.base} -->', body)
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
 
     def test_ordinary_candidate_can_choose_manual_review_without_auto_merge(self):
@@ -986,7 +980,7 @@ for page in (rows[:100],rows[100:]):
                    + f'release_submit_review "$PWD" tapstate/agentic-ops v1.4 develop {self.head} hard true')
         self.assertEqual('OPEN', json.loads(state.read_text())['state'])
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
     def test_archive_is_created_at_merge_and_never_moves(self):
         self.verifier().execute('ensure')
@@ -1085,21 +1079,21 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         hotfix_prepared = subprocess.run(['bash', 'internal/release/release.sh', 'prepare', '--jira', 'AO-262'],
                                         cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, hotfix_prepared.returncode, hotfix_prepared.stderr)
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'release/v1.4'))
         self.git('tag', '-d', 'v1.4')
         self.env.pop('PREPARE_OFFLINE')
         self.assertEqual('', self.git('branch', '--list', 'release/v1.4', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
         inspected = subprocess.run(['bash', 'internal/release/release.sh', 'inspect', '--version', 'v1.4'],
                                    cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, inspected.returncode, inspected.stderr)
         self.assertIn('prepare', json.loads(inspected.stdout)['next_command'])
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
         verified = subprocess.run(['bash', 'internal/release/release.sh', 'verify', '--version', 'v1.4'],
                                   cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
         blocked = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4'],
                                  cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertNotEqual(0, blocked.returncode)
@@ -1109,11 +1103,13 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
         record = self.verifier().path
         saved = record.read_text()
         record.unlink()
+        for path in (self.root / '.local/story-gate/evidence').glob('*.json'):
+            path.unlink()
         missing = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--confirm-release'],
                                  cwd=self.root, env=self.env, capture_output=True, text=True)
         self.assertIn('release_verification_required', missing.stderr)
         self.assertFalse(state.exists())
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
         record.write_text(saved)
         result = subprocess.run(['bash', 'internal/release/release.sh', 'submit-for-review', '--version', 'v1.4', '--jira', 'AO-262', '--confirm-release'],
                                 cwd=self.root, env=self.env, capture_output=True, text=True)
@@ -1151,8 +1147,8 @@ else: os.execv({git_bin!r},[{git_bin!r}]+args)
             self.assertEqual('published', json.loads(finished.stdout.splitlines()[-1])['delivery_status'])
         self.assertEqual(commit, self.git('rev-parse', 'v1.4^{}', root=bare))
         self.assertEqual(commit, self.git('rev-parse', 'release/v1.4', root=bare))
-        self.assertEqual(8, self.count())
-        self.assertEqual(8, self.count())
+        self.assertEqual(4, self.count())
+        self.assertEqual(4, self.count())
 
     def governance_gh(self):
         self.ruleset = self.area / 'ruleset.json'
@@ -1328,7 +1324,7 @@ os.execv(path,[path]+args)
         self.assertEqual('synced', json.loads(final.stdout.splitlines()[-1])['develop_sync_status'])
         self.assertEqual(commit, self.git('rev-parse', 'develop'))
         self.assertEqual(commit, self.git('rev-parse', 'main', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
     def test_pr_hotfix_retry_repairs_missing_audit_without_new_merge(self):
         bare, commit = self.merged_hotfix_fixture()
@@ -1347,7 +1343,7 @@ os.execv(path,[path]+args)
         self.assertEqual(self.head, data['head'])
         self.assertEqual(commit, data['merge_commit'])
         self.assertEqual(commit, self.git('rev-parse', 'main', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
     def test_pr_hotfix_retry_does_not_publish_later_develop_commits(self):
         bare, commit = self.merged_hotfix_fixture()
@@ -1366,7 +1362,7 @@ os.execv(path,[path]+args)
         self.assertEqual(commit, data['merge_commit'])
         self.assertEqual(commit, self.git('rev-parse', 'main', root=bare))
         self.assertEqual(later, self.git('rev-parse', 'develop', root=bare))
-        self.assertEqual(4, self.count())
+        self.assertEqual(0, self.count())
 
 
 if __name__ == '__main__':
