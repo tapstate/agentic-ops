@@ -366,6 +366,10 @@ class VerificationTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / 'acceptance.sh'
         target = self.root / 'internal/acceptance.sh'
         target.write_text(source.read_text())
+        for name in ('internal/python-environment.sh', 'bootstrap/python_runtime.py'):
+            dependency = self.root / name
+            dependency.parent.mkdir(parents=True, exist_ok=True)
+            dependency.write_text((source.parents[1] / name).read_text())
         entry = self.root / 'internal/bin/story-gate'
         entry.parent.mkdir(parents=True)
         entry.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')

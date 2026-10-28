@@ -336,8 +336,9 @@ release_verification() {
   (
     # python -m 优先搜索 cwd；--project 只选择 uv 项目，不隔离模块来源。
     cd "$code_root" || exit 1
+    . "$code_root/internal/python-environment.sh" || exit 1
     PYTHONPATH="$code_root" UV_PROJECT_ENVIRONMENT="$code_root/.local/venv/internal" \
-      "${AGENTIC_OPS_UV:-uv}" run --locked --project "$code_root/internal" --python 3.12 \
+      "${AGENTIC_OPS_UV:-uv}" run --locked --project "$code_root/internal" --python "$AGENTIC_OPS_TEST_PYTHON" \
       python -m internal.release.verification "$@"
   )
 }
@@ -421,6 +422,8 @@ release_story_gate_trust_root_changes() {
     adapters/runtime.py \
     adapters/tools \
     internal/bin/story-gate \
+    internal/python-environment.sh \
+    bootstrap/python_runtime.py \
     internal/pyproject.toml \
     internal/uv.lock \
     internal/story_gate \

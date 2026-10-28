@@ -90,10 +90,11 @@ source_pool="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.
 ao_stage="同步维护依赖与接线"
 printf '[AgenticOps][配置][进行] %s\n' "$ao_stage" >&2
 mkdir -p "$product_root/.local/venv" "$product_root/.local/cache"
+python3 "$product_root/bootstrap/python_runtime.py" prepare --root "$product_root" >/dev/null
 chmod 0700 "$product_root/.local" "$product_root/.local/venv" "$product_root/.local/cache"
 UV_CACHE_DIR="$product_root/.local/cache/uv" \
 UV_PROJECT_ENVIRONMENT="$product_root/.local/venv/internal" \
-  uv sync --locked --project "$product_root/internal"
+  uv sync --locked --project "$product_root/internal" --python "$AO_PRODUCT_PYTHON"
 
 # shellcheck source=internal/release/lib/development-workflow.sh
 . "$product_root/internal/release/lib/development-workflow.sh"

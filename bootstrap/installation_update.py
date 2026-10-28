@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bootstrap import product_state, station_compatibility, product_access
 from workflow.git_environment import git_environment
+from bootstrap import python_runtime
 
 INSTALL_PATHS = ('adapters', 'bootstrap', 'contracts', 'docs', 'gate', 'policies', 'projects', 'workflow')
 GIT_OPERATIONS = {'fetch': '下载版本材料', 'cat-file': '核验本地对象', 'ls-tree': '读取版本文件清单',
@@ -288,7 +289,7 @@ def automatic_protocol(root, reference):
     for path in paths:
         if path.endswith('.py') and path.startswith(('bootstrap/', 'workflow/', 'gate/', 'projects/')) and '/tests/' not in path:
             source = git(root, 'show', reference + ':' + path)
-            if '__main__' in source and path != 'bootstrap/product_access.py':
+            if '__main__' in source and path not in ('bootstrap/product_access.py', 'bootstrap/python_runtime.py'):
                 if '_AO_PRODUCT_ENTRY' not in source or 'python_entry' not in source:
                     raise ValueError('版本入口尚未接入租约：' + path)
     for path in ('agenticops', 'bootstrap/update.sh', 'bootstrap/rollback.sh', 'bootstrap/setup.sh', 'bootstrap/station-init.sh'):
@@ -299,10 +300,16 @@ def automatic_protocol(root, reference):
 def execute(root, args):
     with product_access.lease(root, 'shared' if args.check else 'exclusive'), lifecycle_lock(root, args.mode):
         document, packet = prepare(root, args)
+        # 只为声明了本运行环境能力的目标准备依赖，保留旧目标恢复语义。
+        needs_python = bool(git(root, 'ls-tree', packet['target_ref'], '--', 'bootstrap/python_runtime.py'))
+        if needs_python:
+            python_runtime.select(root)
         if args.check:
             print('[AgenticOps][更新][完成] 预检通过，本次未执行版本切换', file=sys.stderr)
             return packet
         original, target = packet['original_ref'], packet['target_ref']
+        if needs_python:
+            python_runtime.prepare(root)
         if product_access.inherited(root, 'exclusive') is None:
             raise ValueError('版本切换前产品独占租约丢失')
         print('[AgenticOps][更新][进行] 准备安装范围并切换产品版本', file=sys.stderr)
