@@ -29,8 +29,8 @@ metadata:
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
 5. 修改仓通过 repository add --repo <repo> --work-branch <branch> --base-branch <PR目标> --scope <范围> --verification <方式> --operation-id <新op-id> --expected-revision <revision> --expected-run-id <run> --issue-key <issue> --dir <station> 登记并准备工作分支；只允许冻结基线内仓库。范围变化使旧授权失效。
 6. 续办原 run 不重写已有基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。追加当前 Profile 允许的可选仓库时，使用[同周期方案返工](../../../../docs/usage/task-authorization.md#同周期方案返工)，保留成果并重新确认受影响方案和授权；更换工程版本或超出支持范围时须归档清理后重接，不能偷改冻结清单。
-7. 接管成功并核验基线后，按[四项接管标记](../../../../docs/usage/quality-checkpoints.md#四项接管标记)先读取 Jira 四项字段和当前连接登录用户，执行 jira_watermark prepare、原生整体写入、complete 回读；字段 ID 取 Profile，不按显示标题定位。既有标记先核实旧 run 处置，同一 run 保留原版本和时间；未知结果先核对原操作。
-8. 四项标记 verified 后，在本轮主动处理 `takeover_comment`，不等待 Q1 或研发提醒。按[摘要发送与防重](../../../../docs/usage/quality-checkpoints.md#摘要发送与防重)取得稳定 id 和正文，prepare_write 携带写前新回读的 takeover_snapshot，原生发布后核验评论 ID、正文和作者。已有授权直接复用，已验证不重发，未知评论只回读原正文。标记失败暂停摘要；同步异常保留待办，继续无依赖研发。进入 task_intake 后按 Project status_sync 节点处理状态，接管成功不是停点。
+7. 源码准备并核验基线后，按返回的 `takeover.next_step` 和 `sync_actions` 接续，按[四项接管标记](../../../../docs/usage/quality-checkpoints.md#四项接管标记)先读取 Jira 四项字段和当前连接登录用户，执行 jira_watermark prepare、原生整体写入、complete 回读；字段 ID 取 Profile，不按显示标题定位。既有标记先核实旧 run 处置，同一 run 保留原版本和时间；未知结果先核对原操作。
+8. 四项标记 verified 后，在本轮主动处理 `takeover_comment`，不等待 Q1 或研发提醒。按[摘要发送与防重](../../../../docs/usage/quality-checkpoints.md#摘要发送与防重)取得稳定 id 和正文，prepare_write 携带写前新回读的 takeover_snapshot，原生发布后核验评论 ID、正文和作者。已有授权直接复用，已验证不重发，未知评论只回读原正文。标记失败暂停摘要；同步异常保留待办，继续无依赖研发。进入 task_intake 后按 Project status_sync 节点处理状态，源码准备不是接管完成；本轮结束汇总 `takeover.remaining` 和原因，未完成显示“接管待收尾”。
 
 ## 清理与归档
 
