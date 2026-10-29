@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""源码处置必须明确；拒绝未保全删除，明确放弃后整区删除。"""
+"""源码处置必须明确；拒绝未保全归位，明确放弃后恢复基线并保留仓库。"""
 import sys
 from pathlib import Path
 import unittest
@@ -28,7 +28,10 @@ class DevelopmentPreservationTests(unittest.TestCase):
         request['expected_plan_digest'] = station_cleanup.plan(self.ws)['digest']
         result = station.execute(self.ws,'clean',task['issue_key'],task['run_id'],task['_revision'],'op-git-preserve',request)
         self.assertTrue(result['cleanup_result']['complete'], result)
-        self.assertFalse(repo.exists())
+        self.assertTrue((repo / '.git').is_dir())
+        self.assertEqual(self.git(repo, 'rev-parse', 'HEAD'), task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'])
+        self.assertEqual(self.git(repo, 'status', '--porcelain'), '')
+        self.assertTrue((repo / 'file.txt').exists())
         self.assertIsNone(task_store.read_task(self.ws))
 
 

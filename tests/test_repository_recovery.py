@@ -54,8 +54,12 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
 
     def test_partial_clone_can_be_cleaned_after_disposition(self):
         task = self.partial()
-        self.exit(task)
-        self.assertFalse(self.repo.exists())
+        head = self.git(self.repo, 'rev-parse', 'HEAD')
+        result = self.exit(task)
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertTrue((self.repo / '.git').is_dir())
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
+        self.assertEqual(self.git(self.repo, 'status', '--porcelain'), '')
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_partial_clone_unknown_file_preserved(self):
@@ -96,7 +100,10 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         self.assertEqual(self.git(self.repo, "rev-parse", "fix/retained"), head)
         result = self.exit(task)
         self.assertTrue(result["cleanup_result"]["complete"], result)
-        self.assertFalse(self.repo.exists())
+        self.assertTrue((self.repo / '.git').is_dir())
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.sha)
+        self.assertEqual(self.git(self.repo, 'status', '--porcelain'), '')
+        self.assertEqual(self.git(self.repo, 'for-each-ref', '--format=%(refname)', 'refs/heads'), '')
 
 
 if __name__ == "__main__":
