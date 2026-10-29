@@ -34,6 +34,9 @@ def plan_problems(rules, ctx):
             from workflow import test_coverage
             key += (row["level"],)
             errors.extend(test_coverage.plan_case_problems(row))
+            from workflow import it_manual
+            if it_manual.config(rules):
+                errors.extend(it_manual.plan_problems(row, it_manual.config(rules)))
         if key in seen:
             errors.append("验证方案范围重复：" + " / ".join(key))
         seen.add(key)
@@ -272,7 +275,8 @@ def record(model, p, ctx, rules=None):
     revisions, scope = binding(p, ctx)
     value = {"data": copy.deepcopy(p), "versions": revisions, "bindings": scope}
     contract = (rules or {}).get("verification_plan")
-    if contract and p["kind"] in contract["kinds"]:
+    from workflow import it_manual
+    if contract and (p["kind"] in contract["kinds"] or (p['kind'] == 'local' and it_manual.config(rules))):
         from workflow import quality
         value["plan_digest"] = quality.digest(plan_rows(rules, ctx))
     if p["kind"] == "ci":
@@ -290,6 +294,11 @@ def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=Tru
         return result
     p = entry["data"]
     contract = (rules or {}).get("verification_plan")
+    from workflow import it_manual
+    if kind == 'local' and it_manual.config(rules):
+        from workflow import quality
+        if entry.get('plan_digest') != quality.digest(plan_rows(rules, ctx)):
+            result.append('%s 的手动验证方案已变化，重新核对用例和 Jira 关联' % repo)
     if contract and kind in contract["kinds"]:
         from workflow import quality
         if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
@@ -305,11 +314,21 @@ def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=Tru
                 result.append("%s 的依赖 Jar 已变化或缺失，需重验" % repo)
     for item in p.get("results", []):
         if item["result"] != "PASS" and not item.get("decision"):
+            policy = it_manual.config(rules)
+            row = next((r for r in (plan_rows(rules, ctx) or []) if r['repository'] == repo
+                        and r['scope'] == item['scope'] and r['level'] == item.get('level')), None)
+            if kind == 'ci' and policy and row and it_manual.required(row, policy):
+                continue  # 手动替代由 Q4/PR Ready 核验；自动化保留 NOT_RUN，不伪造缺测决定。
             result.append("%s %s：%s 尚未解决或明确处置；请求研发确认具体缺口及后续动作，确认不等于 PASS" % (repo, item["scope"], item["result"]))
     for item in p.get("items", []):
         if item["status"] == "pending":
             result.append("%s 审查意见 %s 尚未处理" % (repo, item["id"]))
     return result
+
+
+def unchanged_repository(state):
+    return bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(state.get("base_sha", "")))
+                and state.get("live_revision") == state["base_sha"])
 
 
 def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
@@ -320,6 +339,11 @@ def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
     result = []
     for repo in ctx["repositories"]:
         for kind in kinds:
+            state = ctx["repositories"][repo]
+            if (kind in (rules or {}).get("change_only_verification", [])
+                    and unchanged_repository(state)):
+                # 只读核实完整 SHA 且无工作树修改；源码变化后自动恢复原检查。
+                continue
             entry = model.get("verification", {}).get(repo, {}).get(kind)
             if not entry:
                 result.append("%s 缺少 %s 验证材料" % (repo, kind))

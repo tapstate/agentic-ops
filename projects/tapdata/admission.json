@@ -195,6 +195,63 @@
         }
       ],
       "optional_facts": []
+    },
+    "general_task": {
+      "title": "通用事项处理",
+      "doc": "projects/tapdata/admission/general-task.md",
+      "required_facts": [
+        {
+          "key": "acceptance_criteria",
+          "label": "验收标准",
+          "source": "Jira 描述「验收标准」章节",
+          "example": "关键用户场景完成验证，新增行为有自动化测试覆盖",
+          "note": "已明确功能范围的验收场景；不承担需求发现与需求任务规划",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「验收标准」：完成后按什么场景/指标判断可验收。"
+        },
+        {
+          "key": "target_repo",
+          "label": "目标仓库",
+          "source": "Jira 组件/标签/项目仓库映射",
+          "example": "tapdata/tapdata",
+          "note": "本次应修改或检查的仓库；必须能在 profile.json 中查到分支映射",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "validate": "known_repository",
+          "supplement": "请补充「目标仓库」：本次改动落在哪个仓库（owner/repo）。"
+        },
+        {
+          "key": "verification_method",
+          "label": "验证方式",
+          "source": "Jira 描述或研发确认的验证方案",
+          "example": "执行对应模块单元测试和必要手工验证",
+          "note": "记录本次实际验证方法和来源；仅在实时字段可编辑时回填 Jira，不要求 customfield_10049 可用",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请确认本次必须执行的测试或验证；可由研发提供，不要求自动回填 Jira 字段。"
+        }
+      ],
+      "optional_facts": [
+        {
+          "key": "scope_boundary",
+          "label": "范围边界",
+          "source": "描述或沟通记录",
+          "note": "明确不做什么，避免范围蔓延"
+        },
+        {
+          "key": "implementation_plan",
+          "label": "实施方案",
+          "source": "源码分析及研发确认",
+          "note": "JSON 对象，包含 objective、changes、acceptance、risks、rollback；在 Q2 确认前记录，验收场景与检查项逐项对应"
+        }
+      ],
+      "quality_profile": "quality-general.json",
+      "stage_guidance": {
+        "implementation": "按已确认方案和授权实施并验证；保留工程质量检查和真实成果，按实际变更交付，评论上报关键结论。",
+        "pr_review": "完成适用检查点及验收后推进；Jira 仅在当前类型有已核实映射时同步，不借用缺陷或故事转换。",
+        "ci_validation": "核验实际代码变更的 PR/CI 和审查，合并须另行授权；无代码变化不制造提交，按真实成果验收。Jira 未映射状态保持原状，以评论记录进展。"
+      }
     }
   },
   "on_missing": {

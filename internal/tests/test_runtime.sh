@@ -48,8 +48,10 @@ run_general_suite() {
   run_product tests/test_task_update.py
   run_product tests/test_checkpoints.py
   run_product tests/test_quality.py
+  run_product tests/test_it_manual.py
   run_product tests/test_issue_versions.py
   run_product tests/test_jira_status.py
+  run_product tests/test_issue_routing.py
   run_product tests/test_jira_watermark.py
   PYTHONDONTWRITEBYTECODE=1 "$product_python" -m unittest discover \
     -s "$repo_root/projects/tapdata/tests" -p 'test_*.py'

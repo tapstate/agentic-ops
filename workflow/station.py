@@ -27,7 +27,20 @@ def _project(base):
 def takeover(base, request, operation_id, expected_revision):
     with task_store.task_state_lock(base):
         issue = task_store.validate_issue_key(request["issue_key"])
-        project_rules.validate_project_issue(project_rules.load_profile(station=base), issue)
+        project_profile = project_rules.load_profile(station=base)
+        project_rules.validate_project_issue(project_profile, issue)
+        previous = operations.read(base)
+        routing = None
+        # 已开始的旧操作按原请求恢复；不向旧请求补字段或重算摘要。
+        if project_profile.get("jira", {}).get("routing") and not (
+                previous and previous["operation_id"] == operation_id and "jira_snapshot" not in request):
+            from workflow import issue_routing
+            routing = issue_routing.resolve(project_profile, issue, request.get("jira_snapshot"))
+            if project_rules.scan_sensitive(project_rules.load_admission(station=base),
+                                            json.dumps(request["jira_snapshot"], ensure_ascii=False)):
+                raise ValueError("类型快照包含敏感内容；仅提供必要身份字段和脱敏来源")
+            if request["task_class"] != routing["task_class"]:
+                raise ValueError("真实 Jira 类型要求 %s，拒绝指定其它流程" % routing["task_class"])
         project_rules.class_spec(project_rules.load_admission(station=base), request["task_class"])
         project = _project(base)
         profiles = json.loads((project / "engineering-profiles.json").read_text())
@@ -64,6 +77,8 @@ def takeover(base, request, operation_id, expected_revision):
                     "stage": "waiting_takeover", "outcome": "in_progress", "facts": {"station_contract": 3}, "history": [],
                     "pending": None, "engineering_baseline": {"status": "resolving"},
                     "task_repositories": {}, "terminal_proof": None, "archive_ref": None}
+            if routing is not None:
+                task["facts"]["jira_routing"] = routing
             runtime = station_directories.path_at(base, station_layout.station_name(base, "task-runtime"))
             if any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空")

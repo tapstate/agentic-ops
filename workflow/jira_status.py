@@ -70,6 +70,22 @@ def config(base, task):
     result = profile.get("jira", {}).get("status_sync")
     if not isinstance(result, dict) or result.get("schema_version") != 1:
         raise ValueError("当前 Project 未配置 Jira 状态同步")
+    routing = task.get("facts", {}).get("jira_routing")
+    default_class = profile.get("jira", {}).get("routing", {}).get("default_task_class")
+    if default_class and task["task_class"] == default_class:
+        if not routing or routing["task_class"] != task["task_class"]:
+            raise ValueError("通用流程缺少真实 Jira 类型绑定")
+        override = result.get("by_issue_type_id", {}).get(routing["issue_type_id"])
+        if override is None:
+            return dict(result, attempts={}, field_mappings={})
+        if (not isinstance(override, dict) or not isinstance(override.get("attempts"), dict)
+                or override.get("issue_type_ids") != [routing["issue_type_id"]]):
+            raise ValueError("通用状态映射必须绑定精确 Jira 类型 ID")
+        for rule in override["attempts"].values():
+            if (not isinstance(rule, dict) or not str(rule.get("transition_id", "")).isdigit()
+                    or not rule.get("from") or not rule.get("to") or not rule.get("local_stages")):
+                raise ValueError("通用状态映射须明确来源、目标状态、适用阶段和转换 ID")
+        return {"schema_version": 1, "field_mappings": {}, **override}
     if task["task_class"] not in result.get("task_classes", []):
         # 可采集和人工交接不代表新增自动转换权限。
         from workflow import jira_collect
@@ -230,8 +246,14 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
     task = task_store.read_task(base, issue_key)
     task_store.require_development(base, task)
     rules = config(base, task)
+    from workflow import issue_routing
+    issue_routing.check_task(project_rules.load_profile(station=base), task,
+                             snapshot.get("issue", {}).get("fields", {}))
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
+        if task.get("facts", {}).get("jira_routing") and not trigger.startswith("native:"):
+            return {"trigger": trigger, "outcome": "skipped", "reason": "transition_not_mapped",
+                    "guidance": [{"guidance": "当前类型未映射此状态转换；评论上报实际进展，继续无依赖工作。"}]}
         if not trigger.startswith("native:"):
             raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
         transition = next((t for t in snapshot.get("transitions", []) if "native:" + str(t.get("id")) == trigger), None)

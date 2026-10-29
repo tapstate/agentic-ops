@@ -17,6 +17,9 @@ def config(base, task):
         raise ValueError("项目缺少 Jira 转换采集配置")
     path = project_rules.project_root(root, project) / name
     value = json.loads(path.read_text())
+    default_class = profile.get("jira", {}).get("routing", {}).get("default_task_class")
+    if value.get("schema_version") == 1 and default_class and task["task_class"] == default_class:
+        return value, {"fields": {}, "transitions": []}
     if value.get("schema_version") != 1 or task["task_class"] not in value.get("task_classes", {}):
         raise ValueError("Jira 采集配置不支持当前任务类型")
     return value, value["task_classes"][task["task_class"]]

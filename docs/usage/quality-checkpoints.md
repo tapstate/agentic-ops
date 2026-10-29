@@ -103,7 +103,7 @@ python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件>
 
 使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定源码版本与仓库登记；不是新任务类型或执行引擎。新 source_sync 仅绑定所属仓，local/ci/review 仍绑定全部任务仓。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
-TapData 的 [IT（Integration Test）](../glossary.md) 指 TapData 集成测试。功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tests` 写入 `implementation_plan` 或 `fix_plan`，不增加确认轮次。每项给出 repository、scope（稳定的模块/行为范围）、level（从 Wiki 和源码判断的单一级别，如 `L1`；不适用写 `N/A`）、knowledge_ref（文章路径）、rationale（源码判定依据）、case_strategy（该场景的覆盖思路）、cases（逐用例计划）和 execution_plan（入口、环境、定向调试、模块回归、CI 触发与报告验证安排）。每个任务仓库至少一项；同仓库同 scope 涉及多个级别时拆行，`repository + scope + level` 不重复，不再填写 `L1,L2`。级别定义查询 Wiki 并用任务源码核验，工具不判断语义或固化 Wiki 分级。
+TapData 的 [IT（Integration Test）](../glossary.md) 指 TapData 集成测试。功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tests` 写入 `implementation_plan` 或 `fix_plan`，不增加确认轮次。每项给出 repository、scope（稳定的模块/行为范围）、level（从 Wiki 和源码判断的单一级别，如 `L1`；不适用写 `N/A`）、knowledge_ref（文章路径）、rationale（源码判定依据）、case_strategy（该场景的覆盖思路）、framework_supported（框架是否支持）、framework_ref（Wiki、方案与任务源码核验依据）、cases（逐用例计划）和 execution_plan（入口、环境、定向调试、模块回归、CI 触发与报告验证安排）。每个任务仓库至少一项；同仓库同 scope 涉及多个级别时拆行，`repository + scope + level` 不重复，不再填写 `L1,L2`。级别定义查询 Wiki 并用任务源码核验，工具不判断语义或固化 Wiki 分级。
 
 每行的 `cases` 列出 `id`、`change`（reuse/modify/new，分别表示复用/修改/新增）、`reason`；复用与修改还提供 `baseline_ref`，引用原用例位置、版本及断言依据。用例 id 复用既有引用或质量 item 标识，在该场景/级别内唯一，不建立另一套编号台账。同一级别允许混合三类用例，不能只用一段文字把整个任务归为“新增测试”。适用级别必须列出用例；`N/A` 使用空 cases 并说明不适用依据，框架不支持不能写成不适用。
 
@@ -124,37 +124,59 @@ results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告�
 
 没有 CI 运行时，CI 材料使用 `run_status=not_triggered`、当前完整 `head_revision`，`source_ref` 引用 PR/触发配置的真实回读，所有 results 保持 `NOT_RUN`，不得填写 run_ref、attempt、checkout_ref。已有运行但未执行集成测试仍使用该运行的真实信息；未触发、跳过、零用例、缺报告分别写入 report_ref 引用的缺口分析，使用 NOT_RUN/SKIPPED/UNKNOWN，不能借其它 Checks 成功填写 PASS。完全未触发时仍需记录真实观察；是否提审按下述 PR Ready 具体 Checks 例外决定，不能改写为 PASS。
 
-发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。编写缺口与执行缺口分别处理，按下述统一规则创建或复用 GitHub Issue；Issue 链接不充当 `proof.source=user_message`。
+发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。TapData IT 编写及执行闭环按下节处理；缺口决定仍保留原结果，不能代替要求的自动或手动验证。
 
 ### 测试编写缺口与 PR 总结
 
-TapData 统一规则：判断需要编写但尚未编写的测试，必须由研发显式确认处置；其中 L1 及以上，或因框架尚不支持而无法编写的缺口，必须说明原因，在对应 GitHub 仓库创建或复用 Issue，并与 PR 双向关联。同一缺口只维护一个 Issue。判断来自 Wiki 和任务源码；`case_coverage.issue_min_level=1` 与 `issue_when_unsupported=true` 由项目质量配置声明，Workflow 只核对结构和确定性条件，不判定测试语义。
+TapData 功能与缺陷统一按需求、实施方案、Wiki 和目标版本源码判断测试级别、框架能力及逐用例覆盖。Wiki 描述不等于代码已支持；没有用例不等于框架缺失；存在用例文件不等于断言覆盖或执行通过。资料冲突时做最小验证，关键依据不明保持待核实，不能把临时环境故障归为框架不兼容。框架与覆盖判断由 Agent 分析，Workflow 检查计划、证据、关联和版本，不认证外部报告真实性或语义去重质量。
 
-复用每项 CI `results` 的 `case_coverage`：`status` 为 `covered`（所有计划用例已完成）、`missing`（存在应写未写）或 `not_applicable`；`reason` 说明编写情况及覆盖依据，`framework_supported` 为布尔值。`cases` 与该行计划的用例 id 精确对应，不能遗漏、重复或借用其它级别用例；不再使用不区分类别的 case_refs 列表。
+```mermaid
+flowchart TD
+    A[Q2 确定应测场景及逐用例计划] --> B{框架支持？}
+    B -- 支持 --> C[复用、修改或新增自动化用例并执行]
+    B -- 不支持或当前 L3 --> D[关联 Jira Manual Test 与质量检查项]
+    D --> E[完成手动验证并按现有验收确认结果]
+    D --> F[按场景去重，复用或新建兼容任务给 Leon]
+    F --> G[关联手动用例及业务任务，回读核验]
+    E --> H[Q4 检查手动证据及 Jira 关联]
+    G --> H
+    C --> I[CI 核对逐用例自动化结果]
+    H --> J[PR Ready 汇总自动覆盖、手动结果和 Jira 跟进]
+    I --> J
+```
 
-| 逐用例实绩字段 | 核验方式 |
+项目 `verification_plan.case_coverage.mode=jira_manual` 启用当前合同，`manual_levels` 声明当前不支持的级别（TapData 为 L3），`assignee_account_id` 声明 Leon 的已核实账号，`jira_base_url` 声明站点，`acceptance_checkpoint` 复用 Q4。L1/L2 不支持与当前所有 L3 必须采用手动路径。功能任务正常自动化路径仍不强制独立 Jira Test；手动路径始终需要。
+
+Q2 每个适用级别列出逐用例计划。框架不支持的每个 case 通过 `manual_item` 引用已有质量 item，方式为 `manual`、本仓修复后 Q4、预期 PASS；可先使用 proposed 创建意图，不要求未来的 Test key 和执行结果。创建或关联真实 Manual Test 后，补入 item 的 `case_ref`（Jira key）及 `case_version`，沿现有 item/execute/decide 记录当前完整 SHA 的执行证据与真实用户确认。没有手动执行、失败、跳过、风险接受均不等于手动闭环完成；继续无依赖工作，只停止受影响验收。
+
+兼容任务先按被测行为、前置条件、预期结果和缺失能力检索去重；已有任务覆盖同一场景则复用，否则新建。核实分派给 Leon，说明框架缺失原因，关联全部对应 Manual Test 和原业务任务。跨仓可共享同一兼容任务，不逐仓建卡。关闭的历史任务须核查能力是否真正交付；泛化的 L3 建设任务不自动等于覆盖具体场景。外部写入未知先回读，不重复创建。取消每仓 GitHub Issue 及 PR/Issue 双向链接要求，历史 Issue 不自动删除或关闭。
+
+Manual Test 以内容完整性为要求，不强制标题、Markdown 排版或 Jira 字段布局。定义必须说明测试目标、前置条件、操作步骤、输入数据、预期结果和必要清理；没有特殊数据或清理时明确写“无”。Agent 从 Jira 原生字段或正文逐项核对，`definition_refs` 保存各项对应的可回查来源位置（goal、preconditions、steps、input_data、expected_result、cleanup），无需另抄整份用例。检查点核对来源完整性，内容是否足以执行由 Agent 与研发评审，不能用非空字段冒充语义验证。
+
+创建 Manual Test 前读取当前 Jira 操作用户，创建请求显式使用该用户的 accountId 作为 Assignee，创建后回读核验；不得依赖 Jira 默认分派，也不得把手动用例默认交给 Leon。分派不一致或写入结果不明确时，先核对并修复原任务，再继续依赖步骤。复用已有用例时保留其负责人；Leon 负责的是兼容跟进任务。该创建规范由 Agent 使用原生 Jira 工具执行，本地检查点不冒充 Jira 创建接口。
+
+每次执行的执行人、时间、环境、代码版本、实际结果和证据保存在执行记录中，通过既有 execute/decide 关联用例与确认，不回写用例定义。用例版本应引用定义版本或定义内容摘要，不使用会随评论、执行或负责人变更而变化的整个 Jira updated 时间；只有定义发生变化才更新用例版本，并重新核验受影响的执行证据。重复执行追加记录，保留历史结果。
+
+Jira 回读沿现有 `verification kind=local` 保存 `it_followups`，每个元素对应唯一 `scope + level`，包含 `tests` 和 `task`。它属于当前 run 的验证证据，不是新任务台账；方案或代码变化后重新核验，归档和恢复沿现有质量材料处理。
+
+| 回读对象 | 必需内容 |
 |---|---|
-| id | 对应本场景/级别计划中的用例；复用、修改、新增从计划读取，不重复登记分类 |
-| status | written 表示本次所需内容已完成；missing 表示尚未完成，不能以原文件存在代替修改完成 |
-| case_ref | written 必填，引用实际用例位置与版本 |
-| change_ref | 修改或新增且 written 时必填，引用已完成差异或对应提交；仅有计划不算完成 |
-| result、report_ref | 逐用例真实执行结果及报告定位，未运行引用缺失原因；missing 只能是 NOT_RUN |
+| tests 每个手动用例 | key、url、test_type=Manual、case_version、definition_refs（六项定义内容的核验来源）、business_issues（关联的业务 key）、source_ref、observed_at（带时区） |
+| task 兼容任务 | key、url、assignee_account_id、reason（缺失原因）、dedup_ref（检索与场景比对来源）、manual_tests（实际关联 Test key）、business_issues、source_ref、observed_at |
 
-级别 PASS 要求本级所有用例均已完成且 PASS，并有有效报告计数；部分通过不能将本级写为 PASS。covered 只表示用例已完成，不证明执行成功。not_applicable 对应 `N/A` 和空 cases，不能登记 PASS。missing 的编写 `decision` 使用 reason/uncovered/level/follow_up/proof，精确绑定场景和级别；执行缺口仍在结果的独立 decision 中处置。识别缺口立即展示场景、级别、未完成用例及风险，复用既有确认环节取得研发决定；无决定可先保存原始材料，但不能作为已处置证据。
+上述列表必须来自原生 Jira 回读，不能把拟写入内容当作事实。Q4 集中核对用例映射、当前版本手动 PASS 和 accept、Jira 关联、负责人及去重依据；同场景重复回读拒绝，多个场景可引用同一实际兼容任务。恢复只复用仍有效材料，不重复建卡。Q2 不要求未来执行和回读；Q4 不要求未来 CI 材料。缺项、不可用和未知写入保持具体待办。
 
-例如同一行为的 L1 用例已完成且通过、L2 新增用例尚未编写，应保存两行：L1 为 covered/PASS，L2 为 missing/NOT_RUN。L2 单独记录编写及执行处置、所需 Issue；即使研发接受延期，L2 仍不是 PASS。L1 内可以同时包含复用正常路径、修改边界断言和新增异常路径，三条用例分别提供完成与执行证据。
+CI `case_coverage` 继续描述自动化覆盖，cases 与本场景/级别计划 id 精确对应。框架支持时，所有用例须 written，提供 case_ref 和真实报告；新增/修改另需 change_ref。测试闭环完成要求实际 PASS 及有效计数。框架不支持时保留 missing/NOT_RUN，所有自动化用例均为 missing/NOT_RUN；手动证据由既有质量 item 引用，不将自动化改成 PASS，也不额外索要一次缺测决定。N/A 使用空 cases，不得冒充 PASS。框架支持但未写仍须补齐。用例已写但因环境或 CI 问题未完成时，保留研发对当前场景、级别的明确执行缺口 decision，允许按既有流程继续提审，但 PR 必须标明“测试闭环未完成”及实际结果、原因和后续处置。原始 FAIL 只有报告明确归因为环境问题（result.failure_kind=environment）才适用该例外；断言失败或归因未知不能当作环境/CI 未完成例外。决定不能替代手动路径的验证，也不将非 PASS 改写为 PASS。非 IT 质量处置与 PR Checks 具体例外仍沿原合同。
 
-满足统一规则的 missing 另提供 `issue={"repository":"owner/repo","url":"https://github.com/owner/repo/issues/123"}`。先检索、优先复用；Issue 记录所需测试或框架能力、具体未覆盖场景、级别、原因、风险与后续安排，创建到承载补测代码或所缺框架能力的仓库。跨仓只引用对应实际仓库，不为每个 PR 重复建票。PR 和 Issue 正文互放完整普通链接，不使用 Closes/Fixes 等自动关闭关联，原功能合并不能提前关闭补测工作。外部创建或更新结果未知先回读原操作，不重复创建。
-
-已写但未运行沿用执行结果及其 decision，不要求仅因环境故障创建编写缺口 Issue；已有充分用例覆盖也不因未新增用例而建票。建票不等于研发接受缺测，接受缺测不等于 PASS，不豁免既有失败修复、选定用例验收或 PR Checks。
+例如 L1 自动化通过、L3 手动通过且兼容任务已交 Leon：两行分别保留 L1 covered/PASS 和 L3 missing/NOT_RUN；PR 同时显示 L3 的手动用例、版本、PASS 证据与兼容 Jira 链接。框架兼容任务后续补齐自动化并回归后关闭，原业务合并不自动关闭它。
 
 PR 创建和每次更新正文都包含可见的 `AgenticOps 版本 XXX`。版本通过 `python3 <agenticops-root>/bootstrap/product_version.py --product-root <绑定的安装根>` 读取，不使用业务版本、接管时旧版本或人工猜值。安装版本无法核实时保留待同步，不填占位版本冒充完成。
 
-PR Ready 复用 `interactions/pr-ready-input.json`：`pull_requests` 每条回读增加 `body`，保留 repository、number、url、headRefOid、state、isDraft、source_ref、observed_at；允许 Draft 通过预检，真正 ready 仍要求原生退出 Draft。顶层 `issues` 保存去重后的 Issue 回读，每条包含 repository、url、body、source_ref、observed_at（带时区时间）。由 Agent 通过原生 GitHub 读取并保留来源，不把自行拼造的正文当回读。
+PR Ready 复用 `interactions/pr-ready-input.json`：`pull_requests` 每条回读包含 body、repository、number、url、headRefOid、state、isDraft、source_ref、observed_at；允许 Draft 通过预检，真正 ready 仍要求原生退出 Draft。不再需要顶层 GitHub issues 回读列表；Jira 兼容关联使用上述本地验证材料。
 
-`pr_ready.py` 的 `required_pr_summaries` 返回逐仓基于当前 CI 材料生成的可见 Markdown 总结，包含完整 Head、各级别与依据、逐用例复用/修改/新增及完成证据、各级别和逐用例执行结果、缺口决定及 Issue 链接。将对应片段原样放入 PR 正文，保留其它人工内容，沿上述正文发布流程写入并回读，再更新同一个提审输入。没有完整材料的 Draft 先披露待办，最终提审前补齐；不得将总结藏在注释或代码块中。预检核对当前版本、总结和 Issue 反向 PR 链接；Head、方案或 CI 观察变化沿既有绑定使旧材料失效，重新核对受影响决定和总结，不重新运行未受影响的测试。摘要比较不认证外部真实性或语义，Agent 仍须核实来源、新鲜度、对应仓库及实际覆盖。
+`pr_ready.py` 的 `required_pr_summaries` 返回当前逐仓可见 Markdown 总结：当前 Head、框架支持与依据、逐用例复用/修改/新增、自动化完成与执行情况；手动路径另展示手动用例版本、实际结果、证据及兼容 Jira 链接。原样纳入 PR 正文并回读，不隐藏在注释或代码块。缺完整材料的 Draft 如实披露待办；最终提审重新核验手动闭环和自动化报告。代码、方案、用例或执行变化使受影响材料和确认失效；CI 观察变化沿已有规则处理，不重复运行未受影响测试。
 
-本次增加单一级别独立验收、逐用例计划与实绩、编写材料及提审条件，将工位 epoch 提升为 34。历史质量事件仍按记录时规则重放，不补造编写确认或 Issue；旧工位先按原版结束任务、归档释放或清理并显式 purge，再切换版本重建，不在线迁移活动任务。
+历史事件仍使用事件内原规则重放，包括旧 GitHub Issue 合同，不改写历史 PASS 或补造关联。当前项目检查使用新合同；旧计划缺 framework_supported/framework_ref、缺手动映射或回读时由 Agent 核实后通过既有入口补齐，并重新确认受影响方案与证据，不手改日志、不因本变更强制重建 run。状态采用遵循工位功能校验合同；本功能未改变数据目录或清理接口。
 
 跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
 
@@ -302,7 +324,7 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
   "current_user": {"accountId": "当前 Jira 用户 accountId"},
   "issue": {"key": "TAP-123", "fields": {"status": {"id": "状态 ID", "name": "Analyzed"}, "assignee": {"accountId": "当前 Jira 用户 accountId"}, "issuelinks": []}},
   "linked_test_details": [
-    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "Jira updated 或 Xray 版本引用", "source_ref": "该 Test Details 的可回查 Jira 来源"}
+    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "定义版本或定义内容摘要", "source_ref": "该 Test Details 的可回查 Jira 来源"}
   ],
   "transitions": [{"id": "421", "name": "Start Investigation", "to": {"id": "目标状态 ID", "name": "In Progress"}, "fields": {}}]
 }
@@ -367,7 +389,7 @@ PR Ready 的定义以[术语表](../glossary.md)为准：所有目标 PR 已原�
     }
   },
   "linked_test_details": [
-    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "Jira updated 或 Xray 版本引用", "source_ref": "该 Test Details 的可回查 Jira 来源"}
+    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "定义版本或定义内容摘要", "source_ref": "该 Test Details 的可回查 Jira 来源"}
   ]
 }
 ```
@@ -613,3 +635,11 @@ python3 <agenticops-root>/workflow/quality.py review --dir <station> --issue-key
 此命令只读，返回方案、验收检查点、全部方案缺口和 jira_status collect 的当前/未来字段包；未来验收结论不提前索取。用户一次答复可作为质量确认和 Jira 字段确认的共同来源，按各自摘要记录，不再重复询问相同事实。Jira 动态未知表单如实显示；Jira 字段未齐只暂停相关转换，不新增整个研发流程的同步门禁。已确认后改变实质方案，使用[同周期返工](task-authorization.md#同周期方案返工)。
 
 例如 MySQL 视图功能，先读取目标分支现有表/视图发现、元数据映射和执行用例，再决定在连接器局部扩展还是修改共享层。将“可发现视图”“可读取视图数据”“权限不足/不支持时的行为”分别映射到实现模块与用例；没有源码依据不能预设必须修改引擎或 sql-core。
+
+### 通用事项与 Jira 类型分流
+
+Project Profile 的 `jira.routing` 使用真实 Jira 类型 ID 选择专用流程，`default_task_class` 承接其他已读取的类型；快照缺失、配置错误及专用流程失败均不能降级。新接管固定类型和流程到当前 run 的事实，类型变化须核实接续，不静默切换。旧运行和在途操作保留原类别与请求。
+
+TapData 的 `general_task` 通过 `quality-general.json` 的单层 `extends` 复用 `quality-feature.json` 的工程质量合同，保留原功能配置内容及其确认摘要，按实际成果适用检查，不放宽缺陷和故事要求；四项接管标记、评论防重、源码基线、授权和交付核验沿用原能力。通用流程的自动 Jira 状态转换只读取 `status_sync.by_issue_type_id` 中与真实类型一致的映射；未配置时不产生转换待办，评论记录成果和未处理的 Jira 状态。映射要求精确类型 ID、阶段、来源和目标状态及转换 ID，执行前核对实时可用转换与字段，未知结果先回读。源码验收不代表所有 Jira 类型的字段和转换已联调。
+
+通用质量配置可声明仅源码变化时适用的来源同步、CI 和 PR。判定来自实时工作树指纹与完整基线 SHA 一致，不接受人工布尔标志；脏源码、未知版本和新提交仍要求原检查。本地验证、审查及成果确认不因此豁免，缺陷和故事未声明此规则时保持原行为。

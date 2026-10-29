@@ -367,6 +367,9 @@ def complete(base, issue_key, outcome, snapshot, message=""):
 def prepare_markers(base, task, state, snapshot):
     rules = config(base)
     fields, issue_type = issue_from(snapshot, task["issue_key"])
+    from workflow import issue_routing
+    profile = project_rules.load_profile(station=base)
+    issue_routing.check_task(profile, task, fields)
     if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(snapshot, ensure_ascii=False)):
         raise ValueError("Jira 初始快照含敏感内容，请先脱敏")
     previous = state.get("watermark")
@@ -387,7 +390,7 @@ def prepare_markers(base, task, state, snapshot):
                           native_request={"issue_key": task["issue_key"], "fields": result["expected_fields"]})
             save_state(base, task, state)
         return dict(result, repeated=True)
-    if issue_type not in rules["issue_type_ids"]:
+    if not issue_routing.marker_type_allowed(profile, task, issue_type):
         raise ValueError("Jira 事务类型未配置接管标记")
     jira_coordination.require(base, task["issue_key"])
     actual = marker_values(fields, rules, snapshot)

@@ -1,0 +1,48 @@
+# 通用事项处理任务准入检查清单（tapdata）
+
+> **本文件由 `projects/tapdata/admission.json` 生成，请勿手工编辑。**
+> 改规则请改 JSON，然后执行 `python3 workflow/project_rules.py render --project tapdata`。
+
+执行时不要读本文件，直接用机读接口：
+
+```sh
+python3 workflow/task.py checklist --task-class general_task          # 人读
+python3 workflow/task.py checklist --task-class general_task --json   # 机读
+python3 workflow/task.py record --issue-key <JIRA-KEY> --expected-run-id <当前-run-id> --key <fact key> --value <值>
+```
+
+下文仅说明步骤；状态变更调用须带 `--expected-run-id`，`advance` 还须带 `--expected-stage`，值来自此前读取的当前任务状态。
+
+## 必填项（缺一不可，`task.py advance` 硬拦）
+
+| 项 | fact key | 到哪里找 | 示例 | 说明 |
+|---|---|---|---|---|
+| 验收标准 | `acceptance_criteria` | Jira 描述「验收标准」章节 | 关键用户场景完成验证，新增行为有自动化测试覆盖 | 已明确功能范围的验收场景；不承担需求发现与需求任务规划 |
+| 目标仓库 | `target_repo` | Jira 组件/标签/项目仓库映射 | tapdata/tapdata | 本次应修改或检查的仓库；必须能在 profile.json 中查到分支映射 |
+| 验证方式 | `verification_method` | Jira 描述或研发确认的验证方案 | 执行对应模块单元测试和必要手工验证 | 记录本次实际验证方法和来源；仅在实时字段可编辑时回填 Jira，不要求 customfield_10049 可用 |
+
+以下项 agent 可结合卡片/日志/源码给出**建议值**，但必须由研发工程师确认后再 record，不得替确认：验收标准、目标仓库、验证方式。
+
+## 可选项（有则记录）
+
+| 项 | fact key | 到哪里找 | 说明 |
+|---|---|---|---|
+| 范围边界 | `scope_boundary` | 描述或沟通记录 | 明确不做什么，避免范围蔓延 |
+| 实施方案 | `implementation_plan` | 源码分析及研发确认 | JSON 对象，包含 objective、changes、acceptance、risks、rollback；在 Q2 确认前记录，验收场景与检查项逐项对应 |
+
+## 准入失败流程（强制点：workflow/task.py advance（离开 task_intake 时 exit 3））
+
+1. 一次列全所有缺失项，不要挤牙膏
+2. 把缺失项与 supplement 文案写成 Jira 评论发布（write_jira_comment 属 free）
+3. python3 workflow/task.py block --reason "..." 并结束本轮，等研发工程师补卡
+
+## 修复前门禁（强制点：workflow/task.py advance（进入 implementation 时校验授权存在且 issue_key 一致））
+
+授权作用域 `task_execution`，由 workflow/authorization.py grant（研发工程师执行，即设计确认的载体）。授权签发前不得修改任何代码；方案实质变更使用 task.py replan prepare/apply，在同一 run 内保留成果、撤销旧授权并回到 design_review；按新方案和受影响验收项重新登记确认后 grant/advance
+
+## 验证结论规则（强制点：workflow/task.py advance（离开 implementation 时 exit 3））
+
+离开 implementation 前必须 `record --key verification`，且不得命中：
+
+- `-DskipTests|-Dmaven\.test\.skip` —— 跳过测试的构建不能作为验证结果；必须单独执行与变更范围匹配的测试
+- `^\s*(未验证|无需验证|不需要验证|待补充|无|N/?A|TODO|skipped)\s*$` —— 验证结果必须是实际执行的命令及其退出结果，不能是占位词

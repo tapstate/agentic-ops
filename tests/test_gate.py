@@ -129,7 +129,7 @@ def grant(ws, **overrides):
         "fix_plan": {
             "format": "structured-v1",
             "integration_tests": [{"repository": repo["repository"], "scope": "fixture:gate",
-                "level": "L1", "knowledge_ref": "fixture:knowledge",
+                "level": "L1", "framework_supported": True, "framework_ref": "fixture:framework-source", "knowledge_ref": "fixture:knowledge",
                 "rationale": "仅 Gate 夹具", "case_strategy": "复用固定 Gate 场景",
                 "cases": [{"id": "gate", "change": "reuse", "reason": "已有夹具覆盖", "baseline_ref": "fixture:baseline"}],
                 "execution_plan": "固定验收夹具，本任务不执行业务 CI"} for repo in repositories],

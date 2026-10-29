@@ -249,7 +249,9 @@
           "rationale",
           "case_strategy",
           "execution_plan",
-          "cases"
+          "cases",
+          "framework_supported",
+          "framework_ref"
         ],
         "properties": {
           "repository": {
@@ -312,18 +314,34 @@
                 "baseline_ref": {
                   "type": "string",
                   "minLength": 1
+                },
+                "manual_item": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "additionalProperties": false
             }
+          },
+          "framework_supported": {
+            "type": "boolean"
+          },
+          "framework_ref": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "additionalProperties": false
       }
     },
     "case_coverage": {
-      "issue_min_level": 1,
-      "issue_when_unsupported": true
+      "mode": "jira_manual",
+      "manual_levels": [
+        "L3"
+      ],
+      "assignee_account_id": "712020:c451ecb0-6041-45d9-b3a4-45f09172b65d",
+      "jira_base_url": "https://tapdata.atlassian.net",
+      "acceptance_checkpoint": "q4-acceptance"
     }
   }
 }

@@ -128,13 +128,13 @@ def warnings(base, task, report=None):
     if watermark.get("outcome") == "verified" and watermark.get("marker_version") != 2 and jira_watermark.config(base).get("schema_version") == 2:
         add("agenticops_version", "deferred", "旧版水印已回读；prepare 补齐四项标记，不覆盖原在途意图")
     attempts = jira_status.load_state(base, task)["attempts"]
-    status_rules = project_rules.load_profile(station=base).get("jira", {}).get("status_sync", {})
-    if task["task_class"] in status_rules.get("task_classes", []):
+    status_rules = jira_status.config(base, task)
+    if status_rules.get("attempts"):
         due = ["takeover"] if task.get("stage") != "waiting_takeover" else []
         if task.get("stage") in ("ci_validation", "completed"):
             due.append("tests_passed")
         for node in due:
-            if node not in attempts:
+            if node in status_rules["attempts"] and node not in attempts:
                 add("jira_status:" + node, "deferred", "本节点尚无同步记录")
     plan = task.get("facts", {}).get("issue_version_plan", {})
     version_receipt = load(base, task).get("problem_version", {})
