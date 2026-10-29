@@ -2433,6 +2433,10 @@ class QualityTests(unittest.TestCase):
 
 
 class FeatureFlowTests(unittest.TestCase):
+    task_class = "feature_change"
+    issue_type_id = "10010"
+    issue_type_name = "故事"
+
     def setUp(self):
         version_read = mock.patch("bootstrap.product_version.describe", return_value="develop-v1.0-2-12345678")
         version_read.start(); self.addCleanup(version_read.stop)
@@ -2493,6 +2497,12 @@ class FeatureFlowTests(unittest.TestCase):
     def cli(self, tool, *args, expected=0, mutation=True):
         command = [sys.executable, str(product_cli(self.ws, "workflow/" + tool)), *args,
                    "--issue-key", "TAP-123", "--dir", str(self.ws)]
+        if args[0] == "takeover":
+            snapshot = self.root / "jira-type.json"
+            snapshot.write_text(json.dumps({"site": "https://tapdata.atlassian.net", "source_ref": "fixture:jira-type",
+                "issue": {"id": "123", "key": "TAP-123", "fields": {
+                    "project": {"key": "TAP"}, "issuetype": {"id": self.issue_type_id, "name": self.issue_type_name}}}}))
+            command += ["--jira-input", str(snapshot)]
         if mutation and args[0] != "takeover":
             command += ["--expected-run-id", self.read()["run_id"]]
         if args[0] == "takeover" or args[:2] == ("repository", "add"):
@@ -2554,13 +2564,13 @@ class FeatureFlowTests(unittest.TestCase):
 
     def test_cli_intake_failure_recovery_upstream_merge_and_pr_ready(self):
         coordination_proof(self.ws, "TAP-123")
-        self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop")
+        self.cli("task.py", "takeover", "--task-class", self.task_class, "--version", "develop")
         run = self.read()["run_id"]
-        self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop", expected=2)
+        self.cli("task.py", "takeover", "--task-class", self.task_class, "--version", "develop", expected=2)
         self.assertEqual(self.read()["run_id"], run)
         initial = Path(self.cli("task.py", "interaction-path", "--name", "jira-intake.json").strip())
         initial.write_text(json.dumps({"source_ref": "fixture:jira-intake", "issue": {
-            "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
+            "key": "TAP-123", "fields": {"issuetype": {"id": self.issue_type_id, "name": self.issue_type_name},
                 "status": {"name": "Analyzed"}, "assignee": {"accountId": "fixture-reviewer"}}}}))
         self.cli("task.py", "snapshot", "--input", str(initial))
         self.cli("task.py", "advance", "--note", "fixture:已读 Analyzed 与负责人")
@@ -2661,12 +2671,12 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("task.py", "advance", "--note", "验收已确认")
         snapshot = Path(self.cli("task.py", "interaction-path", "--name", "jira-readback.json").strip())
         snapshot.write_text(json.dumps({"source_ref": "fixture:jira-readback", "issue": {
-            "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
+            "key": "TAP-123", "fields": {"issuetype": {"id": self.issue_type_id, "name": self.issue_type_name},
                 "status": {"name": "Tests Passed"}, "issuelinks": []}}}))
         self.publish_summary()
         result = pr_ready.check(self.ws, "TAP-123", snapshot)
         self.assertTrue(result["preflight_ready"], result)
-        self.assertTrue(result["jira_status_todos"])
+        self.assertEqual(self.task_class == "feature_change", bool(result["jira_status_todos"]))
         # 其它 Checks 全绿仍须真实集成测试，或研发对明确缺口作出决定。
         material = dict(copy.deepcopy(self.local_material), kind="ci", run_ref="fixture:ci-run-1",
                         checkout_ref="fixture:checkout-head", head_revision=head, attempt=1)
@@ -2711,6 +2721,12 @@ class FeatureFlowTests(unittest.TestCase):
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
 
 
+
+
+class GeneralFlowTests(FeatureFlowTests):
+    task_class = "general_task"
+    issue_type_id = "10008"
+    issue_type_name = "任务"
 
 
 class TestCoverageClosureTests(unittest.TestCase):

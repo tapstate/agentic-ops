@@ -23,6 +23,11 @@ class StationTests(unittest.TestCase):
         self.ws = self.root / "ws"
         self.product = self.root / "product"
         shutil.copytree(ROOT / "projects", self.product / "projects")
+        # 保留旧 technical_task/旧请求生命周期回归；类型分流另用生产 Profile 验证。
+        profile_path = self.product / "projects/tapdata/profile.json"
+        legacy_profile = json.loads(profile_path.read_text())
+        legacy_profile["jira"].pop("routing", None)
+        profile_path.write_text(json.dumps(legacy_profile))
         # 普通任务夹具不启用外部环境；Docker 专项用例另行声明并模拟驱动。
         cleanup_path = self.product / 'projects/tapdata/station-clean.json'
         cleanup = json.loads(cleanup_path.read_text())
@@ -40,6 +45,10 @@ class StationTests(unittest.TestCase):
 
     def prepare_engineering(self, count=1):
         """显式选择临时工程规模；不改正式项目、不共享可变仓库。"""
+        profile_path = self.product / "projects/tapdata/profile.json"
+        legacy_profile = json.loads(profile_path.read_text())
+        legacy_profile["jira"].pop("routing", None)
+        self.write(profile_path, legacy_profile)
         self.assertFalse(hasattr(self, "seed"), "工程夹具只能准备一次")
         self.seed = self.root / "seed"
         self.seed.mkdir()

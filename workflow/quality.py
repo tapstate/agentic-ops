@@ -58,8 +58,23 @@ def config(base, task=None):
         return None
     try:
         result = project_rules.read_json_object(path)
+        parent = result.pop("extends", None)
+        if parent is not None:
+            if not isinstance(parent, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json", parent):
+                raise ValueError("质量基础配置必须是项目内 JSON 文件名")
+            parent_path = project_dir / parent
+            if parent_path.resolve().parent != project_dir.resolve() or parent_path == path:
+                raise ValueError("质量基础配置越界或循环")
+            inherited = project_rules.read_json_object(parent_path)
+            if "extends" in inherited:
+                raise ValueError("质量配置只允许一层复用")
+            result = {**inherited, **result}
         if result.get("schema_version") != 1:
             raise ValueError("不支持的质量配置版本")
+        change_only = result.get("change_only_verification", [])
+        if (not isinstance(change_only, list) or not set(change_only) <= {"source_sync", "ci"}
+                or type(result.get("change_only_pr", False)) is not bool):
+            raise ValueError("无源码变化仅允许省略来源合并、CI 和 PR，本地验证及审查仍须保留")
         if result.get("publication_mode", "deferred-summary") not in ("checkpoint", "deferred-summary"):
             raise ValueError("publication_mode 只支持 checkpoint 或历史 deferred-summary")
         ids = [c["id"] for c in result["checkpoints"]]

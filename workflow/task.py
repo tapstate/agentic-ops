@@ -95,6 +95,8 @@ def cmd_takeover(args):
     request = {"issue_key": args.issue_key, "task_class": args.task_class, "version": args.version,
                "profile": args.profile, "optional_repositories": args.optional_repository,
                "explicit_branches": overrides}
+    if getattr(args, "jira_input", None):
+        request["jira_snapshot"] = json.loads(Path(args.jira_input).read_text(encoding="utf-8"))
     if args.continuation_input:
         request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
     result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
@@ -799,6 +801,7 @@ def main():
     p.add_argument('--update-target-ref', help='本次继续旧版选择的目标完整 SHA，由入口消费')
     p.add_argument("--issue-key", required=True)
     p.add_argument("--task-class", required=True)
+    p.add_argument("--jira-input", help="原生 Jira 类型回读：site/source_ref/issue，含 id/key、project 与 issuetype")
     p.add_argument("--version", required=True)
     p.add_argument("--profile", default="full-application")
     p.add_argument("--optional-repository", action="append", default=[])

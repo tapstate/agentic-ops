@@ -190,11 +190,16 @@ def check(base, issue_key, jira_input):
     if not rules or not isinstance(rules.get("pr_ready"), dict):
         raise ValueError("当前 Project 未配置 PR Ready 验收")
     packet = submission_input(base, task)
+    delivery_task = task
+    if rules.get("change_only_pr"):
+        context = quality.context(base, task)
+        delivery_task = dict(task, repositories=[repo for repo in task.get("repositories", [])
+            if not verification.unchanged_repository(context["repositories"][repo["repository"]])])
     linked_problems, source_ref, linked_tests, ignored_tests = _jira_test_tasks(jira_input, issue_key, rules)
     linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
     groups = {
         "linked_test_tasks": linked_problems,
-        "pr_checks": ci_problems(base, task, packet),
+        "pr_checks": ci_problems(base, delivery_task, packet),
         "task_checks": quality_problems(base, task, rules, jira_status.read_input(jira_input)),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", []), rules),
@@ -206,7 +211,7 @@ def check(base, issue_key, jira_input):
         try:
             version = describe(project_rules.product_root_from_station(base))
             publication, summaries = test_coverage.publication_problems(
-                task, packet, quality.replay(quality.load(base, task)), quality.context(base, task), rules, version)
+                delivery_task, packet, quality.replay(quality.load(base, task)), quality.context(base, task), rules, version)
         except (ValueError, OSError) as error:
             publication = ["PR 测试总结无法核验：" + str(error)]
         groups["pr_publication"] = publication
@@ -218,6 +223,8 @@ def check(base, issue_key, jira_input):
     tests = status["attempts"].get("tests_passed")
     if not tests or tests.get("outcome") not in ("satisfied", "succeeded"):
         for trigger in ("takeover", "tests_passed"):
+            if trigger not in jira_status.config(base, task).get("attempts", {}):
+                continue
             attempt = status["attempts"].get(trigger)
             if attempt and attempt.get("outcome") in ("satisfied", "succeeded"):
                 continue
@@ -226,13 +233,15 @@ def check(base, issue_key, jira_input):
                 status_todos.extend(item["guidance"] for item in attempt.get("guidance", [])
                                     if item.get("guidance"))
     problems = [problem for values in groups.values() for problem in values]
-    submissions = submission_status(task, packet)
+    submissions = submission_status(delivery_task, packet)
     preflight_ready = not problems
-    ready = preflight_ready and bool(submissions) and all(r["confirmed"] for r in submissions)
+    no_pr_required = bool(rules.get("change_only_pr") and not delivery_task.get("repositories"))
+    ready = preflight_ready and (no_pr_required or bool(submissions) and all(r["confirmed"] for r in submissions))
     return {"issue_key": issue_key, "run_id": task["run_id"], "source_ref": source_ref,
             "preflight_ready": preflight_ready, "ready": ready,
+            "pr_required": not no_pr_required,
             "required_pr_summaries": summaries,
-            "submission_status": "confirmed" if ready else ("pending" if preflight_ready else "blocked"),
+            "submission_status": "not_required" if ready and no_pr_required else "confirmed" if ready else ("pending" if preflight_ready else "blocked"),
             "pull_requests": submissions,
             "remaining": [r for r in submissions if not r["confirmed"]],
             "ignored_tests": [{"key": test["key"], "test_type": test["test_type"],

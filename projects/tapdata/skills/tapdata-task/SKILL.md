@@ -24,7 +24,7 @@ metadata:
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。新接管入口按[中央共享 Wiki 合同](../../../../docs/usage/station-materials.md#中央共享-wiki)自动准备并更新 Wiki；读取更新结果，不额外重复刷新。原 run 和在途操作恢复跳过；更新失败或不可用时说明缺口，继续有充分源码依据的工作。
 
 1. 先按[执行接管](../../../../docs/architecture/single-task-station.md#执行接管当前源码)核对当前会话和已有占用，再只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先核实成果保全或明确放弃，再由脚本清理任务，保留用户配置，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
-2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
+2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，保存含 site、source_ref、issue.id/key、issue.fields.project.key 与 issuetype.id/name 的原生快照。按 Profile 的 jira.routing 选择流程：明确映射的缺陷、故事优先，其他类型使用 general_task；类型未知或专用流程失败不能降级。接管命令传入 --jira-input <快照.json>，程序核验类型与类别一致。按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
 3. 新接管先按[更新选择合同](../../../../docs/usage/update-and-rollback.md#新任务前检查与更新目标设计)处理入口返回的更新选择；复用本次有效 SHA 决定，不从 Agent 内嵌套启动新 Agent。空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。用户已选择当前会话处理 TapTest 且需要测试仓时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
 5. 修改仓通过 repository add --repo <repo> --work-branch <branch> --base-branch <PR目标> --scope <范围> --verification <方式> --operation-id <新op-id> --expected-revision <revision> --expected-run-id <run> --issue-key <issue> --dir <station> 登记并准备工作分支；只允许冻结基线内仓库。范围变化使旧授权失效。
@@ -39,6 +39,9 @@ metadata:
 失败沿原 operation 恢复，先核实外部未知结果，再处理原范围的剩余事项。目录删除开始后不换新操作扩大范围。分别说明任务是否解绑、清理是否完成、执行占用是否释放；不手改状态或补造回执。程序自产合法状态无法继续时反馈产品缺陷，外部数据与环境缺项由 Agent 和研发补齐。
 
 ## 准入、设计和多仓库
+
+`general_task` 是未专门适配 Jira 类型的通用处理流程，不是免质量检查的轻流程。通过 quality-general.json 复用功能流程的实施方案、Q1–Q4、源码基线、授权、测试、审查与交付能力；材料按实际事项准备，不填造缺陷根因或问题版本。源码分析、文档及代码变更均核实真实成果，不要求为了流程制造代码或 PR。通用类型不套用缺陷、故事的 allowed_statuses 准入条件；真实状态仅作为处理与同步依据。Jira 状态默认不自动转换，只有 status_sync.by_issue_type_id 为该真实类型配置了已核实转换时才执行；同名状态不证明语义一致。未映射时评论上报，继续无依赖工作，不把本地阶段等同 Jira 状态。旧 technical_task 仅按既有合同接续，不自动改类或补造新质量 PASS。
+
 
 新任务在 Q2 授权前执行 `task.py source-readiness --issue-key <issue> --expected-run-id <run> --dir <station>`；它刷新目标引用并核验完整工程与工作分支。若提示目标正常推进，展示冻结基线、工作 Head、最新目标 SHA，并请用户决定保留基线且在 PR 前按既有规则同步，或归档清理后重接。选择保留时执行相同命令并追加 `--confirm-digest <快照摘要> --decision-ref <真实决定来源>`。随后 grant 与 advance 会重新核对这些事实；变化时重新准备。脏源码、身份错误、分叉及远端核验失败按返回原因处理；ignored 内容不因未登记就阻塞源码准入，也不因此取得删除权限。
 

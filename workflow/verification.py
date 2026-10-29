@@ -326,6 +326,11 @@ def material_problems(entry, repo, kind, ctx, rules=None, *, check_artifacts=Tru
     return result
 
 
+def unchanged_repository(state):
+    return bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(state.get("base_sha", "")))
+                and state.get("live_revision") == state["base_sha"])
+
+
 def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
     if not kinds:
         return []
@@ -334,6 +339,11 @@ def problems(model, ctx, kinds, rules=None, *, check_artifacts=True):
     result = []
     for repo in ctx["repositories"]:
         for kind in kinds:
+            state = ctx["repositories"][repo]
+            if (kind in (rules or {}).get("change_only_verification", [])
+                    and unchanged_repository(state)):
+                # 只读核实完整 SHA 且无工作树修改；源码变化后自动恢复原检查。
+                continue
             entry = model.get("verification", {}).get(repo, {}).get(kind)
             if not entry:
                 result.append("%s 缺少 %s 验证材料" % (repo, kind))

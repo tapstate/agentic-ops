@@ -1,0 +1,12 @@
+{
+  "extends": "quality-feature.json",
+  "schema_version": 1,
+  "task_classes": ["general_task"],
+  "change_only_verification": ["source_sync", "ci"],
+  "change_only_pr": true,
+  "jira": {
+    "automatic_transition_attempts": [],
+    "manual_transitions": [],
+    "note": "通用事项复用工程质量合同；自动状态转换仅使用当前真实类型的 status_sync.by_issue_type_id 映射，未映射时评论上报，不猜测转换。"
+  }
+}

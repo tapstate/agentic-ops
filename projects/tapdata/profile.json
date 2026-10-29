@@ -12,7 +12,8 @@
     "project_key": "TAP",
     "transitions_config": "jira-transitions.json",
     "issue_types": ["Story", "故事", "Bug", "缺陷", "Task", "任务"],
-    "task_query": "project = TAP AND assignee = currentUser() AND status = Analyzed ORDER BY updated DESC",
+    "routing": {"schema_version": 1, "by_issue_type_id": {"10011": "defect_fix", "10010": "feature_change"}, "default_task_class": "general_task"},
+    "task_query": "project = TAP AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
     "takeover": {
       "allowed_statuses": ["Analyzed", "In Progress", "正在进行"],
       "in_progress_run_decision": "developer_selects_resume_or_new_run",
