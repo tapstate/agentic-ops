@@ -143,8 +143,8 @@ class CleanupTests(unittest.TestCase):
         result = self.run_clean(task, request)
         self.assertEqual('awaiting_cleanup', result['phase'])
         # Jira 已交接，取消本地未开始删除的清理仍应能接续。
-        from workflow import jira_coordination
-        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        from station_fixture import transferred_ownership_fixture
+        transferred_ownership_fixture(self.ws)
         cancelled = cleanup.cancel(self.ws, 'op-task-cleanup-test', '确认取消并重新盘点')
         self.assertEqual('done', cancelled['status'])
         self.assertIsNotNone(task_store.read_task(self.ws))
@@ -152,7 +152,7 @@ class CleanupTests(unittest.TestCase):
         self.assertTrue(result['cleanup_result']['complete'], result)
 
     def test_external_cleanup_readback_after_handoff_is_narrowly_scoped(self):
-        from workflow import jira_coordination
+        from station_fixture import transferred_ownership_fixture
         task = self.takeover()
         entry = {'kind': 'external', 'id': 'fixture-resource', 'producer': 'fixture',
                  'action': 'delete', 'status': 'active', 'before': {'id': 'fixture-resource', 'protected': False}}
@@ -161,7 +161,7 @@ class CleanupTests(unittest.TestCase):
         request = self.cleanup_request()
         pending = self.run_clean(task, request)
         self.assertEqual('awaiting_resources', pending['phase'])
-        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        transferred_ownership_fixture(self.ws)
         receipt = dict(entry, status='cleaned', readback_ref='fixture:已核实外部资源不存在')
         with self.assertRaises(ValueError):
             resources.register(self.ws, task['issue_key'], task['run_id'], [dict(receipt, id='other')], pending['operation_id'])
@@ -539,6 +539,11 @@ class SourceReuseTests(unittest.TestCase):
             station_operation.begin(self.ws, 'takeover', 'op-old-partial-takeover', 0, request)
         with self.assertRaises(ValueError):
             station.takeover(self.ws, request, 'op-old-partial-takeover', 0)
+        # 旧版本在解析失败前已 clone/fetch；新版预检不会产生此现场。
+        from workflow import station_takeover, station_source, engineering_baseline
+        _, _, catalog, profile = station_takeover.inputs(self.ws, request)
+        selected = engineering_baseline.selected_repositories(profile, catalog)
+        station_source.prepare_repositories(self.ws, catalog, selected, station_operation.read(self.ws))
         task = task_store.read_task(self.ws)
         result = self.run_clean(task, self.cleanup_request())
         self.assertTrue(result['cleanup_result']['complete'], result)

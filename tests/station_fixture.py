@@ -31,7 +31,7 @@ def product_cli(station, relative):
     return root / relative
 
 
-def save_task(base, task):
+def save_task(base, task, ownership=True):
     initialize_station(base)
     (task_store.state_path(base) / "evidence").mkdir(parents=True, exist_ok=True)
     repositories = task.get("repositories", [])
@@ -69,7 +69,8 @@ def save_task(base, task):
         current = task_store.compare_and_set(base, current["revision"], None)
     task["_revision"] = current["revision"]
     task_store.write_task(base, task)
-    coordination_proof(base, task["issue_key"])
+    if ownership:
+        coordination_proof(base, task["issue_key"])
     normalized = task_store.read_task(base, task["issue_key"])
     task["repositories"] = normalized["repositories"]
 
@@ -100,16 +101,107 @@ def task_state_snapshot(station):
     return value
 
 
+def ownership_snapshot(base, issue='TAP-123', values=None):
+    from workflow import project_rules
+    profile = project_rules.load_profile(station=base)
+    rules = profile['jira']['takeover_watermark']
+    fields = {key: None for key in [rules['field_id'], *rules.get('marker_fields', {}).values()]}
+    fields.update(values or {})
+    fields.update(issuetype={'id': '10011'}, assignee={'accountId': 'fixture-user'}, status={'name': 'Analyzed'})
+    return {'site': profile['jira']['site'].rstrip('/'), 'source_ref': 'fixture:jira/issue',
+            'issue': {'id': '123', 'key': issue, 'fields': fields},
+            'current_user': {'accountId': 'fixture-user', 'displayName': 'Fixture', 'active': True, 'source_ref': 'fixture:jira/me'}}
+
+
 def coordination_proof(base, issue_key, identity=None):
-    """其它功能规则夹具的已核实协调事实；协调专项另测原生分页及实际意图回读。"""
-    import os
-    from workflow import project_rules, execution, station_context
+    """其它功能的已核验归属夹具；四项标记专项通过真实 prepare/complete 验证。"""
+    from workflow import jira_watermark as marker, project_rules, execution, station_context
     current = task_store.read_current(base)
-    root, project = project_rules.station_context(base)
-    profile_path = Path(root) / 'projects' / project / 'profile.json'
-    profile = json.loads(profile_path.read_text()) if profile_path.exists() else {}
-    current['jira_coordination'] = {'entries': {}, 'proof': {
-        'site': profile.get('jira', {}).get('site', 'https://fixture.atlassian.net').rstrip('/'),
-        'issue_id': '123', 'issue_key': issue_key, 'session_id': identity or os.environ.get(execution.SESSION_ENV, 'a'*32),
-        'station_id': station_context.read_binding(base)['station_id'], 'comment_id': '123', 'digest': 'a'*64, 'valid': True}}
+    current.pop('jira_coordination', None)
     task_store._write_json_atomic(task_store.current_path(base), current)
+    task = task_store.read_task(base, issue_key)
+    if task is None:
+        return
+    if marker.state_path(base, task).exists() and identity is None:
+        return
+    root, project = project_rules.station_context(base)
+    directory = project_rules.project_root(root, project)
+    if not (directory / 'profile.json').exists():
+        # 与 Jira 无关的最小模块夹具也提供明确的项目归属合同，不修改产品的缺配置拒绝逻辑。
+        template = json.loads((Path(__file__).resolve().parents[1] / 'projects/tapdata/profile.json').read_text())
+        directory.mkdir(parents=True, exist_ok=True)
+        task_store._write_json_atomic(directory / 'profile.json', {
+            'jira': {'site': 'https://fixture.atlassian.net', 'takeover_watermark': template['jira']['takeover_watermark']},
+            'repositories': {'catalog': 'repositories.json'}})
+        if not (directory / 'repositories.json').exists():
+            task_store._write_json_atomic(directory / 'repositories.json', {'schema_version': 1, 'repositories': {}})
+    profile = project_rules.load_profile(station=base)
+    rules = profile.get('jira', {}).get('takeover_watermark', {})
+    field = rules.get('field_id', 'customfield_10421')
+    mapping = rules.get('marker_fields', {'begin_at': 'customfield_10366', 'station': 'customfield_10462', 'run_id': 'customfield_10365'})
+    expected = {field: 'fixture-version', mapping['begin_at']: '2026-10-29T08:00:00+0000',
+                mapping['station']: station_context.read_binding(base)['station_id'], mapping['run_id']: task['run_id']}
+    record = {'at': '2026-10-29T08:00:00+0000', 'source_ref': 'fixture:jira', 'issue_key': issue_key,
+        'field_id': field, 'field_name': 'AgenticOps Version', 'logical_key': 'agenticops_version',
+        'issue_type_id': '10011', 'version': 'fixture-version', 'write_mode': 'overwrite',
+        'payload_digest': marker.marker_digest(expected), 'outcome': 'verified', 'reason': 'fixture',
+        'marker_version': 2, 'marker_fields': mapping, 'expected_fields': expected,
+        'actor': {'accountId': 'fixture-user', 'displayName': 'Fixture', 'source_ref': 'fixture:jira/me'},
+        'completed_at': '2026-10-29T08:00:00+0000', 'readback_ref': 'fixture:jira', 'readback_fields': expected,
+        'readback_value': 'fixture-version', 'verified_ref': 'fixture:jira',
+        'ownership': {'site': profile.get('jira', {}).get('site', 'https://fixture.atlassian.net').rstrip('/'),
+                      'issue_id': '123', 'session_id': identity or execution.session_id()}}
+    task_store._write_json_atomic(marker.state_path(base, task), {'schema_version': 1, 'issue_key': issue_key,
+        'run_id': task['run_id'], 'watermark': record})
+
+
+def transferred_ownership_fixture(base):
+    """模拟已观察到其它工位接管；保留原意图和首次核验历史。"""
+    from workflow import jira_watermark as marker
+    task = task_store.read_task(base)
+    state = marker.load_state(base, task)
+    record = state['watermark']
+    actual = dict(record['expected_fields'])
+    actual[record['marker_fields']['station']] = 'b' * 32
+    actual[record['marker_fields']['run_id']] = 'run-fedcba987654'
+    record.update(outcome='unknown', reason='markers_unknown', readback_fields=actual,
+                  readback_ref='fixture:jira/transferred', readback_value=record['version'])
+    record.pop('native_request', None)
+    marker.validate_record(record)
+    task_store._write_json_atomic(marker.state_path(base, task), state)
+
+
+def prepared_ownership_fixture(base, task, operation):
+    """源码生命周期专项不测远端通知；仅提供明确的归属夹具，专项另覆盖真实屏障。"""
+    coordination_proof(base, task['issue_key'])
+    return True
+
+
+def complete_takeover_registration(base, snapshot):
+    """隔离集成测试的原生 Jira 响应夹具；通过真实标记、发布和状态入口登记。"""
+    import copy
+    from datetime import datetime, timezone
+    from workflow import jira_watermark, external_sync, quality, jira_status
+    task = task_store.read_task(base)
+    observed = copy.deepcopy(snapshot)
+    marker = jira_watermark.prepare(base, task['issue_key'], observed)
+    observed['issue']['fields'].update(marker['expected_fields'])
+    jira_watermark.complete(base, task['issue_key'], 'unknown', observed)
+    task = task_store.read_task(base)
+    row = next(r for r in external_sync.actions(base, task)['sync_actions'] if r['kind'] == 'takeover_comment')
+    def apply(action, payload):
+        state = quality.load(base, task)
+        return quality.apply(base, task['issue_key'], task['run_id'], state['revision'], {'action': action, 'payload': payload})
+    view = apply('draft', {'id': row['id'], 'body': row['body']})
+    digest = view['publications'][row['id']]['digest']
+    apply('confirm', {'id': row['id'], 'digest': digest, 'proof': {
+        'actor': 'Fixture', 'source': 'user_message', 'reference': 'fixture:takeover',
+        'at': datetime.now(timezone.utc).isoformat()}})
+    view = apply('prepare_write', {'id': row['id'], 'digest': digest, 'takeover_snapshot': observed})
+    record = view['publications'][row['id']]
+    apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
+        'issue_key': task['issue_key'], 'comment_id': '100', 'body': row['body'], 'source_ref': 'fixture:jira/100',
+        'author_account_id': observed['current_user']['accountId']})
+    if 'takeover' in jira_status.config(base, task).get('attempts', {}):
+        observed['issue']['fields']['status'] = {'id': '3', 'name': 'In Progress'}
+        jira_status.prepare(base, task['issue_key'], 'takeover', observed)

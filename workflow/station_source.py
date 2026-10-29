@@ -213,6 +213,67 @@ def prepare_repositories(station, catalog, selected, operation):
     return observations
 
 
+def probe_repositories(station, catalog, selected):
+    """只查询远端 heads；逐仓保留未知结果，交 Project 集中解释。"""
+    observations = {}
+    for name in selected:
+        refs, error = {}, None
+        try:
+            output = git(station, "ls-remote", "--heads", "--", catalog[name]["origin"]).stdout
+            for line in output.splitlines():
+                sha, ref = line.split()
+                if not baseline.SHA.fullmatch(sha) or not ref.startswith("refs/heads/"):
+                    raise ValueError("远端 heads 响应无效")
+                branch = baseline.ref_name(ref.removeprefix("refs/heads/"))
+                if branch in refs and refs[branch] != sha:
+                    raise ValueError("远端 heads 响应不唯一")
+                refs[branch] = sha
+        except (OSError, ValueError):
+            # Git 原始错误可能含 URL 凭据；不将它回显到聚合报告。
+            error = "远端引用无法核验，请检查网络、权限和仓库地址后重试"
+        observations[name] = {"selection": "required", "local": {"status": "available"},
+                              "refs": {"verification": "unknown" if error else "verified"},
+                              "_refs": refs, "_path": None, "error": error}
+    return observations
+
+
+def verify_takeover_preparation(station, catalog, selected, operation):
+    """更正前只读核验旧 clone/fetch；空的 no-checkout 工作树不是用户删除。"""
+    for step in operation["steps"]:
+        if step == 'shared-references' and operation['steps'][step]['receipt'] is not None:
+            continue
+        if step not in {prefix + name for name in selected for prefix in ("clone:", "fetch:")}:
+            raise ValueError("接管已有 checkout 或未知副作用，不能更正请求")
+    for name in selected:
+        path = repository_path(station, name)
+        clone = operation["steps"].get("clone:" + name)
+        fetch = operation["steps"].get("fetch:" + name)
+        if not path.exists():
+            if clone or fetch:
+                raise ValueError("源码准备结果未核实；先恢复原操作核验：" + name)
+            continue
+        identity(path, catalog[name]["origin"])
+        if not clone or not clone["receipt"] or not fetch or not fetch["receipt"]:
+            raise ValueError("源码准备结果未核实；先恢复原操作核验：" + name)
+        refs = {}
+        for line in git(path, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin/").stdout.splitlines():
+            ref, sha = line.split(" ", 1)
+            if ref != "refs/remotes/origin/HEAD":
+                refs[ref.removeprefix("refs/remotes/origin/")] = sha
+        if fetch["receipt"] != {"refs": refs}:
+            raise ValueError("已准备源码引用漂移：" + name)
+        if clone["before"]["exists"]:
+            require_clean(path)
+        elif ((path / ".git/index").exists()
+              or any(child.name != ".git" for child in path.iterdir())):
+            raise ValueError("新建源码已出现索引或工作树内容，保留现场，不能更正：" + name)
+        # 不覆盖更正前出现的独有本地提交或新分支。
+        for line in git(path, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/").stdout.splitlines():
+            ref, sha = line.split(" ", 1)
+            if refs.get(ref.removeprefix("refs/heads/")) != sha:
+                raise ValueError("源码存在未核实本地分支或提交，保留现场：" + name)
+
+
 def checkout_baseline(station, value, operation):
     baseline.validate(value)
     for name, entry in value["repositories"].items():

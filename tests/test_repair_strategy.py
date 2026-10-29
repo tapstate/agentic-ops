@@ -116,7 +116,8 @@ class RepairStrategyTest(unittest.TestCase):
                 self.assertEqual(self.read_state(), before)
 
     def test_missing_project_is_advisory(self):
-        (self.root / "projects/demo").rmdir()
+        import shutil
+        shutil.rmtree(self.root / "projects/demo")
         resolved = repair_strategy.resolve(self.station, self.state)
         self.assertTrue(resolved["available"])
         self.assertEqual(resolved["effective"]["source"], "company_default")

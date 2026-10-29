@@ -144,19 +144,18 @@ class QualityTests(unittest.TestCase):
         command = copy.deepcopy(historical['quality']['events'][0]['command'])
         command['payload']['plan']['id'] = 'after-upgrade'
         revision = historical['quality']['revision']
-        with self.assertRaisesRegex(ValueError, '任务级接管尚未核实'):
+        from workflow import jira_watermark
+        state = jira_watermark.load_state(self.base, self.task)
+        state['watermark'].pop('ownership', None)
+        task_store._write_json_atomic(jira_watermark.state_path(self.base, self.task), state)
+        with self.assertRaisesRegex(ValueError, '归属尚未核验'):
             quality.apply(self.base, self.task['issue_key'], self.task['run_id'], revision, command)
         self.assertEqual(before_quality, path.read_bytes())
-        supplied = {'site':'https://tapdata.atlassian.net', 'issue_id':'123', 'issue_key':self.task['issue_key'],
-                    'source_ref':'fixture:native-jira-readback',
-                    'pages':[{'startAt':0, 'total':0, 'isLast':True, 'comments':[]}]}
-        view = jira_coordination.snapshot(self.base, supplied)
-        pending = jira_coordination.run(self.base, 'prepare', supplied, 'upgrade-claim',
-                                       executor='升级验收', expected_digest=view['digest'])
-        supplied['pages'][0].update(total=1, comments=[{'id':'1', 'body':pending['body'],
-            'updated':datetime.now(timezone.utc).isoformat()}])
-        self.assertTrue(jira_coordination.run(self.base, 'complete', supplied,
-                                             claim_id=pending['claim_id'])['verified'])
+        from station_fixture import ownership_snapshot
+        from workflow import jira_watermark
+        record = jira_watermark.status(self.base, self.task)
+        supplied = ownership_snapshot(self.base, self.task['issue_key'], record['expected_fields'])
+        self.assertEqual('verified', jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', supplied)['outcome'])
         quality.apply(self.base, self.task['issue_key'], self.task['run_id'], revision, command)
         self.assertEqual(before_task, task_store.read_task(self.base))
         current = quality.load(self.base, self.task)
@@ -1664,7 +1663,7 @@ class QualityTests(unittest.TestCase):
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
         self.task["archive_ref"] = {"scope": "product", "run_id": self.task["run_id"], "digest": "a" * 64}
         self.save_task()
-        with task_store.task_state_lock(self.base):
+        with task_store.task_state_lock(self.base, ownership=False):
             pass
         before = {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         actions = [
@@ -2499,9 +2498,12 @@ class FeatureFlowTests(unittest.TestCase):
                    "--issue-key", "TAP-123", "--dir", str(self.ws)]
         if args[0] == "takeover":
             snapshot = self.root / "jira-type.json"
-            snapshot.write_text(json.dumps({"site": "https://tapdata.atlassian.net", "source_ref": "fixture:jira-type",
-                "issue": {"id": "123", "key": "TAP-123", "fields": {
-                    "project": {"key": "TAP"}, "issuetype": {"id": self.issue_type_id, "name": self.issue_type_name}}}}))
+            from station_fixture import ownership_snapshot
+            supplied = ownership_snapshot(self.ws)
+            supplied['issue']['fields'].update(project={'key': 'TAP'}, issuetype={'id': self.issue_type_id, 'name': self.issue_type_name})
+            if self.issue_type_id == '10008':
+                supplied['issue']['fields']['status'] = {'id': '10029', 'name': '待办'}
+            snapshot.write_text(json.dumps(supplied))
             command += ["--jira-input", str(snapshot)]
         if mutation and args[0] != "takeover":
             command += ["--expected-run-id", self.read()["run_id"]]
@@ -2511,6 +2513,10 @@ class FeatureFlowTests(unittest.TestCase):
         if args[0] == "advance":
             command += ["--expected-stage", self.read()["stage"]]
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        if args[0] == 'takeover' and expected == 0 and result.returncode == 0 and json.loads(result.stdout).get('status') != 'done':
+            from station_fixture import complete_takeover_registration
+            complete_takeover_registration(self.ws, supplied)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result.stdout
 
@@ -3434,15 +3440,16 @@ class SyncRecoveryTests(unittest.TestCase):
             'summary': '任务级资源监控', 'assignee': {'displayName': '测试研发'}}}}
         self.save_task()
         from workflow import jira_watermark
+        jira_watermark.state_path(self.base, self.task).unlink(missing_ok=True)
         initial = external_sync.actions(self.base, self.task)
         missing = next(row for row in initial['sync_actions'] if row['kind'] == 'agenticops_version')
         self.assertEqual('read_fields_then_prepare', missing['next_action'])
         initial_marker_id = initial['takeover']['markers']['operation_id']
         with mock.patch('bootstrap.product_version.describe', return_value='v1.fixture'), \
                 mock.patch.object(jira_watermark, 'now', return_value='2026-10-27T19:52:44+0800'):
-            snapshot = {'source_ref': 'fixture:jira/read', 'current_user': {'accountId': 'login-user',
+            snapshot = {'site': 'https://tapdata.atlassian.net', 'source_ref': 'fixture:jira/read', 'current_user': {'accountId': 'login-user',
                 'displayName': '当前登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'},
-                'issue': {'key': self.task['issue_key'], 'fields': {'issuetype': {'id': '10011'},
+                'issue': {'id': '123', 'key': self.task['issue_key'], 'fields': {'issuetype': {'id': '10011'},
                     'customfield_10421': None, 'customfield_10366': None, 'customfield_10462': None, 'customfield_10365': None}}}
             marker = jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
         progress = external_sync.actions(self.base, self.task)['takeover']
@@ -3464,8 +3471,8 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(marker_id, progress['markers']['operation_id'])
         self.assertEqual(row['body'], row['draft_command']['payload']['body'])
         self.assertEqual('not_attempted', row['status'])
-        for text in ('版本：AgenticOps v1.fixture', '操作人：当前登录研发', '任务类型：defect_fix',
-                     self.task['run_id'], '仓库分支列表：', 'tapdata/tapdata：develop'):
+        for text in ('版本：v1.fixture', '操作人：当前登录研发', '工位：',
+                     self.task['run_id'], '本次确认的源码来源：', 'tapdata/tapdata：develop'):
             self.assertIn(text, row['body'])
         for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', str(self.base)):
             self.assertNotIn(text, row['body'])
@@ -3478,12 +3485,14 @@ class SyncRecoveryTests(unittest.TestCase):
         self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
         stale = copy.deepcopy(snapshot)
         stale['issue']['fields']['customfield_10462'] = 'b' * 32
-        with self.assertRaisesRegex(ValueError, '写前回读'):
+        with self.assertRaisesRegex(ValueError, '归属'):
             self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         stale = copy.deepcopy(snapshot)
         stale['issue']['fields']['customfield_10366'] = '2026-10-27T11:53:00Z'
-        with self.assertRaisesRegex(ValueError, '写前回读'):
+        with self.assertRaisesRegex(ValueError, '归属'):
             self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         snapshot['issue']['fields']['customfield_10366'] = '2026-10-27T11:52:13.987Z'
         record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
         self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
@@ -3503,23 +3512,22 @@ class SyncRecoveryTests(unittest.TestCase):
             'source_ref': 'fixture:jira/takeover-comment', 'author_account_id': 'login-user'})
         self.assertFalse(any(item['id'] == row['id'] for item in external_sync.actions(self.base, self.task)['sync_actions']))
         self.assertEqual('complete', external_sync.actions(self.base, self.task)['takeover']['status'])
-        from workflow import jira_coordination
-        state = jira_coordination.state(self.base)
-        state['proof']['valid'] = False
-        jira_coordination.save(self.base, state)
+        changed = copy.deepcopy(snapshot)
+        changed['issue']['fields']['customfield_10365'] = 'new-owner-run'
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', changed)
         progress = external_sync.actions(self.base, self.task)['takeover']
         self.assertEqual('pending', progress['status'])
-        self.assertEqual(['coordination'], progress['remaining'])
+        self.assertEqual(['markers'], progress['remaining'])
         self.assertTrue(progress['independent_read_only_allowed'])
-        with self.assertRaisesRegex(ValueError, '接管'):
-            jira_watermark.prepare(self.base, self.task['issue_key'], snapshot)
+        self.assertNotIn('native_request', jira_watermark.prepare(self.base, self.task['issue_key'], changed))
 
 
     def takeover_fixture(self):
         from workflow import external_sync, jira_watermark
         self.task['source_prepared'] = True
         self.save_task()
-        snapshot = {'source_ref': 'fixture:read', 'issue': {'key': self.task['issue_key'], 'fields': {
+        jira_watermark.state_path(self.base, self.task).unlink(missing_ok=True)
+        snapshot = {'site': 'https://tapdata.atlassian.net', 'source_ref': 'fixture:read', 'issue': {'id': '123', 'key': self.task['issue_key'], 'fields': {
             'issuetype': {'id': '10011'}, 'customfield_10421': None, 'customfield_10366': None,
             'customfield_10462': None, 'customfield_10365': None}},
             'current_user': {'accountId': 'login-user', 'displayName': '研发', 'active': True, 'source_ref': 'fixture:myself'}}
@@ -3557,24 +3565,23 @@ class SyncRecoveryTests(unittest.TestCase):
         changed['issue']['fields']['customfield_10365'] = 'other-run'
         jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', changed)
         action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
-        self.assertEqual('verify_takeover_markers', action['next_action'])
+        self.assertEqual('manual_handoff', action['next_action'])
         self.assertNotIn('quality_command', action)
         self.assertNotIn('draft_command', action)
 
     def test_takeover_lost_coordination_and_frozen_receipts_offer_no_commands(self):
-        from workflow import external_sync, jira_coordination, archive_store
+        from workflow import external_sync, jira_watermark, archive_store
         snapshot, row = self.takeover_fixture()
         record = self.apply('draft', row['draft_command']['payload'])['publications'][row['id']]
         self.apply('confirm', {'id': row['id'], 'digest': record['digest'], 'proof': proof()})
-        coord = jira_coordination.state(self.base)
-        invalid = copy.deepcopy(coord)
-        invalid['proof']['valid'] = False
-        jira_coordination.save(self.base, invalid)
+        changed = copy.deepcopy(snapshot)
+        changed['issue']['fields']['customfield_10365'] = 'new-owner-run'
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', changed)
         action = next(a for a in external_sync.actions(self.base, self.task)['sync_actions'] if a['id'] == row['id'])
         self.assertEqual('manual_handoff', action['next_action'])
         self.assertNotIn('quality_command', action)
         self.assertNotIn('draft_command', action)
-        jira_coordination.save(self.base, coord)
+        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
         self.terminal()
         target = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
@@ -3594,11 +3601,10 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual('complete', view['takeover']['status'])
         self.assertFalse(any(w['kind'] == 'takeover_summary' for w in view['warnings']))
 
-    def test_takeover_summary_is_not_emitted_before_source_prepared(self):
+    def test_takeover_summary_needs_preflight_sources_not_source_prepared_flag(self):
         from workflow import external_sync
         self.task['source_prepared'] = False
-        marker = next(row for row in external_sync.actions(self.base, self.task)['sync_actions'] if row['kind'] == 'agenticops_version')
-        self.assertEqual('prepare_source', marker['next_action'])
+        self.task['engineering_baseline'] = {'status': 'resolving'}
         self.assertFalse(any(item['kind'] == 'takeover_comment'
             for item in external_sync.actions(self.base, self.task)['sync_actions']))
 

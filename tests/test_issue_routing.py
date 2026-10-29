@@ -95,7 +95,11 @@ class TakeoverRoutingTests(StationTests):
         with self.assertRaisesRegex(ValueError, "feature_change"):
             station.takeover(self.ws, self.request, "op-routing-test", 0)
         self.assertFalse((self.ws / ".agenticops/operation.json").exists())
-        self.request["jira_snapshot"] = snapshot.snapshot()
+        from station_fixture import ownership_snapshot
+        intake = ownership_snapshot(self.ws)
+        intake['issue']['fields'].update(snapshot.snapshot()['issue']['fields'])
+        intake['issue']['fields']['status'] = {'id': '3', 'name': '正在进行'}
+        self.request["jira_snapshot"] = intake
         station.takeover(self.ws, self.request, "op-routing-test", 0)
         from workflow import task_store
         task = task_store.read_task(self.ws)

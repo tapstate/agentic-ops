@@ -74,3 +74,5 @@ run_product tests/test_source_preservation.py
 run_product tests/test_station_development_reset.py
 run_product tests/test_station_terminal_redaction.py
 run_product tests/test_station_lifecycle.py
+run_product tests/test_takeover_correction.py
+run_product tests/test_jira_ownership.py

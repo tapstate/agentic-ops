@@ -17,6 +17,25 @@ python3 <agenticops-root>/workflow/task.py takeover \
 
 operation-id 使用 op- 前缀的稳定随机标识；重试保持同值和原请求。可选验证仓库在冻结前加入；所有必需仓库解析并核验后冻结完整工程。随后 repository context 读取 source 路径与基线，不使用远程页面替代本地事实。
 
+`--version` 表示主仓工程分支，TapData 对应 `tapdata/tapdata`；连接器等模块通过 `--explicit-branch owner/repo=branch` 指定。新接管先集中核验分支，失败不创建 run/op/current；远端不可用不等于分支不存在。完整边界以[接管合同](../architecture/single-task-station.md#接管归档与恢复)为准。
+
+预检成功后按同步待办重新读取 Jira 四项接管标记并登记回读，发布包含全部源码来源的接管评论，紧接着处理状态同步，再重试原 takeover 完成源码准备。未知外部结果先沿原意图回读，不重复发送；评论或状态待核验不冒充成功。
+
+### 更正未冻结接管的分支
+
+先用 status 和 repository context --full 回读当前任务、原 operation 及请求。只更正版本和逐仓覆盖，其他输入由程序从原请求保留。用户已明确两个仓库的分支时，直接引用该决定；Agent 整理命令，研发不需要填写摘要或内部编号。
+
+```sh
+python3 <agenticops-root>/workflow/task.py takeover-correct \
+  --issue-key TAP-13151 --expected-run-id <原run> --operation-id <原op> \
+  --expected-revision <当前任务revision> --expected-request-digest <原请求摘要> \
+  --version release-v4.21.0 \
+  --explicit-branch tapdata/tapdata-connectors-enterprise=release-v2.0.8 \
+  --decision-ref <用户已明确分支的决定来源> --dir <station>
+```
+
+`--explicit-branch` 提供更正后的完整覆盖集合，可重复指定；未列出的原覆盖不会保留。命令保存更正并继续原接管；中断后重复相同更正参数可回读，或用日志中的有效 request 和原 expected_revision 重试 takeover。更正使用当前任务 revision，原 takeover 重试仍使用操作创建时的 expected_revision，二者不混用。尚未冻结也不保证一定可更正：已有 checkout、未核实准备结果或本地独有源码时，先保留并核验具体对象；退出另用清理预检，不能直接删除 source。安装无此入口时不得手改状态冒充升级成功。
+
 ## 登记修改仓与阶段
 
 ```sh

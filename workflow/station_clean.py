@@ -151,7 +151,10 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
         # 仅沿已冻结正文核验原回执可独立收尾；新归档或重新生成正文仍需 Jira 接管。
         receipt_only = (same and jira_readback is not None
                         and old.get('archive_payload', {}).get('snapshot', {}).get('handoff') is not None)
-        identity = execution.enter(base, coordination=not receipt_only)
+        identity = execution.enter(base, coordination=False)
+        if not receipt_only:
+            from workflow import jira_ownership
+            jira_ownership.require(base, issue, archival=True)
         candidate = None
         if same:
             if (old['kind'] != kind or old['request_digest'] != baseline.digest(request)

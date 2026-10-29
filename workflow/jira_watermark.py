@@ -2,7 +2,7 @@
 """接管版本水印的确定性意图、回读与单次结果记录。
 
 实际 Jira 写入由 Agent 原生工具执行。本模块只准备精确字段载荷，并在回读确认
-前保留同步待办；外部同步结果不阻止本地任务推进。
+前保留同步待办；归属未通过时停止依赖归属的写入，通知和业务状态另行记录。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bootstrap import product_version  # noqa: E402
-from workflow import project_rules, task_store, sync_recovery, station_context, jira_coordination  # noqa: E402
+from workflow import project_rules, task_store, sync_recovery, station_context, jira_ownership, station_takeover  # noqa: E402
 
 
 def now():
@@ -175,6 +175,13 @@ def validate_record(record):
         marker_time(fields[mapping["begin_at"]])
     if record.get("verified_ref") is not None and (not isinstance(record["verified_ref"], str) or not record["verified_ref"].strip()):
         raise ValueError("Jira 标记首次核验来源无效")
+    if 'ownership' in record:
+        owner = record['ownership']
+        if (not isinstance(owner, dict) or set(owner) != {'site', 'issue_id', 'session_id'}
+                or not isinstance(owner['site'], str) or not owner['site'].startswith('https://')
+                or not isinstance(owner['issue_id'], str) or not owner['issue_id'].isdigit()
+                or not isinstance(owner['session_id'], str) or not re.fullmatch(r'[a-f0-9]{32}', owner['session_id'])):
+            raise ValueError('四项标记归属回读身份无效')
     outcome = record["outcome"]
     if outcome not in ("ready", "verified", "unknown", "failed", "stale"):
         raise ValueError("Jira 接管水印记录 outcome 无效")
@@ -215,10 +222,10 @@ def load_state(base, task):
 
 
 def save_state(base, task, state, recovery=None):
-    with task_store.task_run_lock(base, task["issue_key"]):
+    with task_store.task_run_lock(base, task["issue_key"], ownership=False):
         current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
         if recovery is None:
-            task_store.require_development(base, current)
+            station_takeover.require_external(base, current)
         else:
             sync_recovery.require_receipt(base, current)
             if load_state(base, current).get("watermark") != recovery:
@@ -226,7 +233,7 @@ def save_state(base, task, state, recovery=None):
             if recovery.get("verified_ref") and state["watermark"].get("verified_ref") != recovery["verified_ref"]:
                 raise ValueError("不得撤销或改写首次核验来源")
             sync_recovery.validate_update(recovery, state["watermark"],
-                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields", "verified_ref"})
+                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields", "verified_ref", "ownership"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 水印回执")
         task_store._write_json_atomic(state_path(base, task), state)
@@ -260,10 +267,10 @@ def config(base):
     return profile["jira"]["takeover_watermark"]
 
 
-@sync_recovery.locked
+@sync_recovery.local_locked
 def prepare(base, issue_key, snapshot):
     task = task_store.read_task(base, issue_key)
-    task_store.require_development(base, task)
+    station_takeover.require_external(base, task)
     state = load_state(base, task)
     previous = state.get("watermark")
     if config(base).get("schema_version") == 2:
@@ -313,7 +320,7 @@ def prepare(base, issue_key, snapshot):
     return record
 
 
-@sync_recovery.locked
+@sync_recovery.local_locked
 def complete(base, issue_key, outcome, snapshot, message=""):
     if outcome not in ("failed", "unknown"):
         raise ValueError("无效水印回执结果")
@@ -324,10 +331,10 @@ def complete(base, issue_key, outcome, snapshot, message=""):
         raise ValueError("当前 task/run 没有待回读的 Jira 接管水印意图")
     sync_recovery.require_receipt(base, task)
     original = copy.deepcopy(record)
-    fields, issue_type_id = issue_from(snapshot, issue_key)
-    rules = config(base)
     if record.get("marker_version") == 2:
         return complete_markers(base, task, state, snapshot, outcome, message)
+    fields, issue_type_id = issue_from(snapshot, issue_key)
+    rules = config(base)
     if issue_type_id != record["issue_type_id"] or issue_type_id not in rules["issue_type_ids"]:
         raise ValueError("Jira 工作项类型已变化或不再适用接管版本水印")
     product_root = project_rules.product_root_from_station(base)
@@ -382,7 +389,7 @@ def prepare_markers(base, task, state, snapshot):
                 raise ValueError("旧标记缺少核验历史，不能证明原操作从未成功；仅回读或交接，不重复写入")
             if result.get("verified_ref"):
                 raise ValueError("原标记曾经核验成功；当前变化不能解释为原写入未生效，禁止重复写入")
-            jira_coordination.require(base, task["issue_key"])
+            jira_ownership.inspect(base, task["issue_key"], snapshot, task)
             if (not isinstance(snapshot["not_applied_ref"], str) or not snapshot["not_applied_ref"].strip()
                     or actual != previous["previous_fields"]):
                 raise ValueError("重试必须确认原写入未生效，且当前四项仍等于原写前观察")
@@ -392,7 +399,7 @@ def prepare_markers(base, task, state, snapshot):
         return dict(result, repeated=True)
     if not issue_routing.marker_type_allowed(profile, task, issue_type):
         raise ValueError("Jira 事务类型未配置接管标记")
-    jira_coordination.require(base, task["issue_key"])
+    ownership = jira_ownership.inspect(base, task["issue_key"], snapshot, task)
     actual = marker_values(fields, rules, snapshot)
     actor = snapshot.get("current_user", {})
     if (not isinstance(actor, dict) or actor.get("active") is not True or
@@ -424,7 +431,7 @@ def prepare_markers(base, task, state, snapshot):
               "issue_type_id": issue_type, "version": expected[rules["field_id"]], "write_mode": "overwrite",
               "marker_version": 2, "marker_fields": mapping, "expected_fields": expected, "actor": actor,
               "previous_fields": actual, "previous_takeover": snapshot.get("previous_takeover"),
-              "payload_digest": marker_digest(expected), "verified_ref": None}
+              "payload_digest": marker_digest(expected), "verified_ref": None, "ownership": ownership}
     if markers_equal(actual, expected, mapping["begin_at"]):
         record.update(outcome="verified", reason="already_current", completed_at=now(),
                       readback_ref=snapshot["source_ref"], readback_fields=actual, readback_value=record["version"],
@@ -443,17 +450,23 @@ def prepare_markers(base, task, state, snapshot):
 def complete_markers(base, task, state, snapshot, outcome, message):
     record = state["watermark"]
     original = copy.deepcopy(record)
-    fields, issue_type = issue_from(snapshot, task["issue_key"])
     # 兼容旧 verified 记录：在覆盖最新观察前保全已发生的核验事实。
     if original["outcome"] == "verified" and not record.get("verified_ref"):
         record["verified_ref"] = original["readback_ref"]
     try:
-        if issue_type != record["issue_type_id"] or issue_type not in config(base)["issue_type_ids"]:
+        fields, issue_type = issue_from(snapshot, task["issue_key"])
+        from workflow import issue_routing
+        if (issue_type != record["issue_type_id"] or not issue_routing.marker_type_allowed(
+                project_rules.load_profile(station=base), task, issue_type)):
             raise ValueError("Jira 工作项类型已变化或不再适用接管标记")
+        ownership = jira_ownership.inspect(base, task["issue_key"], snapshot, task, readback=True)
+        previous_identity = record.get('ownership', {})
+        if previous_identity and any(previous_identity.get(k) != ownership[k] for k in ('site', 'issue_id')):
+            raise ValueError('Jira 归属回读站点或任务 ID 已变化')
         actual = marker_values(fields, record, snapshot)
     except ValueError:
         record.update(outcome="unknown", reason="markers_unreadable", completed_at=now(),
-                      readback_ref=snapshot["source_ref"], readback_fields={}, readback_value=None)
+                      readback_ref=snapshot.get("source_ref") or "unreadable:ownership-readback", readback_fields={}, readback_value=None)
         record.pop("native_request", None)
         save_state(base, task, state, recovery=original)
         raise
@@ -463,11 +476,11 @@ def complete_markers(base, task, state, snapshot, outcome, message):
     if markers_equal(actual, record["expected_fields"], record["marker_fields"]["begin_at"]):
         if not record.get("verified_ref"):
             record["verified_ref"] = snapshot["source_ref"]
-        record.update(outcome="verified", reason="markers_read_back")
+        record.update(outcome="verified", reason="markers_read_back", ownership=ownership)
         record.pop("guidance", None)
     else:
         record.update(outcome=outcome, reason="markers_" + outcome)
-        record["guidance"] = [{"guidance": "四项标记未一致，暂停接管摘要；先核实原写入及接管归属，不能盲目重发。无依赖研发可继续。"}]
+        record["guidance"] = [{"guidance": "四项标记未一致，暂停依赖归属的写入及接管摘要；先核实原写入及接管归属，不能盲目重发。无依赖研发可继续。"}]
         if message:
             record["message"] = ("外部错误信息含敏感内容，原文未保存" if project_rules.scan_sensitive(
                 project_rules.load_admission(station=base), str(message)) else str(message)[:600])
@@ -505,7 +518,7 @@ def takeover_warnings(base, task):
         return []
     if record.get("outcome") == "missing":
         return ["接管版本水印尚未准备；先读取 Jira 快照并执行 jira_watermark.py prepare"]
-    return ["接管版本水印未回读验证（当前 %s）；本地流程可继续" % record.get("outcome")]
+    return ["接管版本水印未回读验证（当前 %s）；依赖归属的写入暂停，独立只读核验可继续" % record.get("outcome")]
 
 
 def main():
@@ -530,12 +543,12 @@ def main():
     try:
         task_store.station_project(args.dir)
         issue_key = task_store.resolve_issue(args.dir, args.issue_key)
-        with task_store.task_run_lock(args.dir, issue_key, execution=args.command != "status"):
+        with task_store.task_run_lock(args.dir, issue_key, execution=args.command != "status", ownership=False):
             task = task_store.read_task(args.dir, issue_key)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue_key, args.expected_run_id)
                 if args.command != "complete":
-                    task_store.require_development(args.dir, task)
+                    station_takeover.require_external(args.dir, task)
             if args.command == "prepare":
                 result = prepare(args.dir, issue_key, read_input(args.input))
             elif args.command == "complete":

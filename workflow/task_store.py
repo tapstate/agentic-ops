@@ -321,6 +321,7 @@ def task_state_lock(
     allow_incompatible_station=False,
     execution=True,
     refresh_activity=True,
+    ownership=True,
 ):
     """持有工位状态目录锁，并在获得锁后重新核验工位绑定。
 
@@ -383,7 +384,7 @@ def task_state_lock(
             if not allow_incompatible_station:
                 _require_station_epoch_supported(base, current_root)
             from workflow import execution as execution_control
-            identity = execution_control.enter(base) if execution else None
+            identity = execution_control.enter(base, coordination=ownership) if execution else None
             held[lock_key] = execution
             try:
                 yield
@@ -398,9 +399,9 @@ def task_state_lock(
 
 
 @contextmanager
-def task_run_lock(base, issue_key, refresh_activity=True, execution=True):
+def task_run_lock(base, issue_key, refresh_activity=True, execution=True, ownership=True):
     validate_issue_key(issue_key)
-    with task_state_lock(base, refresh_activity=refresh_activity, execution=execution):
+    with task_state_lock(base, refresh_activity=refresh_activity, execution=execution, ownership=ownership):
         yield
 
 

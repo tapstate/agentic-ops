@@ -12,6 +12,15 @@ def locked(function):
     return invoke
 
 
+def local_locked(function):
+    """仅用于归属核验自身：仍保护本地会话，不循环依赖已有远端归属。"""
+    @wraps(function)
+    def invoke(base, issue_key, *args, **kwargs):
+        with task_store.task_run_lock(base, issue_key, ownership=False):
+            return function(base, issue_key, *args, **kwargs)
+    return invoke
+
+
 def require_receipt(base, task):
     """调用者另须核验原意图；必须在工位锁内检查和保存。"""
     current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
@@ -34,6 +43,9 @@ def require_receipt(base, task):
     if current.get("outcome") == "interrupted":
         raise ValueError("任务已终止，不能补写活动回执")
     if operation and operation.get("status") != "done":
+        from workflow import station_takeover
+        if station_takeover.preparing(base, current):
+            return
         if operation.get("run_id") != task["run_id"] or operation.get("kind") not in ("archive", "release", "clean"):
             raise ValueError("工位有其它未完成操作，请先恢复")
         plan = operation.get('cleanup_plan')
