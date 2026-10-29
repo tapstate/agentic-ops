@@ -257,7 +257,7 @@ def detach_preflight(product_root, station, purge=False, tree=None):
         raise ValueError("工位仍被任务占用，必须先归档并释放或清理，不能解绑")
     from workflow import jira_coordination
     if jira_coordination.pending(station):
-        raise ValueError("Jira 协调记录尚未结束回读；清理可完成，注销前先 coordination end/complete 收尾")
+        raise ValueError("旧 Jira 协调写入结果尚未核实；清理可完成，注销前先原生回读并 coordination retire，保留恢复线索")
     from workflow import station_cleanup
     if station_cleanup.pending_corrections(station):
         raise ValueError('清理成果更正尚未回读；先收尾，注销不能删除唯一同步线索')

@@ -42,6 +42,10 @@ class StationTests(unittest.TestCase):
         epoch = json.loads((self.product / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
         self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": epoch, "cleanup": json.loads((self.product / "policies/station-clean.json").read_text())})
         task_store.initialize_current(self.ws)
+        from station_fixture import prepared_ownership_fixture
+        self.ownership_barrier = mock.patch('workflow.station_takeover.publication_ready', side_effect=prepared_ownership_fixture)
+        self.ownership_barrier.start()
+        self.addCleanup(self.ownership_barrier.stop)
 
     def prepare_engineering(self, count=1):
         """显式选择临时工程规模；不改正式项目、不共享可变仓库。"""
@@ -75,7 +79,8 @@ class StationTests(unittest.TestCase):
         self.request = {"issue_key": "TAP-123", "task_class": "technical_task", "version": "develop", "profile": "full-application",
                         "explicit_branches": {name: "develop" for name in profile["repositories"]}}
 
-        from station_fixture import coordination_proof
+        from station_fixture import coordination_proof, ownership_snapshot
+        self.request.setdefault("jira_snapshot", ownership_snapshot(self.ws))
         coordination_proof(self.ws, self.request["issue_key"])
 
     def write(self, path, value):
@@ -97,12 +102,12 @@ class StationTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         return task
 
-    def test_reference_refresh_precedes_run_and_skips_operation_replay(self):
+    def test_reference_refresh_follows_persisted_preflight_and_skips_replay(self):
         self.prepare_engineering()
         def refresh(base):
-            self.assertIsNone(station_operation.read(base))
-            self.assertIsNone(task_store.read_current(base)['current'])
-            self.assertFalse((self.product / '.archive').exists())
+            self.assertIsNotNone(station_operation.read(base)['takeover_baseline'])
+            self.assertIsNotNone(task_store.read_current(base)['current'])
+            self.assertFalse((self.ws / 'source/tapdata/tapdata').exists())
         with mock.patch.object(station.source, 'refresh_shared_references', side_effect=refresh) as update:
             self.takeover()
             station.takeover(self.ws, self.request, 'op-takeover-one', 0)
@@ -311,6 +316,8 @@ class StationTests(unittest.TestCase):
                                    'expected_head': head}})
                 from station_fixture import coordination_proof
                 coordination_proof(ws, request['issue_key'])
+                from station_fixture import ownership_snapshot
+                request['jira_snapshot'] = ownership_snapshot(ws, request['issue_key'])
                 station.takeover(ws, request, 'op-recover-' + str(epoch), 0)
                 task = task_store.read_task(ws)
                 self.assertEqual(old, task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'])

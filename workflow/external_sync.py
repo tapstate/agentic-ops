@@ -130,7 +130,7 @@ def warnings(base, task, report=None):
     attempts = jira_status.load_state(base, task)["attempts"]
     status_rules = jira_status.config(base, task)
     if status_rules.get("attempts"):
-        due = ["takeover"] if task.get("stage") != "waiting_takeover" else []
+        due = ["takeover"]
         if task.get("stage") in ("ci_validation", "completed"):
             due.append("tests_passed")
         for node in due:
@@ -146,7 +146,7 @@ def warnings(base, task, report=None):
     if not quality.enabled(task, rules):
         return result
     report = report or quality.report(quality.load(base, task), rules, quality.context(base, task), base=base, task=task)
-    intake_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
+    intake_id = takeover_publication_id(base, task, report.get("publications", {}))
     if (rules.get("publication_mode") == "checkpoint" and jira_watermark.config(base).get("schema_version") == 2
             and task.get("source_prepared") and intake_id not in report.get("publications", {})):
         add("takeover_summary", "deferred", "接管待收尾：人读摘要尚未发起；先核验四项标记，再处理 takeover_comment")
@@ -156,28 +156,85 @@ def warnings(base, task, report=None):
     return result
 
 
-def takeover_body(task, publication_id, watermark):
-    """从接管标记及冻结源码基线生成人读摘要；内部发布 ID 不进入正文。"""
-    lines = ["版本：AgenticOps %s" % watermark["version"],
-             "操作人：%s" % watermark["actor"]["displayName"],
-             "运行编号：%s" % task["run_id"], "任务类型：%s" % task["task_class"], "", "仓库分支列表："]
-    repositories = task.get("engineering_baseline", {}).get("repositories", {})
+def takeover_sources(base, task):
+    from workflow import station_operation
+    current = task.get('engineering_baseline', {})
+    if current.get('status') == 'frozen':
+        return current.get('repositories', {})
+    operation = station_operation.read(base) or {}
+    value = operation.get('takeover_baseline') if operation.get('run_id') == task['run_id'] else None
+    return (value or task.get('engineering_baseline', {})).get('repositories', {})
+
+
+def takeover_publication_id(base, task, publications=None):
+    from workflow import station_operation
+    root = 'takeover-' + quality.digest([task['issue_key'], task['run_id']])[:20]
+    operation = station_operation.read(base) or {}
+    records = [(key, record) for key, record in (publications or {}).items()
+               if is_takeover_publication(task, key)]
+    for key, record in records:
+        if record['status'] in ('intent', 'created', 'unknown'):
+            return key  # 先回读未知旧发送，不用更正掩盖原意图。
+    if not records:
+        return root
+    key, latest = records[-1]
+    body = latest.get('body', '')
+    sources = takeover_sources(base, task)
+    explicit_change = operation.get('run_id') == task['run_id'] and operation.get('takeover_revisions')
+    previous_sources = task.get('replan', {}).get('sources')
+    explicit_change = explicit_change or (isinstance(previous_sources, dict) and set(previous_sources) != set(sources))
+    if not body.startswith('AgenticOps 已接管') and not explicit_change:
+        return key  # 旧已发模板不因升级补发。
+    marker = jira_watermark.status(base, task)
+    if not sources or marker.get('marker_version') != 2:
+        return key
+    expected = takeover_body(task, key, marker, sources)
+    if takeover_source_lines(body) == takeover_source_lines(expected):
+        return key
+    # 引用上次发布身份，A→B→A→B 也各有替代说明；普通重试仍稳定。
+    return root + '-sources-' + quality.digest([sources, key])[:20]
+
+
+def takeover_source_lines(body):
+    # 仅比较已保存评论的来源列表，避免模板排版升级产生重复评论；不用于写入回读验收。
+    sources = body.partition('本次确认的源码来源：')[2].partition('以上为本次选定的源码来源')[0]
+    return [line.strip().removeprefix('- ').removeprefix('* ') for line in sources.splitlines() if line.strip()]
+
+
+def is_takeover_publication(task, key):
+    import re
+    root = 'takeover-' + quality.digest([task['issue_key'], task['run_id']])[:20]
+    return isinstance(key, str) and bool(re.fullmatch(re.escape(root) + r'(?:-sources-[a-f0-9]{20})?', key))
+
+
+def takeover_body(task, publication_id, watermark, repositories=None):
+    """预检来源不等于源码已准备；旧已发布正文按原日志保留。"""
+    lines = ['AgenticOps 已接管，开始处理本任务。',
+             '操作人：' + watermark['actor']['displayName'], '版本：' + watermark['version'],
+             '工位：' + watermark['expected_fields'][watermark['marker_fields']['station']],
+             '运行编号：' + task['run_id'], '', '本次确认的源码来源：']
+    if '-sources-' in publication_id:
+        lines.insert(1, '源码来源更正：以下列表替代本 run 先前接管评论中的来源信息。')
+    repositories = repositories if repositories is not None else task.get('engineering_baseline', {}).get('repositories', {})
+    if not repositories:
+        raise ValueError('接管评论缺少完整已核验的源码来源')
     for name, repository in sorted(repositories.items()):
-        kind, ref = repository.get("ref_kind"), repository.get("ref_name")
-        if kind == "branch" and ref:
-            lines.append("- %s：%s" % (name, ref))
-        elif kind in ("tag", "sha", "commit"):
-            lines.append("- %s：无分支（%s：%s）" % (name, "Tag" if kind == "tag" else "SHA", ref or repository.get("commit_sha", "")))
+        kind, ref = repository.get('ref_kind'), repository.get('ref_name')
+        if kind == 'branch' and ref:
+            lines.append('%s：%s' % (name, ref))
+        elif kind in ('tag', 'sha', 'commit'):
+            lines.append('%s：无分支（%s：%s）' % (name, 'Tag' if kind == 'tag' else 'SHA', ref or repository.get('commit_sha', '')))
         else:
-            raise ValueError("冻结仓库缺少已核验来源分支或 Tag/SHA：%s" % name)
-    return "\n".join(lines)
+            raise ValueError('仓库缺少已核验来源分支或 Tag/SHA：' + name)
+    lines.extend(['', '以上为本次选定的源码来源，源码准备尚未完成。'])
+    return '\n\n'.join(line for line in lines if line)
 
 
 def takeover_progress(base, task, publications, *, summary_required=True):
     """接管事务的只读投影；所有证据仍由原协调、水印和发布模块拥有。"""
-    from workflow import jira_coordination
+    from workflow import jira_ownership
     try:
-        jira_coordination.require(base, task["issue_key"])
+        jira_ownership.require(base, task["issue_key"])
         coordination = True
         reason = ""
     except ValueError as error:
@@ -186,11 +243,10 @@ def takeover_progress(base, task, publications, *, summary_required=True):
     rules = jira_watermark.config(base)
     marker_ready = (jira_watermark.summary_ready(base, task) if rules.get("schema_version") == 2
                     else marker.get("outcome") == "verified")
-    publication_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
+    publication_id = takeover_publication_id(base, task, publications)
     publication = publications.get(publication_id, {})
     source_ready = bool(task.get("source_prepared"))
-    steps = {"coordination": coordination, "source": source_ready,
-             "markers": marker_ready, "summary": not summary_required or publication.get("status") == "verified"}
+    steps = {"markers": coordination and marker_ready, "summary": not summary_required or publication.get("status") == "verified", "source": source_ready}
     missing = [key for key, done in steps.items() if not done]
     field_ids = [rules["field_id"], *rules.get("marker_fields", {}).values()]
     marker_id = "markers-" + quality.digest([task["issue_key"], task["run_id"], "takeover-markers"])[:24]
@@ -206,7 +262,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
             "steps": steps, "remaining": missing, "next_step": next_step,
             "reason": reason or ("" if not missing else "缺少已核验的" + "、".join(missing)),
             "independent_read_only_allowed": True,
-            "coordination_note": "AgenticOps 任务接管协调 v1 是系统协调记录，人读摘要单独发布；远端变化需重新原生回读",
+            "ownership_note": "四项标记不证明在线或全局互斥；工作段和关键写入前重新原生回读",
             "markers": {"operation_id": marker_id, "status": marker["outcome"],
                 "write_started": "not_attempted" if marker["outcome"] == "missing" else "unknown" if marker["outcome"] == "ready" else marker["outcome"],
                 "expected_fields": marker.get("expected_fields"),
@@ -214,7 +270,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                 "command": {"script": "workflow/jira_watermark.py", "action": marker_action,
                     "issue_key": task["issue_key"], "expected_run_id": task["run_id"],
                     **({"outcome": "unknown"} if marker_action == "complete" else {})},
-                "required_input": ["source_ref", "issue", "current_user"] if marker_action == "prepare" else ["source_ref", "issue"],
+                "required_input": ["site", "source_ref", "issue", "current_user"],
                 "recovery": "缺 value 不等于 null；显式字段补查。已有意图先 complete 回读；仅证实未生效且归属未变才 prepare 重试原载荷"},
             "summary": {"required": summary_required, "publication_id": publication_id, "operation_id": publication.get("operation_id"),
                 "status": publication.get("status", "not_attempted"),
@@ -225,7 +281,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
 
 def actions(base, task, report=None):
     """从既有事实派生工作清单；查询不写草稿、意图或第二份队列。"""
-    from workflow import sync_recovery, jira_coordination
+    from workflow import sync_recovery, jira_ownership, station_takeover
     rules = quality.config(base, task)
     enabled = quality.enabled(task, rules)
     if report is None:
@@ -233,8 +289,8 @@ def actions(base, task, report=None):
     pending = warnings(base, task, report)
     result = []
     try:
-        task_store.require_development(base, task)
-        jira_coordination.require(base, task["issue_key"])
+        station_takeover.require_external(base, task)
+        jira_ownership.require(base, task["issue_key"])
         active = True
     except ValueError:
         active = False
@@ -243,6 +299,11 @@ def actions(base, task, report=None):
         recovery = True
     except ValueError:
         recovery = False
+    try:
+        station_takeover.require_external(base, task)
+        can_prepare_markers = True
+    except ValueError:
+        can_prepare_markers = False
 
     def add(key, kind, state, body=None, record=None, **extra):
         next_action = ("readback" if recovery else "maintenance_handoff") if state == "unknown" else (
@@ -256,8 +317,8 @@ def actions(base, task, report=None):
             row["record"] = record
         result.append(row)
 
-    publications = report.get("publications", {})
-    intake_id = "takeover-" + quality.digest([task["issue_key"], task["run_id"]])[:20]
+    publications = report.get("publications", quality.replay(quality.load(base, task))["publications"])
+    intake_id = takeover_publication_id(base, task, report.get("publications", {}))
     covered = set()
     for key, record in publications.items():
         if record["status"] == "verified":
@@ -273,13 +334,13 @@ def actions(base, task, report=None):
             if not active:
                 result[-1]["next_action"] = "manual_handoff"
                 continue
-            if not task.get("source_prepared"):
+            if not takeover_sources(base, task):
                 result[-1]["next_action"] = "prepare_source"
                 continue
             if not jira_watermark.summary_ready(base, task):
                 result[-1].update(next_action="verify_takeover_markers", reason="先回读四项接管标记，再恢复摘要")
                 continue
-            body = takeover_body(task, intake_id, jira_watermark.status(base, task))
+            body = takeover_body(task, intake_id, jira_watermark.status(base, task), takeover_sources(base, task))
             if body != record["body"] or not record.get("snapshot_current", False) or record["status"] == "deferred":
                 result[-1].update(body=body, next_action="refresh_and_confirm", refresh_required=True)
                 continue
@@ -287,12 +348,12 @@ def actions(base, task, report=None):
             result[-1]["next_action"] = "refresh_and_confirm" if active else "manual_handoff"
             if cp and report.get("checkpoints", {}).get(cp, {}).get("reviewed"):
                 result[-1]["body"] = report["checkpoints"][cp]["publication_body"]
-    if enabled and rules.get("publication_mode") == "checkpoint":
+    if rules and rules.get("publication_mode") == "checkpoint":
         if intake_id not in publications:
-            if task.get("source_prepared") and jira_watermark.summary_ready(base, task):
+            if takeover_sources(base, task) and jira_watermark.summary_ready(base, task):
                 add(intake_id, "takeover_comment", "not_attempted",
-                    body=takeover_body(task, intake_id, jira_watermark.status(base, task)))
-        for cp, view in report.get("checkpoints", {}).items():
+                    body=takeover_body(task, intake_id, jira_watermark.status(base, task), takeover_sources(base, task)))
+        for cp, view in (report.get("checkpoints", {}) if enabled else {}).items():
             if view["reviewed"] and not view["published"] and cp not in covered:
                 key = cp + "-" + quality.digest([task["run_id"], view["publication_body"]])[:20]
                 add(key, "checkpoint_comment", "not_attempted", body=view["publication_body"], checkpoint=cp)
@@ -330,17 +391,17 @@ def actions(base, task, report=None):
                 record.get("readback_ref") and record.get("readback_value") == record.get("version")))
             result[-1]["current_version_sync"] = "同一 run 保留原接管版本与时间；回执不改变原目标"
     progress = takeover_progress(base, task, publications,
-        summary_required=enabled and rules.get("publication_mode") == "checkpoint"
+        summary_required=bool(rules) and rules.get("publication_mode") == "checkpoint"
                          and jira_watermark.config(base).get("schema_version") == 2)
     for row in result:
         if row["kind"] == "agenticops_version" and jira_watermark.config(base).get("schema_version") == 2:
             row.update(progress["markers"])
             if row["command"]["action"] == "prepare":
-                row["next_action"] = ("read_fields_then_prepare" if task.get("source_prepared") else "prepare_source") if active else "manual_handoff"
+                row["next_action"] = "read_fields_then_prepare" if can_prepare_markers else "manual_handoff"
             else:
                 row["next_action"] = "readback" if recovery else "manual_handoff"
         if row["id"] == intake_id:
-            row["quality_revision"] = report.get("revision")
+            row["quality_revision"] = quality.load(base, task)["revision"]
             row["readback_requirements"] = progress["summary"]["readback_requirements"]
             record = publications.get(intake_id, {})
             # 在途只能回读；受阻动作不再附带可被误执行的写命令。

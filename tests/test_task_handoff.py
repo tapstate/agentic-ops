@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parent)]
 import test_station_records as records
-from station_fixture import coordination_proof
+from station_fixture import coordination_proof, ownership_snapshot
 from workflow import station, station_archive, station_operation, task_store, task_handoff
 
 
@@ -73,7 +73,8 @@ class HandoffTests(unittest.TestCase):
         task_store.initialize_current(self.ws)
         self.request = {
             'issue_key': 'TAP-123', 'task_class': 'technical_task', 'version': 'develop',
-            'profile': 'full-application', 'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation}
+            'profile': 'full-application', 'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation,
+            'jira_snapshot': ownership_snapshot(self.ws)}
         # 归档不携带接管权；本测试单独提供新工位已核实交接的夹具。
         coordination_proof(self.ws, 'TAP-123')
         station.takeover(self.ws, self.request, 'op-new-handoff-run', 0)
@@ -126,7 +127,8 @@ class HandoffTests(unittest.TestCase):
         continuation = task_handoff.continuation_input(packet)
         request = {'issue_key': packet['issue_key'], 'task_class': packet['task_class'],
             'version': 'develop', 'profile': 'full-application',
-            'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation}
+            'explicit_branches': {'tapdata/tapdata': 'develop'}, 'continuations': continuation,
+            'jira_snapshot': ownership_snapshot(self.ws)}
         station.takeover(self.ws, request, 'op-independent-recovery', 0)
         task = task_store.read_task(self.ws)
         row = continuation['tapdata/tapdata']

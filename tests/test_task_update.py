@@ -85,6 +85,10 @@ class TaskUpdateTests(unittest.TestCase):
         import test_task_handoff
         from workflow import task_store
         from unittest import mock
+        from station_fixture import prepared_ownership_fixture
+        registration = mock.patch('workflow.station_takeover.publication_ready', side_effect=prepared_ownership_fixture)
+        registration.start()
+        self.addCleanup(registration.stop)
         flow = test_task_handoff.HandoffTests()
         flow.root = self.root / 'business-fixture'
         flow.root.mkdir()

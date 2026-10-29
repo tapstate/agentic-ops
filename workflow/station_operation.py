@@ -49,6 +49,31 @@ def read(base):
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
             or not isinstance(value["phase"], str) or not value["phase"]):
         raise ValueError("工位操作日志身份或请求摘要无效")
+    revisions = value.get("takeover_revisions", [])
+    if not isinstance(revisions, list):
+        raise ValueError("接管更正历史无效")
+    if any(not isinstance(revision, dict) or not isinstance(revision.get("before_request"), dict) for revision in revisions):
+        raise ValueError("接管更正历史无效")
+    for index, revision in enumerate(revisions):
+        following = revisions[index + 1]["before_request"] if index + 1 < len(revisions) else value["request"]
+        if (value["kind"] != "takeover" or not isinstance(revision, dict)
+                or not isinstance(revision.get("before_request"), dict)
+                or revision.get("before_digest") != engineering_baseline.digest(revision["before_request"])
+                or revision.get("after_digest") != engineering_baseline.digest(following)
+                or type(revision.get("expected_revision")) is not int or revision["expected_revision"] < 0
+                or not isinstance(revision.get("decision_ref"), str) or not revision["decision_ref"].strip()):
+            raise ValueError("接管更正历史摘要或决定来源无效")
+        fixed_before = {k: v for k, v in revision["before_request"].items() if k not in ("version", "explicit_branches")}
+        fixed_after = {k: v for k, v in following.items() if k not in ("version", "explicit_branches")}
+        if fixed_before != fixed_after:
+            raise ValueError("接管更正不能改变任务、工程范围或续办输入")
+    if "takeover_baseline" in value:
+        engineering_baseline.validate(value["takeover_baseline"])
+        expected_input = {"version": value["request"].get("version"),
+                          "explicit_branches": value["request"].get("explicit_branches", {}),
+                          "optional_repositories": sorted(value["request"].get("optional_repositories", []))}
+        if value["kind"] != "takeover" or value["takeover_baseline"]["resolution_input"] != expected_input:
+            raise ValueError("接管预检基线与有效请求不一致")
     # 已完成操作只供历史查阅；未完成计划才要求满足当前执行合同。
     if value["status"] != "done":
         from workflow.station_clean_rules import validate_snapshot
@@ -99,8 +124,9 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None, bef
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
-        if before_create is not None:
-            before_create()
+        takeover_baseline = before_create() if before_create is not None else None
+        if takeover_baseline is not None:
+            engineering_baseline.validate(takeover_baseline)
         from workflow import archive_store
         for attempt in range(2):
             run_id = task_store.new_run_id(issue_key)
@@ -122,6 +148,8 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None, bef
         "expected_revision": expected_revision, "phase": "intent", "status": "running",
         "request": copy.deepcopy(request), "steps": {},
     }
+    if kind == "takeover" and takeover_baseline is not None:
+        value["takeover_baseline"] = copy.deepcopy(takeover_baseline)
     if previous and previous.get('protected_paths'):
         value['protected_paths'] = previous['protected_paths']
     inherited = list(previous.get("retained_results", [])) if previous else []

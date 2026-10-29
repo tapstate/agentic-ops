@@ -18,9 +18,11 @@ def emit(value, details=False, output=None, base=None):
                 result = {}
                 for key, child in item.items():
                     if key == 'cleanup_plan':
-                        if child.get('schema_version') == 8:
+                        if child.get('schema_version') in (8, 9):
                             result['cleanup_plan'] = {'scope': child['scope'], 'digest': child['digest'],
                                 'paths': [row['path'] for row in child['targets']], 'source': bounded(child['source'])}
+                            if 'source_reuse' in child:
+                                result['cleanup_plan']['source_reuse'] = bounded(child['source_reuse'])
                         else:
                             result['object_count'] = len(child.get('objects', []))
                     elif isinstance(child, list):

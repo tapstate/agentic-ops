@@ -158,7 +158,11 @@ with mock.patch.object(subject.source, 'git', side_effect=interrupted):
         self.assertEqual(result['status'], 'done')
         self.assertTrue(result['cleanup_result']['complete'])
         self.assertFalse(list((self.ws / 'runtime').iterdir()))
-        self.assertFalse(list((self.ws / 'source').iterdir()))
+        for item in preview['source_reuse']['repositories']:
+            repo = self.ws / item['path']
+            self.assertTrue((repo / '.git').is_dir())
+            self.assertEqual(self.git(repo, 'rev-parse', 'HEAD'), item['target_sha'])
+            self.assertEqual(self.git(repo, 'status', '--porcelain'), '')
 
     def cli_error(self):
         from projects.tapdata.scripts.test_environment import main

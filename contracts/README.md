@@ -14,7 +14,7 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
 - `station-layout.json`：工位固定路径、结构角色和合法动作能力，由 Bootstrap 与 Workflow 共同读取，不提供默认清理动作。
-- `station-reset.schema.json`：当前整区清理计划，格式版本以 Schema 为准；未完成旧计划须由原版本核实收尾，不在线转换。历史档案保留，不作为可恢复执行合同。
+- `station-reset.schema.json`：生命周期清理计划；v9 增加逐仓归位与明确删除兜底，v8 在途计划按原整区删除语义恢复，不静默转换。归位依赖及私有恢复区职责见[任务数据描述](../workflow/task-data.md#源码归位依赖)。其它旧计划须由原版本核实收尾。
 - `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：任务模块拥有的 current 信封、阶段、事实、仓库和恢复状态；依赖含义、来源、修补入口及备份清理见 [任务状态依赖描述](../workflow/task-data.md)，其它功能使用 task_store 接口。

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agenticops.tapdata.net/contracts/station-reset.schema.json",
-  "title": "生命周期整区清理计划",
+  "title": "生命周期清理计划：旧整区删除与源码归位复用",
   "type": "object",
   "required": [
     "schema_version",
@@ -16,7 +16,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 8
+      "enum": [
+        8,
+        9
+      ]
     },
     "scope": {
       "enum": [
@@ -39,7 +42,7 @@
     },
     "targets": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "items": {
         "type": "object",
         "required": [
@@ -101,6 +104,166 @@
     "digest": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_reuse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositories",
+        "extras"
+      ],
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "parent",
+              "snapshot",
+              "recreate",
+              "repository",
+              "origin",
+              "target_sha",
+              "action",
+              "reason",
+              "object_source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "parent": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 3
+              },
+              "snapshot": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "identity",
+                      "digest"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "identity": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 3
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                ]
+              },
+              "recreate": {
+                "type": "boolean"
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 1
+              },
+              "origin": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target_sha": {
+                "type": "string",
+                "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+              },
+              "action": {
+                "enum": [
+                  "restore",
+                  "delete"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "object_source": {
+                "enum": [
+                  "repository",
+                  "cache",
+                  "remote",
+                  "missing"
+                ]
+              }
+            }
+          }
+        },
+        "extras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "parent",
+              "snapshot",
+              "recreate"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "parent": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 3
+              },
+              "snapshot": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "identity",
+                      "digest"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "identity": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 3
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                ]
+              },
+              "recreate": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

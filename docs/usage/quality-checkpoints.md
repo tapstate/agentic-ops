@@ -17,7 +17,7 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 配置缺失时先查全站活动字段及类似语义、类型和上下文，复用匹配字段；确认无对应字段才创建，并检查项目字段方案、编辑屏幕和中文翻译。本次复用原 `Agentic Run ID`、`Agentic Takeover Time`，保留 ID 和历史值。字段不在某个工作项回读结果中，不等于全站不存在。
 
-先完成既有[接管协调](../architecture/single-task-station.md#jira-任务级接管协调与授权)，再读取工作项四个字段及 `issuetype.id`，明确返回 null 与未返回字段的区别。`jira_watermark.py prepare` 的输入包含 `source_ref`、原生 `issue`，以及从同一 Jira 连接读取的 `current_user`（accountId、displayName、active=true、source_ref）。已有不同工位/run 或不完整标记时，先核实原 run 归档、清理或交接，将依据放入 `previous_takeover.evidence_ref`，并以 `previous_takeover.observed_fields` 绑定本次读到的四项原值；标记本身不证明原执行者停写，也不替代现有协调要求。
+接管前先读取 Jira 站点、任务 ID/key、当前用户及四项标记，完整分支预检通过并持久化 run/op 后再写标记。`jira_watermark.py prepare/complete` 的输入含 site、source_ref、原生 issue（保留 id/key/fields）及同一连接的 current_user（accountId、displayName、active=true、source_ref）。四项明确为空才视为空；其它完整归属需提供 previous_takeover.observed_fields、evidence_ref、decision_ref、conflict_check_ref，绑定人工交接与旧执行者停写核实。残缺字段先修复，不猜值。通用内核使用 Project 字段映射，未配置四项标记的项目不能自动接管。
 
 字段读取接受原生 `issue.fields[field_id]`，或连接器 `issue.fields.customFields` 中以 `id` 定位且显式包含 `value` 的条目。`value` 为字符串表示有值，显式 null 表示已确认空；条目只有 id、字段省略均为 `unreturned`，明确 401/403 为 `forbidden`。不能从可编辑 metadata、allowedValues 或字段名存在推断空值。读失败返回 `field_observations` 和恢复要求，不创建可发送载荷；已有 verified 标记再次回读不可读时恢复为 unknown，禁止沿旧结论发送摘要。
 
@@ -37,17 +37,17 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 上述仅示范输入结构，不是任何真实任务为空的证据。补查仅补缺项或核对一致值；与已有明确值或其它补查冲突时拒绝合并，重新完整回读四项字段，不能以排列顺序覆盖他站标记。写前仍重新核验接管归属。
 
-`prepare` 固定四项值并返回一次 issue edit 的 `native_request.fields`。原生工具写入四项后重新读四项，由 `complete --outcome unknown` 核验一致才置为 verified；仅接管时间的回读核验统一到 UTC 后按分钟比较，忽略秒和小数秒，跨分钟仍不一致，版本、工位及 run 严格匹配。水印记录校验及摘要发送前复核使用相同规则；原始时间、写入载荷及其摘要和实际回读值原样保留，不修改时间生成或其它超时、协调规则。当前连接器没有同时写评论和字段的操作，因此执行两次有依赖的请求：先整体写标记并回读，后写摘要。无全局并发锁，沿用不同进程不会在一分钟内同时接管的使用假设。
+`prepare` 固定四项值并返回一次 issue edit 的 `native_request.fields`。原生工具写入四项后重新读四项，由 `complete --outcome unknown` 核验一致才置为 verified；仅接管时间的回读核验统一到 UTC 后按分钟比较，忽略秒和小数秒，跨分钟仍不一致，版本、工位及 run 严格匹配。水印记录校验及摘要发送前复核使用相同规则；原始时间、写入载荷及其摘要和实际回读值原样保留，不修改时间生成或用户指定的授权期限。当前连接器没有同时写评论和字段的操作，因此执行两次有依赖的请求：先整体写标记并回读，后写摘要。没有全局并发锁；两个工位可能先后写入并各自回读成功，须在后续工作段及关键写入前回读发现覆盖，不宣称互斥。
 
-同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 `complete` 回读，确认后 `prepare` 保留旧记录并补齐其余字段，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败只暂停依赖它的摘要，无依赖研发继续。原操作曾核验成功后，远端清空或变化不再解释为“原写入未生效”；保留首次核验来源，禁止重新发起该标记写入。类型错误、来源冲突和不可读均撤销当前 verified 结论，保留原载荷和历史核验事实。
+同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 complete 回读；残缺字段由 Agent 核实人工修复，整体四项同 run 回读后 prepare 保留旧记录并采用，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败暂停依赖归属的写入，独立只读准备继续。原操作曾核验成功后，远端清空或变化不再解释为“原写入未生效”；保留首次核验来源，禁止重新发起该标记写入。类型错误、来源冲突和不可读均撤销当前 verified 结论，保留原载荷和历史核验事实。
 
 ### 摘要发送与防重
 
-复用接管及对应 Jira 回写的有效授权，按待办稳定 id 执行 `draft`、`confirm`、`prepare_write`。接管摘要的 prepare_write 必须携带新读取的 `takeover_snapshot`（source_ref、issue 及 current_user.accountId）；程序核对四项标记和登录身份仍与原意图一致，再允许生成评论发送意图。标记已被其它工位/run 改写时，不发送过期摘要。已有的接管协调评论保持原合同，这里的顺序针对人读接管摘要。
+复用接管及对应 Jira 回写的有效授权，按待办稳定 id 执行 `draft`、`confirm`、`prepare_write`。接管摘要的 prepare_write 必须携带新读取的 `takeover_snapshot`（site、source_ref、含 ID 的 issue 及 current_user）；程序核对四项标记和登录身份仍与原意图一致，再允许生成评论发送意图。标记已被其它工位/run 改写时，不发送过期摘要。独立协调评论已停用，旧记录先核实退役；本评论列出预检全部仓库来源，标签为“版本”，不宣称源码准备完成。评论后紧接着处理适用的 Jira 状态同步，再恢复源码准备。
 
-取得评论 ID 后记 `receipt result=created`，回读目标、ID、完整正文和作者；`readback` 的 `author_account_id` 必须匹配原 Jira 登录用户。已验证评论不重发；发送意图、超时或结果不明时保留原 id、正文和 operation_id，查全相关评论并唯一定位原评论，不重新生成正文或新 id。无法唯一定位时保留未知，不能把“暂时没查到”当作未发送；不承诺跨服务严格恰好一次。旧版已发送评论仍按其原正文和回执回读，不因升级补发新版摘要。
+取得评论 ID 后记 `receipt result=created`，回读目标、ID、完整正文和作者；`readback` 的 `author_account_id` 必须匹配原 Jira 登录用户。已验证评论不重发；发送意图、超时或结果不明时保留原 id、正文和 operation_id，查全相关评论并唯一定位原评论，不重新生成正文或新 id。无法唯一定位时保留未知，不能把“暂时没查到”当作未发送；不承诺跨服务严格恰好一次。旧版已发送评论仍按其原正文和回执回读，不因升级补发新版摘要。明确更正来源分支后按新来源生成替代说明，普通重试不新增评论。
 
-已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。deferred 或未发送的过期草稿由待办返回标准正文及 draft_command，重新按当前事实确认；标记、协调或源码未就绪时只给出补齐步骤，不附带 confirm/prepare_write。未知评论只给出原 operation 的 readback；回执已冻结则交接维护，不输出不可执行命令。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
+已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。deferred 或未发送的过期草稿由待办返回标准正文及 draft_command，重新按当前事实确认；标记或预检来源未就绪时只给出补齐步骤，不附带 confirm/prepare_write。未知评论只给出原 operation 的 readback；回执已冻结则交接维护，不输出不可执行命令。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
 
 ## 同步待办与有限回执恢复
 

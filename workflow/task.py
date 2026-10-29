@@ -79,19 +79,26 @@ def operation_summary(operation):
     result["superseded_steps"] = [name for name, step in steps.items() if step.get("superseded_by")]
     result["pending_external_results"] = [row["operation_id"] for row in operation.get("retained_results", []) if row.get("result", {}).get("pending_external")]
     result["details"] = "repository context --full（读取完整操作与恢复回执）"
+    if operation["kind"] == "takeover" and operation["status"] != "done":
+        result["recovery"] = "输入不变沿原 takeover 恢复；版本误填且基线未冻结时使用 takeover-correct；退出先做 clean --check，不手改状态"
     return result
 
 
-def cmd_takeover(args):
-    from workflow import station
+def takeover_overrides(values):
     overrides = {}
-    for value in args.explicit_branch:
+    for value in values:
         if "=" not in value:
             raise ValueError("显式分支格式为 repository=branch")
         name, branch = value.split("=", 1)
         if name in overrides:
             raise ValueError("重复显式分支")
         overrides[name] = branch
+    return overrides
+
+
+def cmd_takeover(args):
+    from workflow import station
+    overrides = takeover_overrides(args.explicit_branch)
     request = {"issue_key": args.issue_key, "task_class": args.task_class, "version": args.version,
                "profile": args.profile, "optional_repositories": args.optional_repository,
                "explicit_branches": overrides}
@@ -101,6 +108,17 @@ def cmd_takeover(args):
         request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
     result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
     from workflow import external_sync
+    current = task_store.read_task(args.dir)
+    print(json.dumps(dict(operation_summary(result), **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_takeover_correct(args):
+    from workflow import station, station_takeover, external_sync
+    operation = station_takeover.correct(args.dir, args.issue_key, args.expected_run_id,
+        args.operation_id, args.expected_revision, args.expected_request_digest,
+        args.version, takeover_overrides(args.explicit_branch), args.decision_ref)
+    result = station.takeover(args.dir, operation["request"], operation["operation_id"], operation["expected_revision"])
     current = task_store.read_task(args.dir)
     print(json.dumps(dict(operation_summary(result), **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
     return 0
@@ -464,10 +482,16 @@ def _check_advance(task, target, base, spec):
 
 def cmd_advance(args):
     issue = task_store.resolve_issue(args.dir, args.issue_key)
-    with task_store.task_run_lock(args.dir, issue, refresh_activity=False):
+    with task_store.task_run_lock(args.dir, issue, refresh_activity=False, ownership=False):
         task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
-        if not (task.get("stage") == "completed" and task.get("terminal_proof")
+        if (task.get("stage") == "completed" and task.get("terminal_proof")
                 and args.expected_stage in ("ci_validation", "completed")):
+            # 已完成提交点仅补收敛原授权撤销；不以历史归属恢复开发或重跑验收。
+            from workflow import sync_recovery
+            sync_recovery.require_receipt(args.dir, task)
+        else:
+            from workflow import jira_ownership
+            jira_ownership.require(args.dir, issue)
             task_store.require_development(args.dir, task)
         result = _cmd_advance_locked(args)
         if result == 0:
@@ -529,7 +553,18 @@ def cmd_block(args):
 
 
 def cmd_interaction_path(args):
-    return _cmd_development_interaction(args)
+    from workflow import station_takeover
+    # 标记核验本身需要输入文件；仅开放已预检接管的本地材料路径，不开放开发动作。
+    with task_store.task_state_lock(args.dir, ownership=False):
+        issue = task_store.resolve_issue(args.dir, args.issue_key)
+        task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+        if not station_takeover.preparing(args.dir, task):
+            from workflow import jira_ownership
+            jira_ownership.require(args.dir, issue)
+            return _cmd_development_interaction(args)
+        path = task_store.interaction_path(args.dir, issue, task['run_id'], args.name, create=True)
+        print(path)
+        return 0
 
 
 @task_store.task_mutation
@@ -802,7 +837,7 @@ def main():
     p.add_argument("--issue-key", required=True)
     p.add_argument("--task-class", required=True)
     p.add_argument("--jira-input", help="原生 Jira 类型回读：site/source_ref/issue，含 id/key、project 与 issuetype")
-    p.add_argument("--version", required=True)
+    p.add_argument("--version", required=True, help="主仓工程分支；TapData 为 tapdata/tapdata 分支，非连接器版本")
     p.add_argument("--profile", default="full-application")
     p.add_argument("--optional-repository", action="append", default=[])
     p.add_argument("--explicit-branch", action="append", default=[])
@@ -811,6 +846,17 @@ def main():
     p.add_argument("--expected-revision", required=True, type=int)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_takeover)
+    p = sub.add_parser("takeover-correct", help="更正未冻结接管的版本及逐仓分支，然后沿原 run/op 继续")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--operation-id", required=True)
+    p.add_argument("--expected-revision", required=True, type=int)
+    p.add_argument("--expected-request-digest", required=True)
+    p.add_argument("--version", required=True, help="正确的主仓工程分支")
+    p.add_argument("--explicit-branch", action="append", default=[], help="完整的逐仓覆盖集合，repository=branch")
+    p.add_argument("--decision-ref", required=True, help="已有用户分支更正决定的来源，无需重复确认")
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_takeover_correct)
     p = sub.add_parser('handoff-continuations', help='从已回读的接续正文提取现有 takeover 输入，不导入阶段或授权')
     p.add_argument('--input', required=True)
     p.add_argument('--expected-digest', required=True)
@@ -1011,20 +1057,15 @@ def main():
     for command in ("add", "amend", "record-result"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     from workflow import jira_coordination
-    p = sub.add_parser('coordination', help='Jira 任务级接管协调；原生工具读写，不提供全局锁')
-    p.add_argument('coordination_action', choices=('status','check','prepare','complete','cancel'))
+    p = sub.add_parser('coordination', help='旧协调记录状态与受控退役；不再写协调评论')
+    p.add_argument('coordination_action', choices=('status', 'retire'))
     p.add_argument('--dir', default='.')
-    p.add_argument('--input', help='站点、任务 ID/key、来源及完整原生评论分页 JSON')
-    p.add_argument('--operation-id')
-    p.add_argument('--mode', choices=('claim','report','end'), default='claim')
-    p.add_argument('--executor')
-    p.add_argument('--expected-digest')
+    p.add_argument('--input', help='旧未知写入的逐项原生回读')
     p.add_argument('--conflict-check-ref')
     p.add_argument('--decision-ref')
-    p.add_argument('--claim-id')
     p.set_defaults(func=jira_coordination.command)
     from workflow import execution
-    p = sub.add_parser("execution", help="本地会话写入保护；任务级 8 小时判定使用 coordination")
+    p = sub.add_parser("execution", help="本地会话写入保护；远端归属使用四项 Jira 标记")
     p.add_argument("execution_action", choices=("status", "claim", "heartbeat"))
     p.add_argument("--dir", default=".")
     p.add_argument("--executor")

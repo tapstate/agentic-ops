@@ -25,7 +25,7 @@ def _project(base):
 
 
 def takeover(base, request, operation_id, expected_revision):
-    with task_store.task_state_lock(base):
+    with task_store.task_state_lock(base, ownership=False):
         issue = task_store.validate_issue_key(request["issue_key"])
         project_profile = project_rules.load_profile(station=base)
         project_rules.validate_project_issue(project_profile, issue)
@@ -64,10 +64,13 @@ def takeover(base, request, operation_id, expected_revision):
             runtime = Path(base) / station_layout.station_name(base, "task-runtime")
             if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空；保留残留，尚未创建操作")
-        from workflow import jira_coordination
-        jira_coordination.require(base, issue)
+        from workflow import station_takeover, jira_ownership
+        def prepare_request():
+            jira_ownership.preflight(base, issue, request.get('jira_snapshot', {}), request['task_class'])
+            value = station_takeover.preflight(base, request)
+            return value
         operation = operations.begin(base, "takeover", operation_id, expected_revision, request,
-                                     before_create=lambda: source.refresh_shared_references(base))
+                                     before_create=prepare_request)
         if operation["status"] == "done":
             return operation
         task = task_store.read_task(base)
@@ -91,6 +94,19 @@ def takeover(base, request, operation_id, expected_revision):
             task_store.write_task(base, task)
         if task["run_id"] != operation["run_id"]:
             raise ValueError("接管恢复 run 不一致")
+        if not operation.get('takeover_baseline'):
+            # 旧接管采用新顺序，先核验原请求；不重建 run 或冒充原历史已有预检。
+            operation['takeover_baseline'] = station_takeover.preflight(base, request)
+            operations.save(base, operation)
+        if not station_takeover.publication_ready(base, task, operation):
+            return operation
+        operation['phase'] = 'preparing_source'
+        operations.save(base, operation)
+        if 'shared-references' not in operation['steps']:
+            operations.intent(base, operation, 'shared-references', {}, {})
+        if operation['steps']['shared-references']['receipt'] is None:
+            source.refresh_shared_references(base)
+            operations.receipt(base, operation, 'shared-references', {'attempted': True})
         if "retained_repositories" not in task:
             task["retained_repositories"] = source.check_station_layout(base, catalog, selected)
             task_store.write_task(base, task)
@@ -102,9 +118,30 @@ def takeover(base, request, operation_id, expected_revision):
             module = importlib.util.module_from_spec(specification)
             specification.loader.exec_module(module)
             config = json.loads((project / "version-branch-alignments.json").read_text())
-            value = module.resolve(request["version"], config, catalog, profile, observations,
-                                   optional=request.get("optional_repositories", []),
-                                   explicit_branches=request.get("explicit_branches", {}))
+            value = copy.deepcopy(operation.get("takeover_baseline"))
+            if value is None:  # 合法旧操作继续复用原请求与原准备回执。
+                value = module.resolve(request["version"], config, catalog, profile, observations,
+                                       optional=request.get("optional_repositories", []),
+                                       explicit_branches=request.get("explicit_branches", {}))
+            else:
+                baseline.validate(value)
+                if value["profile"] != {"id": profile["id"], "revision": profile["revision"], "digest": baseline.digest(profile)}:
+                    raise ValueError("预检后工程 Profile 已变化，保留原操作")
+                if any(entry["rule_version"] != baseline.digest(config) for entry in value["repositories"].values()):
+                    raise ValueError("预检后项目分支规则已变化，保留原操作")
+                for name, entry in value["repositories"].items():
+                    if entry["origin"] != catalog[name]["origin"]:
+                        raise ValueError("预检后仓库来源已变化，保留原操作：" + name)
+                    path = source.repository_path(base, name)
+                    sha = entry["commit_sha"]
+                    step = "baseline-object:" + name + ":" + sha
+                    if source.git(path, "cat-file", "-t", sha, check=False).stdout.strip() != "commit":
+                        operations.intent(base, operation, step, {}, {"sha": sha})
+                        source.git(path, "fetch", "--no-tags", "origin", sha)
+                        if source.git(path, "cat-file", "-t", sha).stdout.strip() != "commit":
+                            raise ValueError("预检对象无法取回，保留原操作：" + name)
+                    if step in operation["steps"]:
+                        operations.receipt(base, operation, step, {"sha": sha})
             continuations = request.get("continuations", {})
             if not isinstance(continuations, dict) or not set(continuations) <= set(selected):
                 raise ValueError("续办仓库必须属于完整工程")
@@ -132,7 +169,13 @@ def takeover(base, request, operation_id, expected_revision):
             if continuations:
                 inputs = dict(value["resolution_input"], continuations=continuations)
                 value = baseline.freeze(profile, catalog, resolutions, inputs, request.get("optional_repositories", []))
-            baseline.verify_local_baseline(base, value)
+            if operation.get("takeover_baseline"):
+                # 远端分支可能已推进，预检固定的 SHA 仍是本次工程对象，不改写本地远端 refs。
+                for name, entry in value["repositories"].items():
+                    baseline.verify_local_repository(base, name, entry["origin"], "commit",
+                                                     entry["commit_sha"], entry["commit_sha"])
+            else:
+                baseline.verify_local_baseline(base, value)
             task["engineering_baseline"] = value
             task_store.write_task(base, task)
         source.checkout_baseline(base, task["engineering_baseline"], operation)

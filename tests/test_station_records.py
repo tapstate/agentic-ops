@@ -36,6 +36,22 @@ class RecordTests(unittest.TestCase):
     def cleanup_request(self):
         return {'scope': 'task', 'expected_plan_digest': station_cleanup.plan(self.ws)['digest'], 'materials': 'discard', 'decision_ref': '用户确认清理本地成果'}
 
+    def test_completed_task_can_archive_without_restoring_development(self):
+        from workflow import jira_ownership
+        self.task = self.takeover()
+        self.task.update(stage='completed', outcome='completed', terminal_proof={'fixture': 'already-verified'})
+        task_store.write_task(self.ws, self.task)
+        self.task = task_store.read_task(self.ws)
+        self.handoff = {'handoff': {'plan': '已确认方案', 'progress': '已完成', 'remaining': '无', 'environment': '已记录'}}
+        with self.assertRaisesRegex(ValueError, '已结束'):
+            jira_ownership.require(self.ws, self.task['issue_key'])
+        pending = self.archive()
+        self.assertEqual('awaiting_jira', pending['archive_result']['status'])
+        saved = self.archive(self.receipt(pending))
+        self.assertEqual('done', saved['status'])
+        with self.assertRaisesRegex(ValueError, '归档|终止'):
+            task_store.require_development(self.ws, task_store.read_task(self.ws))
+
     def test_cleanup_correction_survives_new_task_and_is_read_back_without_reclean(self):
         task = self.takeover()
         request = self.cleanup_request()
@@ -104,11 +120,12 @@ class RecordTests(unittest.TestCase):
 
     def test_archive_receipt_after_handoff_does_not_require_reclaim(self):
         import os
-        from workflow import jira_coordination, execution
+        from workflow import execution
+        from station_fixture import transferred_ownership_fixture
         pending = self.begin()
-        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
-        with self.assertRaisesRegex(ValueError, '尚未核实'):
-            self.archive(op='new-archive-after-handoff')
+        transferred_ownership_fixture(self.ws)
+        with self.assertRaisesRegex(ValueError, '归属尚未核验'):
+            self.archive(op='op-new-archive-after-handoff')
         with self.assertRaises(ValueError):
             self.archive(dict(self.receipt(pending), body='错误正文'))
         with mock.patch.dict(os.environ, {execution.SESSION_ENV: 'b' * 32}):

@@ -49,10 +49,11 @@ def load_state(base, task):
 
 
 def save_state(base, task, state, recovery=None):
-    with task_store.task_run_lock(base, task["issue_key"]):
+    with task_store.task_run_lock(base, task["issue_key"], ownership=recovery is None):
         current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
         if recovery is None:
-            task_store.require_development(base, current)
+            from workflow import station_takeover
+            station_takeover.require_external(base, current)
         else:
             trigger, original = recovery
             sync_recovery.require_receipt(base, current)
@@ -244,7 +245,19 @@ def guidance_for(fields, rules, task):
 @sync_recovery.locked
 def prepare(base, issue_key, trigger, snapshot, operation_id=None):
     task = task_store.read_task(base, issue_key)
-    task_store.require_development(base, task)
+    from workflow import station_takeover, quality, external_sync
+    if trigger == 'takeover':
+        station_takeover.require_external(base, task)
+        if station_takeover.preparing(base, task):
+            publications = quality.replay(quality.load(base, task))['publications']
+            key = external_sync.takeover_publication_id(base, task, publications)
+            if publications.get(key, {}).get('status') not in ('created', 'unknown', 'verified', 'deferred'):
+                raise ValueError('先发布并回读接管评论或记录其未知结果，紧接着处理状态同步')
+            from workflow import jira_watermark, jira_ownership
+            jira_watermark.complete(base, issue_key, 'unknown', snapshot)
+            jira_ownership.require(base, issue_key)
+    else:
+        task_store.require_development(base, task)
     rules = config(base, task)
     from workflow import issue_routing
     issue_routing.check_task(project_rules.load_profile(station=base), task,
@@ -402,7 +415,7 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
     return record
 
 
-@sync_recovery.locked
+@sync_recovery.local_locked
 def complete(base, issue_key, trigger, outcome, snapshot, message, operation_id=None):
     if outcome not in ("failed", "unknown", "not_written"):
         raise ValueError("无效 Jira 回执结果")
@@ -473,12 +486,16 @@ def main():
     try:
         task_store.station_project(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
-        with task_store.task_run_lock(args.dir, issue, execution=args.command != "status"):
+        with task_store.task_run_lock(args.dir, issue, execution=args.command != "status", ownership=args.command != "complete"):
             task = task_store.read_task(args.dir, issue)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
                 if args.command != "complete":
-                    task_store.require_development(args.dir, task)
+                    from workflow import station_takeover
+                    if getattr(args, 'trigger', None) == 'takeover':
+                        station_takeover.require_external(args.dir, task)
+                    else:
+                        task_store.require_development(args.dir, task)
             if args.command in ("collect", "confirm"):
                 from workflow import jira_collect
                 document = json.loads(Path(args.input).read_text())

@@ -49,7 +49,7 @@ class JiraWatermarkTests(unittest.TestCase):
             "issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
             "stage": "waiting_takeover", "facts": {}, "repositories": [], "pending": None, "history": [],
         }
-        save_station_task(self.base, self.task)
+        save_station_task(self.base, self.task, ownership=False)
 
 
     def test_product_git_facts_ignore_foreign_repository_environment(self):
@@ -177,7 +177,7 @@ class TerminalWatermarkTests(unittest.TestCase):
         record = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
         jira_watermark.complete(self.base, "TAP-123", "failed", self.snapshot("old"))
         self.task.update(stage="completed", outcome="completed")
-        save_station_task(self.base, self.task)
+        save_station_task(self.base, self.task, ownership=False)
         with self.assertRaisesRegex(ValueError, "未知"):
             station_resources.verify_known_external(self.base, self.task)
         with self.assertRaises(ValueError):
@@ -190,7 +190,7 @@ class TerminalWatermarkTests(unittest.TestCase):
         from workflow import external_sync, station_resources
         record = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
         self.task.update(stage="completed", outcome="completed")
-        save_station_task(self.base, self.task)
+        save_station_task(self.base, self.task, ownership=False)
         subprocess.run(["git", "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--allow-empty", "-qm", "next"], cwd=self.product, check=True)
         stale = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot("different"))
         self.assertEqual(stale["outcome"], "stale")
@@ -217,7 +217,7 @@ class FourMarkerTests(unittest.TestCase):
         fields = dict.fromkeys(['customfield_10421', 'customfield_10366', 'customfield_10462', 'customfield_10365'])
         fields.update(values or {})
         fields['issuetype'] = {'id': '10011'}
-        return {'source_ref': 'fixture:jira/read', 'issue': {'key': 'TAP-123', 'fields': fields},
+        return {'site': 'https://tapdata.atlassian.net', 'source_ref': 'fixture:jira/read', 'issue': {'id': '123', 'key': 'TAP-123', 'fields': fields},
                 'current_user': {'accountId': 'jira-login', 'displayName': '登录研发', 'active': True, 'source_ref': 'fixture:jira/myself'}}
 
     def test_four_field_write_readback_and_resume_preserves_original(self):
@@ -307,16 +307,16 @@ class FourMarkerTests(unittest.TestCase):
         prior = {'customfield_10421': 'old-version', 'customfield_10366': '2026-01-01T00:00:00Z',
                  'customfield_10462': 'b'*32, 'customfield_10365': 'TAP-123-old'}
         snapshot = self.snapshot(prior)
-        with self.assertRaisesRegex(ValueError, '旧 run'):
+        with self.assertRaisesRegex(ValueError, '已有其它接管归属|残缺'):
             jira_watermark.prepare(self.base, 'TAP-123', snapshot)
-        snapshot['previous_takeover'] = {'observed_fields': prior, 'evidence_ref': 'fixture:jira/confirmed-handoff'}
+        snapshot['previous_takeover'] = {'observed_fields': prior, 'evidence_ref': 'fixture:jira/confirmed-handoff', 'decision_ref': 'fixture:user', 'conflict_check_ref': 'fixture:stopped'}
         record = jira_watermark.prepare(self.base, 'TAP-123', snapshot)
         self.assertEqual(self.task['run_id'], record['expected_fields']['customfield_10365'])
         self.assertEqual(prior, record['previous_fields'])
 
     def test_same_station_new_run_also_needs_cleanup_evidence(self):
         snapshot = self.snapshot({'customfield_10462': 'a'*32, 'customfield_10365': 'old-run'})
-        with self.assertRaisesRegex(ValueError, '旧 run'):
+        with self.assertRaisesRegex(ValueError, '已有其它接管归属|残缺'):
             jira_watermark.prepare(self.base, 'TAP-123', snapshot)
 
     def test_missing_field_or_actor_not_inferred_from_assignee(self):
@@ -339,7 +339,7 @@ class FourMarkerTests(unittest.TestCase):
         self.assertEqual('ready', retried['outcome'])
         self.assertEqual(record['native_request'], retried['native_request'])
         snapshot['issue']['fields']['customfield_10365'] = 'another-run'
-        with self.assertRaisesRegex(ValueError, '原写前观察'):
+        with self.assertRaisesRegex(ValueError, '原写前观察|残缺'):
             jira_watermark.prepare(self.base, 'TAP-123', snapshot)
         self.assertNotIn('native_request', jira_watermark.status(self.base, self.task))
 
@@ -356,6 +356,11 @@ class FourMarkerTests(unittest.TestCase):
         self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
         observed['previous_takeover'] = {'observed_fields': {k:v for k,v in observed['issue']['fields'].items() if k.startswith('customfield_')},
                                          'evidence_ref': 'fixture:legacy-run-observed'}
+        with self.assertRaisesRegex(ValueError, '残缺'):
+            jira_watermark.prepare(self.base, 'TAP-123', observed)
+        # 原生工具在人工核实后补齐同一旧 run，再采用四项归属，不猜测缺值。
+        observed['issue']['fields'].update(customfield_10366=legacy['at'],
+            customfield_10462='a'*32, customfield_10365=self.task['run_id'])
         with mock.patch.object(product_version, 'describe', side_effect=AssertionError('不刷新接管版本')):
             upgraded = jira_watermark.prepare(self.base, 'TAP-123', observed)
         self.assertEqual(legacy['version'], upgraded['version'])
@@ -485,7 +490,7 @@ class FourMarkerTests(unittest.TestCase):
     def test_terminal_readback_confirms_only_original_four_fields(self):
         record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
         self.task.update(stage='completed', outcome='completed')
-        save_station_task(self.base, self.task)
+        save_station_task(self.base, self.task, ownership=False)
         with self.assertRaises(ValueError):
             jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
         result = jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))

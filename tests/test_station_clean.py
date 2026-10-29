@@ -38,8 +38,12 @@ class CleanupTests(unittest.TestCase):
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual('unclaimed', execution.status(self.ws)['status'])
         self.assertEqual('keep', (self.ws / 'config/user').read_text())
-        for name in ('source', 'runtime'):
-            self.assertEqual([], list((self.ws / name).iterdir()))
+        self.assertEqual([], list((self.ws / 'runtime').iterdir()))
+        repository = self.ws / 'source/tapdata/tapdata'
+        self.assertTrue((repository / '.git').is_dir())
+        self.assertEqual(task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'],
+                         self.git(repository, 'rev-parse', 'HEAD'))
+        self.assertEqual('', self.git(repository, 'status', '--porcelain'))
         self.run_clean(task, request)
         self.assertEqual('unclaimed', execution.status(self.ws)['status'])
 
@@ -139,8 +143,8 @@ class CleanupTests(unittest.TestCase):
         result = self.run_clean(task, request)
         self.assertEqual('awaiting_cleanup', result['phase'])
         # Jira 已交接，取消本地未开始删除的清理仍应能接续。
-        from workflow import jira_coordination
-        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        from station_fixture import transferred_ownership_fixture
+        transferred_ownership_fixture(self.ws)
         cancelled = cleanup.cancel(self.ws, 'op-task-cleanup-test', '确认取消并重新盘点')
         self.assertEqual('done', cancelled['status'])
         self.assertIsNotNone(task_store.read_task(self.ws))
@@ -148,7 +152,7 @@ class CleanupTests(unittest.TestCase):
         self.assertTrue(result['cleanup_result']['complete'], result)
 
     def test_external_cleanup_readback_after_handoff_is_narrowly_scoped(self):
-        from workflow import jira_coordination
+        from station_fixture import transferred_ownership_fixture
         task = self.takeover()
         entry = {'kind': 'external', 'id': 'fixture-resource', 'producer': 'fixture',
                  'action': 'delete', 'status': 'active', 'before': {'id': 'fixture-resource', 'protected': False}}
@@ -157,7 +161,7 @@ class CleanupTests(unittest.TestCase):
         request = self.cleanup_request()
         pending = self.run_clean(task, request)
         self.assertEqual('awaiting_resources', pending['phase'])
-        jira_coordination.save(self.ws, {'entries': {}, 'proof': None})
+        transferred_ownership_fixture(self.ws)
         receipt = dict(entry, status='cleaned', readback_ref='fixture:已核实外部资源不存在')
         with self.assertRaises(ValueError):
             resources.register(self.ws, task['issue_key'], task['run_id'], [dict(receipt, id='other')], pending['operation_id'])
@@ -343,6 +347,226 @@ class CleanupTests(unittest.TestCase):
                 self.assertTrue(root.exists())
                 self.assertFalse(any('stop' in c or 'rm' in c for c in calls))
 
+
+
+class SourceReuseTests(unittest.TestCase):
+    setUp = fixture.StationTests.setUp
+    prepare_engineering = fixture.StationTests.prepare_engineering
+    write = fixture.StationTests.write
+    git = fixture.StationTests.git
+    takeover = fixture.StationTests.takeover
+    cleanup_request = CleanupTests.cleanup_request
+    run_clean = CleanupTests.run_clean
+
+    def test_discard_is_concentrated_and_restores_baseline_without_reclone(self):
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        inode, metadata_inode = repo.stat().st_ino, (repo / '.git').stat().st_ino
+        self.git(repo, 'config', 'user.name', 'Test')
+        self.git(repo, 'config', 'user.email', 'test@example.com')
+        self.git(repo, 'checkout', '-b', 'local-work')
+        (repo / 'file.txt').write_text('local commit')
+        self.git(repo, 'commit', '-am', 'unpublished')
+        (repo / 'file.txt').write_text('stash work')
+        self.git(repo, 'stash', 'push')
+        (repo / '.gitignore').write_text('unique.secret\n')
+        (repo / 'unique.secret').write_text('fixture unique data')
+        (repo / 'untracked').write_text('keep or explicitly discard')
+        (repo / 'file.txt').write_text('staged')
+        self.git(repo, 'add', 'file.txt')
+        (repo / 'file.txt').write_text('unstaged')
+        plan = cleanup.plan(self.ws)
+        report = plan['source']['repositories'][0]
+        self.assertIn('refs/heads/local-work', report['unpreserved_refs'])
+        self.assertIn('refs/stash', report['unpreserved_refs'])
+        self.assertIn('unique.secret', report['unique_files'])
+        self.assertIn('untracked', report['unique_files'])
+        self.assertIn('file.txt', report['changed_files'])
+        with self.assertRaisesRegex(ValueError, '尚有未保全'):
+            self.run_clean(task, self.cleanup_request())
+        result = self.run_clean(task, self.cleanup_request(materials='discard'))
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual((inode, metadata_inode), (repo.stat().st_ino, (repo / '.git').stat().st_ino))
+        self.assertEqual('baseline\n', (repo / 'file.txt').read_text())
+        self.assertFalse((repo / 'unique.secret').exists())
+        self.assertEqual('', self.git(repo, 'for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/stash'))
+        from workflow import station_source
+        original = station_source.git
+        calls = []
+        def observed(path, *args, **kwargs):
+            calls.append(args)
+            return original(path, *args, **kwargs)
+        with mock.patch.object(station_source, 'git', side_effect=observed):
+            self.takeover('op-reuse-next-task')
+        self.assertFalse(any('clone' in args for args in calls))
+        self.assertEqual(metadata_inode, (repo / '.git').stat().st_ino)
+
+    def test_interrupted_restore_keeps_private_repository_and_resumes(self):
+        from workflow import station_source_reset as reset
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        inode = (repo / '.git').stat().st_ino
+        request = self.cleanup_request()
+        original = reset.source.git
+        def interrupted(path, *args, **kwargs):
+            if 'reset' in args:
+                raise ValueError('fixture reset failure, not delete permission')
+            return original(path, *args, **kwargs)
+        with mock.patch.object(reset.source, 'git', side_effect=interrupted):
+            result = self.run_clean(task, request)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertFalse(repo.exists())
+        kept = list((self.ws / '.agenticops/cleanup/op-task-cleanup-test').glob('restore-*'))
+        self.assertEqual(1, len(kept))
+        self.assertEqual(inode, (kept[0] / '.git').stat().st_ino)
+        result = self.run_clean(task, request)
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual(inode, (repo / '.git').stat().st_ino)
+
+    def test_ready_snapshot_recovers_publish_receipt_failure_and_rejects_new_files(self):
+        from workflow import station_operation
+        task = self.takeover()
+        request = self.cleanup_request()
+        original = station_operation.receipt
+        def interrupted(base, operation, name, value):
+            if name.startswith('restore:'):
+                raise OSError('receipt unavailable')
+            return original(base, operation, name, value)
+        with mock.patch.object(station_operation, 'receipt', side_effect=interrupted):
+            result = self.run_clean(task, request)
+        self.assertFalse(result['cleanup_result']['complete'])
+        repo = self.ws / 'source/tapdata/tapdata'
+        (repo / 'late').write_text('must survive')
+        result = self.run_clean(task, request)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertEqual('must survive', (repo / 'late').read_text())
+
+    def test_git_lock_or_permission_error_never_deletes_repository(self):
+        from workflow import station_source_reset as reset
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        (repo / '.git/index.lock').write_text('another process')
+        with self.assertRaisesRegex(ValueError, 'Git 锁'):
+            self.cleanup_request(materials='discard')
+        self.assertTrue(repo.exists())
+        (repo / '.git/index.lock').unlink()
+        with mock.patch.object(reset, 'object_type', side_effect=PermissionError('denied')):
+            with self.assertRaises(PermissionError):
+                self.cleanup_request(materials='discard')
+        self.assertTrue(repo.exists())
+
+    def test_old_delete_plan_keeps_original_semantics(self):
+        from workflow import station_cleanup_tree as trees, station_operation, engineering_baseline
+        task = self.takeover()
+        plan = cleanup.plan(self.ws)
+        plan.update(schema_version=8, targets=[trees.entry(self.ws, name, True) for name in ('source', 'runtime')])
+        plan.pop('source_reuse')
+        plan['digest'] = engineering_baseline.digest({k:v for k,v in plan.items() if k != 'digest'})
+        request = {'scope':'task','materials':'preserved','expected_plan_digest':plan['digest'],'decision_ref':'old confirmed delete'}
+        with task_store.task_state_lock(self.ws):
+            operation = station_operation.begin(self.ws, 'clean', 'op-old-delete-plan', task['_revision'], request, task['run_id'])
+            operation.update(cleanup_plan=plan, exit_task=task)
+            station_operation.save(self.ws, operation)
+        result = self.run_clean(task, request, 'op-old-delete-plan')
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual([], list((self.ws / 'source').iterdir()))
+
+    def test_multi_repository_restore_and_station_cleanup_keep_config_boundary(self):
+        self.prepare_engineering(2)
+        task = self.takeover()
+        (self.ws / 'config/user').write_text('user configuration')
+        result = self.run_clean(task, self.cleanup_request(scope='station'))
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual([], list((self.ws / 'config').iterdir()))
+        for name in ('tapdata', 'tapdata-common-lib'):
+            self.assertTrue((self.ws / 'source/tapdata' / name / '.git').is_dir())
+
+    def missing_baseline(self, copy_to=None):
+        from workflow import engineering_baseline as baseline, source_pool
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        self.git(repo, 'config', 'user.name', 'Test')
+        self.git(repo, 'config', 'user.email', 'test@example.com')
+        tree = self.git(repo, 'rev-parse', 'HEAD^{tree}')
+        sha = self.git(repo, 'commit-tree', tree, '-m', 'old frozen baseline')
+        value = task['engineering_baseline']
+        value['repositories']['tapdata/tapdata'].update(commit_sha=sha, ref_kind='commit', ref_name=sha)
+        value['digest'] = baseline.digest({k:v for k,v in value.items() if k != 'digest'})
+        task_store.write_task(self.ws, task)
+        if copy_to:
+            target = self.remote if copy_to == 'remote' else source_pool.pool_path(self.ws, 'tapdata/tapdata', str(self.remote))
+            self.git(target, 'fetch', str(repo), sha)
+        (repo / '.git/objects' / sha[:2] / sha[2:]).unlink()
+        return task_store.read_task(self.ws), repo, sha
+
+    def test_missing_local_object_recovers_from_cache_or_exact_remote(self):
+        # 本用例覆盖远端精确 SHA；另一个用例验证缓存路径。
+        task, repo, sha = self.missing_baseline('remote')
+        plan = cleanup.plan(self.ws)
+        self.assertEqual('remote', plan['source_reuse']['repositories'][0]['object_source'])
+        inode = (repo / '.git').stat().st_ino
+        result = self.run_clean(task, self.cleanup_request(materials='discard'))
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual(sha, self.git(repo, 'rev-parse', 'HEAD'))
+        self.assertEqual(inode, (repo / '.git').stat().st_ino)
+
+    def test_missing_local_object_recovers_from_cache(self):
+        task, repo, sha = self.missing_baseline('cache')
+        plan = cleanup.plan(self.ws)
+        self.assertEqual('cache', plan['source_reuse']['repositories'][0]['object_source'])
+        result = self.run_clean(task, self.cleanup_request(materials='discard'))
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual(sha, self.git(repo, 'rev-parse', 'HEAD'))
+
+    def test_proven_unrecoverable_target_deletes_only_that_repository(self):
+        task, repo, sha = self.missing_baseline()
+        plan = cleanup.plan(self.ws)
+        item = plan['source_reuse']['repositories'][0]
+        self.assertEqual('delete', item['action'])
+        self.assertIn('not our ref', item['reason'])
+        result = self.run_clean(task, self.cleanup_request(materials='discard'))
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertFalse(repo.exists())
+        self.assertEqual('delete', result['cleanup_result']['source'][0]['action'])
+        self.takeover('op-after-unrecoverable')
+        self.assertTrue((repo / '.git').is_dir())
+
+    def test_no_checkout_partial_takeover_cleanup_retains_repository(self):
+        from workflow import station, station_operation
+        self.prepare_engineering()
+        request = dict(self.request, version='missing', explicit_branches={})
+        with task_store.task_state_lock(self.ws):
+            station_operation.begin(self.ws, 'takeover', 'op-old-partial-takeover', 0, request)
+        with self.assertRaises(ValueError):
+            station.takeover(self.ws, request, 'op-old-partial-takeover', 0)
+        # 旧版本在解析失败前已 clone/fetch；新版预检不会产生此现场。
+        from workflow import station_takeover, station_source, engineering_baseline
+        _, _, catalog, profile = station_takeover.inputs(self.ws, request)
+        selected = engineering_baseline.selected_repositories(profile, catalog)
+        station_source.prepare_repositories(self.ws, catalog, selected, station_operation.read(self.ws))
+        task = task_store.read_task(self.ws)
+        result = self.run_clean(task, self.cleanup_request())
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertTrue((self.ws / 'source/tapdata/tapdata/.git').is_dir())
+
+    def test_ready_snapshot_recovers_after_publish_without_repeating_git(self):
+        from workflow import station_operation, station_source_reset as reset
+        task = self.takeover()
+        request = self.cleanup_request()
+        original = station_operation.receipt
+        def interrupted(base, operation, name, value):
+            if name.startswith('restore:'):
+                raise OSError('receipt unavailable')
+            return original(base, operation, name, value)
+        with mock.patch.object(station_operation, 'receipt', side_effect=interrupted):
+            self.assertFalse(self.run_clean(task, request)['cleanup_result']['complete'])
+        original_git = reset.source.git
+        def reject_repeated_reset(path, *args, **kwargs):
+            if 'reset' in args:
+                raise AssertionError('must not repeat completed reset')
+            return original_git(path, *args, **kwargs)
+        with mock.patch.object(reset.source, 'git', side_effect=reject_repeated_reset):
+            self.assertTrue(self.run_clean(task, request)['cleanup_result']['complete'])
 
 
 if __name__ == '__main__':

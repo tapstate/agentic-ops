@@ -98,7 +98,7 @@ class EnvironmentTests(unittest.TestCase):
             'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
             'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
             'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
-        with mock.patch('workflow.jira_coordination.require', side_effect=ValueError('Jira 已交接')) as require:
+        with mock.patch('workflow.jira_ownership.require', side_effect=ValueError('Jira 已交接')) as require:
             with self.env.lock('uninstall'):
                 self.assertEqual('run-test', mod.task_store.read_task(self.station)['run_id'])
             require.assert_not_called()

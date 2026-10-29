@@ -343,17 +343,20 @@ class StationBootstrapTests(unittest.TestCase):
     def test_pending_jira_coordination_prevents_losing_receipt_on_detach(self):
         from workflow import jira_coordination, project_rules
         site = project_rules.load_profile(station=self.station)['jira']['site'].rstrip('/')
-        snapshot = {'site': site, 'issue_id': '123', 'issue_key': 'TAP-123',
-                    'source_ref': 'fixture:jira', 'pages': [
-                        {'startAt': 0, 'total': 0, 'isLast': True, 'comments': []}]}
-        view = jira_coordination.run(self.station, 'check', snapshot)
-        jira_coordination.run(self.station, 'prepare', snapshot, 'claim-before-purge',
-                              executor='fixture', expected_digest=view['digest'])
-        with self.assertRaisesRegex(ValueError, 'Jira 协调记录尚未结束'):
+        from workflow import execution
+        packet = {'format': jira_coordination.MARKER, 'site': site, 'issue_id': '123', 'issue_key': 'TAP-123',
+            'station_id': 'a'*32, 'session_id': execution.session_id(), 'executor': 'fixture',
+            'claim_id': 'claim-before-purge', 'update_id': 'update-before-purge', 'active': True,
+            'supersedes': [], 'decision_ref': '', 'conflict_check_ref': ''}
+        jira_coordination.save(self.station, {'entries': {'claim-before-purge': {
+            'packet': packet, 'comment_id': '', 'pending': True, 'actor': execution.session_id(), 'before': None}}, 'proof': None})
+        with self.assertRaisesRegex(ValueError, 'Jira 协调'):
             registry.detach(ROOT, self.station, purge=True)
         self.assertTrue(jira_coordination.pending(self.station))
-        jira_coordination.run(self.station, 'cancel', snapshot, claim_id='claim-before-purge',
-                              decision_ref='fixture:从未发送')
+        snapshot = {'source_ref': 'fixture:jira', 'observations': [{'claim_id': 'claim-before-purge',
+            'site': site, 'issue_id': '123', 'source_ref': 'fixture:jira-readback',
+            'confirmed_not_applied': True, 'not_applied_ref': 'fixture:never-sent'}]}
+        jira_coordination.retire(self.station, snapshot, 'user:retire', 'old:stopped')
         registry.detach(ROOT, self.station, purge=True)
         self.assertFalse((self.station / '.agenticops/station.json').exists())
 

@@ -795,20 +795,30 @@ def validate_command(command):
 
 def apply(base, issue, run_id, revision, command):
     validate_command(command)
-    with task_store.task_run_lock(base, issue):
+    with task_store.task_run_lock(base, issue, ownership=command['action'] not in ('receipt', 'readback')):
         task_store.resolve_issue(base, issue)
         task = task_store.read_task(base, issue)
+        from workflow import station_takeover, external_sync
+        takeover_publication = (command['action'] in ('draft', 'confirm', 'prepare_write', 'receipt', 'readback', 'defer')
+            and external_sync.is_takeover_publication(task, command['payload'].get('id')))
         if command["action"] in ("receipt", "readback"):
             from workflow import sync_recovery
             sync_recovery.require_receipt(base, task)
         else:
-            task_store.require_development(base, task)
+            if takeover_publication:
+                station_takeover.require_external(base, task)
+            else:
+                task_store.require_development(base, task)
         if task["run_id"] != run_id:
             raise ValueError("任务 run 已变化，拒绝旧请求")
         rules = config(base, task)
-        if not enabled(task, rules):
+        if not enabled(task, rules) and not takeover_publication:
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
+        if takeover_publication and command['action'] == 'draft':
+            expected_id = external_sync.takeover_publication_id(base, task, replay(state)['publications'])
+            if command['payload']['id'] != expected_id:
+                raise ValueError('接管评论必须复用当前稳定发布编号，不能另发重复评论')
         if type(revision) is not int or state["revision"] != revision:
             raise ValueError("质量日志 revision 不一致：expected=%s actual=%s；此值不是任务 revision，请读取 quality.py status" % (revision, state["revision"]))
         ctx = context(base, task)
@@ -826,12 +836,16 @@ def apply(base, issue, run_id, revision, command):
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
-            if command["payload"]["id"] == "takeover-" + digest([task["issue_key"], task["run_id"]])[:20]:
+            if takeover_publication:
                 from workflow import jira_watermark, external_sync
-                if not task.get("source_prepared") or not jira_watermark.summary_ready(base, task):
+                if not external_sync.takeover_sources(base, task) or not jira_watermark.summary_ready(base, task):
                     raise ValueError("接管摘要发送前必须回读核验四项接管标记及源码基线")
                 marker = jira_watermark.status(base, task)
                 snapshot = command["payload"].get("takeover_snapshot", {})
+                # 回读失败或发现新归属必须撤销旧本地证明，不能留下可继续写入的缓存。
+                jira_watermark.complete(base, issue, 'unknown', snapshot)
+                from workflow import jira_ownership
+                jira_ownership.require(base, issue)
                 fields, issue_type = jira_watermark.issue_from(snapshot, issue)
                 if (not snapshot.get("source_ref") or issue_type != marker["issue_type_id"]
                         or not jira_watermark.markers_equal(jira_watermark.marker_values(fields, marker, snapshot),
@@ -839,7 +853,7 @@ def apply(base, issue, run_id, revision, command):
                         or snapshot.get("current_user", {}).get("accountId") != marker["actor"]["accountId"]):
                     raise ValueError("接管摘要写前回读标记或 Jira 登录用户已变化，先核实归属")
                 body = replay(state)["publications"][command["payload"]["id"]]["body"]
-                if body != external_sync.takeover_body(task, command["payload"]["id"], jira_watermark.status(base, task)):
+                if body != external_sync.takeover_body(task, command["payload"]["id"], jira_watermark.status(base, task), external_sync.takeover_sources(base, task)):
                     raise ValueError("接管摘要与已核验的标记、登录用户或仓库分支不一致；重新生成并确认")
             elif "takeover_snapshot" in command["payload"]:
                 raise ValueError("takeover_snapshot 仅用于当前 run 的接管摘要")

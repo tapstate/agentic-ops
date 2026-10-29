@@ -45,7 +45,7 @@ def status(base):
     if control is None:
         return {'status': 'unclaimed', 'control_digest': digest(None)}
     return {'status': 'occupied', **control, 'control_digest': digest(control),
-            'boundary': '仅保护本地写入；8 小时提示统一由 Jira coordination 判定'}
+            'boundary': '仅保护本地会话写入；远端归属由四项 Jira 标记回读核验，不推断在线或闲置'}
 
 
 def _save(base, current, control):
@@ -61,8 +61,8 @@ def enter(base, coordination=True):
     control = current.get('execution_control')
     validate(control)
     if coordination and current['current'] is not None:
-        from workflow import jira_coordination
-        jira_coordination.require(base, current['current']['issue_key'])
+        from workflow import jira_ownership
+        jira_ownership.require(base, current['current']['issue_key'])
     if control is None:
         control = {'session_id': identity, 'executor': os.environ.get('AGENTICOPS_EXECUTOR', 'Agent 会话'),
                    'last_activity_epoch': time.time(), 'handoff': None}

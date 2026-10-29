@@ -1,204 +1,74 @@
-"""任务级协调：真实本地状态、原生回读夹具及双工位冲突，不模拟判定成功。"""
+"""旧协调只保留退役核验，不再发送、报活或判断闲置。"""
 import copy
 import json
-import os
-from pathlib import Path
-import shutil
-import sys
-import time
 import unittest
-from datetime import datetime, timezone
-from unittest import mock
-sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parent)]
 import test_station_lifecycle as fixture
-from workflow import jira_coordination as c, task_store, execution, station
+from workflow import jira_coordination as legacy, task_store, execution
 
-A,B='a'*32,'b'*32
 
-class CoordinationTests(unittest.TestCase):
-    write=fixture.StationTests.write
-    git=fixture.StationTests.git
-    prepare_engineering=fixture.StationTests.prepare_engineering
-    def setUp(self):
-        fixture.StationTests.setUp(self)
-        self.env=mock.patch.dict(os.environ, {execution.SESSION_ENV:A});self.env.start();self.addCleanup(self.env.stop)
-        self.other=self.root/'other';shutil.copytree(self.ws,self.other)
-        binding=json.loads((self.other/'.agenticops/station.json').read_text());binding['station_id']=B
-        self.write(self.other/'.agenticops/station.json',binding)
-        self.comments=[]
-    def snapshot(self):
-        return {'site':'https://tapdata.atlassian.net','issue_id':'42687','issue_key':'TAP-13146','source_ref':'https://tapdata.atlassian.net/browse/TAP-13146',
-                'pages':[{'startAt':0,'total':len(self.comments),'isLast':True,'comments':copy.deepcopy(self.comments)}]}
-    def prepare(self,base=None,operation='claim-one',**kw):
-        base=base or self.ws;s=self.snapshot();v=c.snapshot(base,s)
-        return c.run(base,'prepare',s,operation,expected_digest=v['digest'],executor='测试执行者',**kw)
-    def publish(self,result,base=None):
-        base=base or self.ws
-        cid=result['comment_id'] or str(len(self.comments)+1)
-        row={'id':cid,'body':result['body'],'updated':datetime.now(timezone.utc).isoformat()}
-        self.comments=[r for r in self.comments if r['id']!=cid]+[row]
-        return c.run(base,'complete',self.snapshot(),claim_id=result['claim_id'])
-    def test_empty_prepare_readback_and_normal_continue(self):
-        with self.assertRaisesRegex(ValueError,'尚未核实'):c.require(self.ws,'TAP-13146')
-        p=self.prepare();self.assertTrue(p['pending'])
-        with self.assertRaisesRegex(ValueError,'尚未核实'):c.require(self.ws,'TAP-13146')
-        self.assertTrue(self.publish(p)['verified']);c.require(self.ws,'TAP-13146')
-        before=task_store.current_path(self.ws).read_bytes();c.run(self.ws,'status');self.assertEqual(before,task_store.current_path(self.ws).read_bytes())
-    def test_active_transfer_requires_decision_and_old_report_is_fenced(self):
-        p=self.prepare();self.publish(p)
-        os.environ[execution.SESSION_ENV]=B
-        with self.assertRaisesRegex(ValueError,'decision-ref'):self.prepare(self.other,'claim-two',conflict_check_ref='old stopped')
-        second=self.prepare(self.other,'claim-two',conflict_check_ref='old stopped',decision_ref='用户决定')
-        self.assertTrue(self.publish(second,self.other)['verified'])
-        os.environ[execution.SESSION_ENV]=A
-        self.assertFalse(c.run(self.ws,'check',self.snapshot())['verified'])
-        with self.assertRaisesRegex(ValueError,'尚未核实'):c.require(self.ws,'TAP-13146')
-        with self.assertRaisesRegex(ValueError,'已被接替'):self.prepare(operation='report-old',mode='report',claim_id=p['claim_id'])
-    def test_eight_hours_uses_remote_report_not_local_activity(self):
-        p=self.prepare();self.publish(p);now=int(time.time());self.comments[0]['updated']=datetime.fromtimestamp(now-8*3600,timezone.utc).isoformat()
-        os.environ[execution.SESSION_ENV]=B
-        with mock.patch.object(c.time,'time',return_value=now):
-            self.assertTrue(c.run(self.other,'check',self.snapshot())['holders'][0]['idle'])
-            with self.assertRaisesRegex(ValueError,'conflict-check-ref'):self.prepare(self.other,'claim-two')
-            second=self.prepare(self.other,'claim-two',conflict_check_ref='已核实停写')
-        self.publish(second,self.other)
-    def test_concurrent_claims_are_visible_not_last_writer_wins(self):
-        p=self.prepare()
-        os.environ[execution.SESSION_ENV]=B;q=self.prepare(self.other,'claim-two');self.publish(q,self.other)
-        os.environ[execution.SESSION_ENV]=A
-        self.assertFalse(self.publish(p)['verified'])
-        self.assertEqual(2,len(c.run(self.ws,'check',self.snapshot())['holders']))
-        with self.assertRaisesRegex(ValueError,'decision-ref'):self.prepare(operation='resolve',conflict_check_ref='停写')
-    def test_lost_receipt_reuses_body_and_does_not_duplicate_intent(self):
-        p=self.prepare();self.assertEqual(p['body'],self.prepare()['body'])
-        self.comments.append({'id':'1','body':p['body'],'updated':datetime.now(timezone.utc).isoformat()})
-        self.assertTrue(c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'])['verified'])
-        self.assertEqual(1,len(c.pending(self.ws)))
-    def test_report_edits_own_comment_and_end_survives_local_release(self):
-        p=self.prepare();self.publish(p)
-        update=self.prepare(operation='report-one',mode='report',claim_id=p['claim_id']);self.assertEqual('1',update['comment_id']);self.publish(update)
-        with task_store.task_state_lock(self.ws):pass
-        with task_store.task_state_lock(self.ws,execution=False):execution.release(self.ws,A)
-        end=self.prepare(operation='end-one',mode='end',claim_id=p['claim_id']);self.publish(end)
-        self.assertEqual([],c.pending(self.ws));self.assertFalse(c.run(self.ws,'check',self.snapshot())['verified'])
-    def test_old_station_end_cannot_release_new_station(self):
-        p=self.prepare();self.publish(p);os.environ[execution.SESSION_ENV]=B
-        q=self.prepare(self.other,'claim-two',conflict_check_ref='停写',decision_ref='交接');self.publish(q,self.other)
-        os.environ[execution.SESSION_ENV]=A
-        end=self.prepare(operation='end-old',mode='end',claim_id=p['claim_id']);self.publish(end)
-        os.environ[execution.SESSION_ENV]=B
-        self.assertTrue(c.run(self.other,'check',self.snapshot())['verified']);self.assertTrue(c.pending(self.other)[0]['active'])
-    def test_local_successor_can_end_but_not_report_old_record(self):
-        p=self.prepare();self.publish(p);os.environ[execution.SESSION_ENV]=B
-        with self.assertRaisesRegex(ValueError,'旧会话'):self.prepare(operation='end-old',mode='end',claim_id=p['claim_id'])
-        end=self.prepare(operation='end-old',mode='end',claim_id=p['claim_id'],conflict_check_ref='停写',decision_ref='清理授权');self.publish(end)
-        self.assertEqual([],c.pending(self.ws))
-    def test_invalid_input_invalidates_previous_proof(self):
-        p=self.prepare();self.publish(p);s=self.snapshot();s['pages'][0]['total']+=1
-        with self.assertRaisesRegex(ValueError,'分页'):c.run(self.ws,'check',s)
-        with self.assertRaisesRegex(ValueError,'尚未核实'):c.require(self.ws,'TAP-13146')
-    def test_pagination_and_unrelated_comments(self):
-        p=self.prepare();self.publish(p)
-        self.comments.append({'id':'2','body':'普通评论','updated':datetime.now(timezone.utc).isoformat()})
-        s=self.snapshot();s['pages']=[{'startAt':0,'total':2,'isLast':False,'comments':[self.comments[0]]},{'startAt':1,'total':2,'isLast':True,'comments':[self.comments[1]]}]
-        self.assertTrue(c.run(self.ws,'check',s)['verified'])
-        s['pages']=s['pages'][1:]
-        with self.assertRaisesRegex(ValueError,'分页'):c.run(self.ws,'check',s)
-    def test_cancel_unsent_claim_and_report_and_repeat_end_readback(self):
-        p=self.prepare()
-        c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='用户确认从未发送')
-        self.assertEqual([],c.pending(self.ws))
-        p=self.prepare(operation='claim-new');self.publish(p)
-        r=self.prepare(operation='report',mode='report',claim_id=p['claim_id'])
-        c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='尚未发送')
-        self.assertTrue(c.run(self.ws,'check',self.snapshot())['verified'])
-        e=self.prepare(operation='end',mode='end',claim_id=p['claim_id']);self.publish(e)
-        self.assertTrue(c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'])['saved'])
+class LegacyCoordinationTests(unittest.TestCase):
+    setUp = fixture.StationTests.setUp
+    write = fixture.StationTests.write
 
-    def test_takeover_gate_and_cleanup_after_remote_handoff(self):
-        from workflow import station_cleanup
-        self.prepare_engineering();self.request['issue_key']='TAP-13146'
-        c.save(self.ws,{'entries':{},'proof':None})
-        with self.assertRaisesRegex(ValueError,'尚未核实'):
-            station.takeover(self.ws,self.request,'op-coordination-takeover',0)
-        p=self.prepare();self.publish(p)
-        station.takeover(self.ws,self.request,'op-coordination-takeover',0)
-        task=task_store.read_task(self.ws)
-        os.environ[execution.SESSION_ENV]=B
-        q=self.prepare(self.other,'claim-two',conflict_check_ref='已停止 A 写入',decision_ref='用户交接');self.publish(q,self.other)
-        os.environ[execution.SESSION_ENV]=A
-        c.run(self.ws,'check',self.snapshot())
-        with self.assertRaisesRegex(ValueError,'尚未核实'):
-            with task_store.task_state_lock(self.ws):pass
-        plan=station_cleanup.plan(self.ws,'task')
-        result=station_cleanup.execute(self.ws,task['issue_key'],task['run_id'],task['_revision'],'op-clean-after-handoff',
-            {'scope':'task','materials':'preserved','expected_plan_digest':plan['digest'],'decision_ref':'用户清理旧工位'})
-        self.assertTrue(result['cleanup_result']['complete'])
-        self.assertTrue(result['cleanup_result']['coordination']['records'])
-        self.assertIsNone(task_store.read_task(self.ws))
-        e=self.prepare(operation='end-after-clean',mode='end',claim_id=p['claim_id']);self.publish(e)
-        os.environ[execution.SESSION_ENV]=B
-        self.assertTrue(c.run(self.other,'check',self.snapshot())['verified'])
+    def install(self, pending=True):
+        packet = {'format': legacy.MARKER, 'site': 'https://tapdata.atlassian.net', 'issue_id': '123',
+            'issue_key': 'TAP-123', 'station_id': 'a'*32, 'session_id': execution.session_id(),
+            'executor': 'Fixture', 'claim_id': 'old-claim', 'update_id': 'old-update', 'active': True,
+            'supersedes': [], 'decision_ref': '', 'conflict_check_ref': ''}
+        state = {'entries': {'old-claim': {'packet': packet, 'comment_id': '', 'pending': pending,
+            'actor': execution.session_id(), 'before': None}}, 'proof': None}
+        legacy.save(self.ws, state)
+        return packet
 
-    def test_native_jira_timezone_without_colon(self):
-        native=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000+0000')
-        self.assertLess(abs(time.time()-c.timestamp(native)),2)
+    def observation(self, packet):
+        return {'source_ref': 'fixture:jira', 'observations': [{'claim_id': 'old-claim',
+            'site': packet['site'], 'issue_id': packet['issue_id'], 'comment_id': '7',
+            'source_ref': 'fixture:jira/7', 'body': legacy.MARKER + '\n\n```json\n' +
+                json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2) + '\n```'}]}
 
-    def test_new_session_recovers_unknown_write_without_borrowing_identity(self):
-        p=self.prepare()
-        self.comments.append({'id':'1','body':p['body'],'updated':datetime.now(timezone.utc).isoformat()})
-        os.environ[execution.SESSION_ENV]=B
-        with self.assertRaises(ValueError):c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'])
-        r=c.run(self.ws,'complete',self.snapshot(),claim_id=p['claim_id'],decision_ref='用户接续收尾',conflict_check_ref='旧会话已停止')
-        self.assertTrue(r['saved']);self.assertFalse(r['verified'])
-        with self.assertRaises(ValueError):self.prepare(operation='old-report',mode='report',claim_id=p['claim_id'])
-        e=self.prepare(operation='old-end',mode='end',claim_id=p['claim_id'],decision_ref='用户清理',conflict_check_ref='停写')
-        self.publish(e);self.assertEqual([],c.pending(self.ws))
+    def test_unknown_write_must_be_read_before_retirement(self):
+        packet = self.install()
+        with self.assertRaisesRegex(ValueError, '尚未退役'):
+            legacy.require_retired(self.ws)
+        before = legacy.state(self.ws)
+        with self.assertRaisesRegex(ValueError, '逐项核实'):
+            legacy.retire(self.ws, {'source_ref': 'fixture:jira'}, 'user:retire', 'old:stopped')
+        self.assertEqual(before, legacy.state(self.ws))
+        supplied = self.observation(packet)
+        self.assertTrue(legacy.retire(self.ws, supplied, 'user:retire', 'old:stopped')['retired'])
+        legacy.require_retired(self.ws)
+        self.assertEqual([], legacy.pending(self.ws))
+        self.assertTrue(legacy.state(self.ws)['entries']['old-claim']['packet']['active'])
+        self.assertTrue(legacy.retire(self.ws, supplied, 'user:retire', 'old:stopped')['repeated'])
 
-    def test_new_session_can_cancel_proven_unsent_intent(self):
-        p=self.prepare();os.environ[execution.SESSION_ENV]=B
-        with self.assertRaises(ValueError):c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='尚未发送')
-        c.run(self.ws,'cancel',self.snapshot(),claim_id=p['claim_id'],decision_ref='已核实尚未发送',conflict_check_ref='旧会话已停止')
-        self.assertEqual([],c.pending(self.ws))
+    def test_identity_mismatch_preserves_unknown_intent(self):
+        packet = self.install()
+        supplied = self.observation(packet)
+        supplied['observations'][0]['issue_id'] = '456'
+        with self.assertRaisesRegex(ValueError, '身份不符'):
+            legacy.retire(self.ws, supplied, 'user:retire', 'old:stopped')
+        self.assertTrue(legacy.pending(self.ws))
 
-    def test_cancel_cannot_use_another_tasks_empty_comments(self):
-        p=self.prepare();s=self.snapshot();s['issue_id']='999';s['issue_key']='TAP-999'
-        with self.assertRaises(ValueError):c.run(self.ws,'cancel',s,claim_id=p['claim_id'],decision_ref='未发送')
-        self.assertTrue(c.pending(self.ws)[0]['pending'])
+    def test_verified_not_applied_keeps_original_packet(self):
+        packet = self.install()
+        supplied = self.observation(packet)
+        row = supplied['observations'][0]
+        row.pop('body')
+        row.update(confirmed_not_applied=True, not_applied_ref='fixture:complete-comments-and-original-result')
+        legacy.retire(self.ws, supplied, 'user:retire', 'old:stopped')
+        self.assertEqual(packet, legacy.state(self.ws)['entries']['old-claim']['packet'])
 
-    def test_unrelated_pending_intent_does_not_block_new_task(self):
-        p=self.prepare();self.publish(p)
-        # 原任务的报活还未发送，另一任务的完整回读不依赖该远端写入。
-        self.prepare(operation='old-report',mode='report',claim_id=p['claim_id'])
-        s=self.snapshot();s.update(issue_id='999',issue_key='TAP-999');s['pages'][0].update(total=0,comments=[])
-        v=c.run(self.ws,'check',s)
-        with self.assertRaises(ValueError):
-            c.run(self.ws,'prepare',s,p['claim_id'],executor='另一任务',expected_digest=v['digest'])
-        self.assertTrue(c.state(self.ws)['entries'][p['claim_id']]['pending'])
-        q=c.run(self.ws,'prepare',s,'other-task',executor='另一任务',expected_digest=v['digest'])
-        s['pages'][0].update(total=1,comments=[{'id':'2','body':q['body'],'updated':datetime.now(timezone.utc).isoformat()}])
-        self.assertTrue(c.run(self.ws,'complete',s,claim_id=q['claim_id'])['verified'])
+    def test_known_legacy_record_still_needs_stopped_executor(self):
+        self.install(False)
+        with self.assertRaisesRegex(ValueError, '停写'):
+            legacy.retire(self.ws, {'source_ref': 'fixture:old'}, 'user:retire', '')
+        self.assertTrue(legacy.retire(self.ws, {'source_ref': 'fixture:old'}, 'user:retire', 'old:stopped')['retired'])
 
-    def test_station_scoped_operation_ids_and_remote_reuse_rejected_before_write(self):
-        p=self.prepare();self.publish(p);os.environ[execution.SESSION_ENV]=B
-        q=self.prepare(self.other,conflict_check_ref='停写',decision_ref='交接')
-        self.assertTrue(self.publish(q,self.other)['verified'])
-        e=self.prepare(self.other,'end',mode='end',claim_id=q['claim_id']);self.publish(e,self.other)
-        self.prepare(self.other,'another-claim')  # 收敛已结束的本地回执。
-        c.run(self.other,'cancel',self.snapshot(),claim_id='another-claim',decision_ref='从未发送')
-        with self.assertRaises(ValueError):self.prepare(self.other)
-        self.assertEqual([],c.pending(self.other))
+    def test_new_station_has_no_coordination_write_or_idle_api(self):
+        legacy.require_retired(self.ws)
+        self.assertFalse(hasattr(legacy, 'run'))
+        self.assertFalse(hasattr(legacy, 'IDLE_SECONDS'))
+        self.assertFalse(hasattr(legacy, 'body'))
 
-    def test_wrong_site_id_malformed_and_future_timestamp_rejected(self):
-        p=self.prepare();self.publish(p)
-        for field,value in [('site','https://other.atlassian.net'),('issue_id','999')]:
-            s=self.snapshot();s[field]=value
-            with self.assertRaises(ValueError):c.run(self.ws,'check',s)
-        self.comments[0]['updated']='2100-01-01T00:00:00Z'
-        with self.assertRaises(ValueError):c.run(self.ws,'check',self.snapshot())
-    def test_observation_change_rejects_stale_decision(self):
-        p=self.prepare();self.publish(p);observed=c.snapshot(self.ws,self.snapshot())['digest'];self.comments[0]['updated']=datetime.now(timezone.utc).isoformat()
-        os.environ[execution.SESSION_ENV]=B
-        with self.assertRaisesRegex(ValueError,'观察已变化'):c.run(self.other,'prepare',self.snapshot(),'claim-two',executor='B',expected_digest=observed,decision_ref='旧决定',conflict_check_ref='停写')
 
-if __name__=='__main__':unittest.main()
+if __name__ == '__main__': unittest.main()

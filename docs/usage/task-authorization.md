@@ -17,6 +17,25 @@ python3 <agenticops-root>/workflow/task.py takeover \
 
 operation-id 使用 op- 前缀的稳定随机标识；重试保持同值和原请求。可选验证仓库在冻结前加入；所有必需仓库解析并核验后冻结完整工程。随后 repository context 读取 source 路径与基线，不使用远程页面替代本地事实。
 
+`--version` 表示主仓工程分支，TapData 对应 `tapdata/tapdata`；连接器等模块通过 `--explicit-branch owner/repo=branch` 指定。新接管先集中核验分支，失败不创建 run/op/current；远端不可用不等于分支不存在。完整边界以[接管合同](../architecture/single-task-station.md#接管归档与恢复)为准。
+
+预检成功后按同步待办重新读取 Jira 四项接管标记并登记回读，发布包含全部源码来源的接管评论，紧接着处理状态同步，再重试原 takeover 完成源码准备。未知外部结果先沿原意图回读，不重复发送；评论或状态待核验不冒充成功。
+
+### 更正未冻结接管的分支
+
+先用 status 和 repository context --full 回读当前任务、原 operation 及请求。只更正版本和逐仓覆盖，其他输入由程序从原请求保留。用户已明确两个仓库的分支时，直接引用该决定；Agent 整理命令，研发不需要填写摘要或内部编号。
+
+```sh
+python3 <agenticops-root>/workflow/task.py takeover-correct \
+  --issue-key TAP-13151 --expected-run-id <原run> --operation-id <原op> \
+  --expected-revision <当前任务revision> --expected-request-digest <原请求摘要> \
+  --version release-v4.21.0 \
+  --explicit-branch tapdata/tapdata-connectors-enterprise=release-v2.0.8 \
+  --decision-ref <用户已明确分支的决定来源> --dir <station>
+```
+
+`--explicit-branch` 提供更正后的完整覆盖集合，可重复指定；未列出的原覆盖不会保留。命令保存更正并继续原接管；中断后重复相同更正参数可回读，或用日志中的有效 request 和原 expected_revision 重试 takeover。更正使用当前任务 revision，原 takeover 重试仍使用操作创建时的 expected_revision，二者不混用。尚未冻结也不保证一定可更正：已有 checkout、未核实准备结果或本地独有源码时，先保留并核验具体对象；退出另用清理预检，不能直接删除 source。安装无此入口时不得手改状态冒充升级成功。
+
 ## 登记修改仓与阶段
 
 ```sh
@@ -161,14 +180,14 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 ## 清理与退出
 
-当前源码候选使用两个范围，安装是否可用须核实实际版本。先由 Agent 调用预检，向研发说明实际删除范围、未保全成果及唯一数据；研发无需手写 JSON 或逐文件批准。任务清理保留 config，工位清理删除本地用户配置并保留初始接线。完整边界见[工位合同](../architecture/single-task-station.md#7-清单与退出职责)。
+当前源码候选使用两个范围，安装是否可用须核实实际版本。先由 Agent 调用预检，向研发集中说明源码归位、删除兜底及运行区清理范围、未保全成果及唯一数据；研发无需手写 JSON 或逐文件批准。两个范围优先归位并保留独立源码；任务清理保留 config，工位清理删除本地用户配置并保留初始接线。完整边界见[工位合同](../architecture/single-task-station.md#7-清单与退出职责)。
 
 ```sh
 python3 <product-root>/workflow/station-clean.py --dir <station> --check --scope task --details
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --scope task --expected-plan-digest <预检digest> --decision-ref <有效用户决定来源> --materials preserved
 ```
 
-清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
+清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。Agent 先按用户已有决定推送并回读，或把唯一文件归置到可靠保全位置后重检；已保全内容不重复索要确认。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
 
 归档独立使用 `--action archive --handoff-input <材料文件>`，具体流程见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。不再提供 release 或 work-clean 生命周期入口；任务进行中的缓存清理、环境重建由对应功能处理。
 
@@ -180,13 +199,13 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --resume --oper
 
 脚本回读已完成对象，只继续原范围的剩余工作；返回的 released、complete、resources 和 residuals 分别反映实际结果。pending 返回非零但不意味着已经执行的步骤被撤销。Agent 修复访问、补齐事实或按原授权处理后继续原操作，不重发未知外部写入、不手改回执。归档未知写入须先核实，不能通过清理绕过。
 
-尚未开始目录删除且资源步骤均已核验时，可取消原清理后重新预检：
+尚未开始源码归位或目录删除且资源步骤均已核验时，可取消原清理后重新预检：
 
 ```sh
 python3 <product-root>/workflow/station-clean.py --dir <station> --cancel --operation-id <原操作> --decision-ref <明确取消决定>
 ```
 
-取消保留任务，不自动重新启动已停止资源。已经开始删除时不能取消为新清理，应继续原操作处理。注销另用 `agenticops station purge`，有任务或未完成操作时先处理原操作；注销不再自动调用清理，也不代替源码删除决定。
+取消保留任务，不自动重新启动已停止资源。已经开始归位或删除时不能取消为新清理，应继续原操作处理。注销另用 `agenticops station purge`，有任务或未完成操作时先处理原操作；注销不再自动调用清理，也不代替源码删除决定。
 
 ## 完成预检与等待合并
 

@@ -54,13 +54,15 @@ class ResourceTests(unittest.TestCase):
         self.git(self.seed, 'push', str(self.remote), 'develop')
         return self.ready()
 
-    def test_empty_gitlink_deleted_only_after_scope_decision(self):
+    def test_empty_gitlink_restored_only_after_scope_decision(self):
         task = self.gitlink_ready()
         before = self.git(self.repo, 'ls-files', '--stage')
         self.git(self.repo, 'config', 'submodule.recurse', 'true')
         self.execute(task, self.reset_request(task))
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertFalse(self.repo.exists())
+        self.assertTrue((self.repo / '.git').is_dir())
+        self.assertEqual(self.git(self.repo, 'ls-files', '--stage'), before)
+        self.assertEqual(self.git(self.repo, 'status', '--porcelain'), '')
         self.assertTrue(before)
 
 
@@ -144,7 +146,9 @@ class ResourceTests(unittest.TestCase):
             self.execute(task, self.reset_request(task))
         self.assertTrue(output.exists())
         self.assertEqual(artifacts.digest(output.read_bytes()), result['sha256'])
-        self.assertFalse(self.repo.exists())
+        self.assertTrue((self.repo / '.git').is_dir())
+        self.assertEqual(self.git(self.repo, 'status', '--porcelain'), '')
+        self.assertNotEqual((self.repo / 'file.txt').read_text(), 'exported content')
         self.assertIn(b'exported content', base64.b64decode(json.loads(output.read_text())['bundle']['worktree_patch']))
 
 

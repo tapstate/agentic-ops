@@ -7,6 +7,7 @@ from pathlib import Path
 from workflow import engineering_baseline as baseline, station_clean_rules as rules
 from workflow import station_cleanup_tree as trees, station_context, station_layout
 from workflow import station_operation as operations, station_source_preservation as preservation, task_store
+from workflow import station_source_reset as source_reset
 
 
 def initial_paths(base, config):
@@ -35,7 +36,8 @@ def plan(base, scope='task'):
     task = current['current']
     source = station_layout.station_name(base, 'repositories')
     runtime = station_layout.station_name(base, 'task-runtime')
-    targets = [trees.entry(base, name, recreate=True) for name in (source, runtime)]
+    source_reuse = source_reset.plan(base, task)
+    targets = [trees.entry(base, runtime, recreate=True)]
     if scope == 'station':
         protected = initial_paths(base, config)
         def visit(folder):
@@ -52,17 +54,18 @@ def plan(base, scope='task'):
                     targets.append(trees.entry(base, name, recreate=recreate))
         visit(base)
     other_repositories = []
-    for item in targets[1:]:
+    for item in targets:
         path = trees.path_for(base, item['path'])
         if path.is_dir() and not path.is_symlink():
             other_repositories.extend(repo.relative_to(base).as_posix() for repo in preservation.assert_isolated(path))
-    source_report = preservation.source_preservation(base, config)
+    source_report = preservation.source_preservation(base, config,
+        {item['repository']: item['target_sha'] for item in source_reuse['repositories'] if item['action'] == 'restore'})
     if other_repositories:
         source_report['other_repositories'] = other_repositories
         source_report['requires_decision'] = True
-    value = {'schema_version': 8, 'scope': scope, 'revision': current['revision'],
+    value = {'schema_version': 9, 'scope': scope, 'revision': current['revision'],
              'run_id': task['run_id'] if task else None, 'config': config, 'targets': targets,
-             'source': source_report}
+             'source': source_report, 'source_reuse': source_reuse}
     value['digest'] = baseline.digest(value)
     return value
 
@@ -70,13 +73,30 @@ def plan(base, scope='task'):
 def validate(plan):
     from workflow import quality_contract
     quality_contract.validate(plan, 'station-reset.schema.json')
-    if (not isinstance(plan, dict) or plan.get('schema_version') != 8
+    if (not isinstance(plan, dict) or plan.get('schema_version') not in (8, 9)
             or plan.get('scope') not in ('task', 'station') or not isinstance(plan.get('targets'), list)
             or baseline.digest({key: value for key, value in plan.items() if key != 'digest'}) != plan.get('digest')):
         raise ValueError('生命周期清理范围格式或摘要无效')
     paths = [item['path'] for item in plan['targets']]
     if len(paths) != len(set(paths)) or any(len(item['parent']) != 3 or item['snapshot'] and len(item['snapshot']['identity']) != 3 for item in plan['targets']):
         raise ValueError('清理路径重复或目录身份无效')
+    if plan['schema_version'] == 8:
+        if 'source_reuse' in plan or len(plan['targets']) < 2:
+            raise ValueError('旧清理计划不能混入源码归位语义')
+    else:
+        reuse = plan.get('source_reuse')
+        if not isinstance(reuse, dict) or set(reuse) != {'repositories', 'extras'}:
+            raise ValueError('源码归位计划缺失')
+        entries = reuse['repositories'] + reuse['extras']
+        all_paths = paths + [item['path'] for item in entries]
+        if len(all_paths) != len(set(all_paths)) or any(
+                a.startswith(b + '/') for a in all_paths for b in all_paths if a != b):
+            raise ValueError('源码归位与删除范围重叠')
+        for item in reuse['repositories']:
+            if (item['action'] not in ('restore', 'delete') or not baseline.SHA.fullmatch(item['target_sha'])
+                    or item['snapshot'] is None or item['recreate']
+                    or (item['action'] == 'delete') != (item['object_source'] == 'missing')):
+                raise ValueError('源码归位对象无效')
 
 
 def clear_state(base, operation):
@@ -196,12 +216,17 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
                 operation['phase'] = 'awaiting_resources'
                 operations.save(base, operation)
                 return operation
+            if cleanup_plan['schema_version'] == 9:
+                source_reset.execute(base, operation, cleanup_plan['source_reuse'])
+                result['source'] = [{'repository': item['repository'], 'action': item['action'],
+                                     'target_sha': item['target_sha']}
+                                    for item in cleanup_plan['source_reuse']['repositories']]
             for index, item in enumerate(cleanup_plan['targets']):
                 key = 'tree:' + hashlib.sha256(item['path'].encode()).hexdigest()
                 recorded = operation['steps'].get(key)
                 if recorded:
                     effective = recorded['expected']
-                elif index == 0:
+                elif index == 0 and cleanup_plan['schema_version'] == 8:
                     effective = item  # 源码成果必须匹配用户已核实的现场。
                 else:
                     path = trees.path_for(base, item['path'])
@@ -235,7 +260,7 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
 
 
 def cancel(base, operation_id, decision_ref):
-    """源码尚未开始删除时允许取消原清理，修正材料后重新预检；不恢复已停止资源。"""
+    """源码归位或数据删除尚未开始时允许取消并重新预检；不恢复已停止资源。"""
     if not isinstance(decision_ref, str) or not decision_ref.strip():
         raise ValueError('取消清理需要用户决定来源')
     from workflow import execution
@@ -248,8 +273,8 @@ def cancel(base, operation_id, decision_ref):
             if operation.get('cancelled'):
                 return operation
             raise ValueError('已完成清理不能取消')
-        if any(name.startswith('tree:') or name == 'unbind' for name in operation['steps']):
-            raise ValueError('数据删除已经开始，只能沿原操作核实并继续')
+        if any(name.startswith(('tree:', 'restore:')) or name == 'unbind' for name in operation['steps']):
+            raise ValueError('源码归位或数据删除已经开始，只能沿原操作核实并继续')
         if any(step['receipt'] is None for step in operation['steps'].values()):
             raise ValueError('资源动作尚未回读，先处理原操作，不能取消未知结果')
         operation['cancelled'] = {'decision_ref': decision_ref, 'boundary': '保留任务，已停止的资源不会自动启动'}

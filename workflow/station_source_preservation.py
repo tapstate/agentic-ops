@@ -68,7 +68,7 @@ def generated(config, name, relative):
     return 'preserve' not in actions and 'generated' in actions
 
 
-def source_preservation(base, config):
+def source_preservation(base, config, retained_heads=None):
     root = Path(base).resolve() / station_layout.station_name(base, 'repositories')
     if root.is_symlink():
         raise ValueError('source 根为链接，先核实并修复工位路径，不递归删除目标')
@@ -76,7 +76,10 @@ def source_preservation(base, config):
     found = assert_isolated(root)
     result = []
     task = task_store.read_task(base) or {}
+    from workflow import station_operation
+    operation = station_operation.read(base) or {}
     frozen = task.get('engineering_baseline', {}).get('repositories', {})
+    retained_heads = retained_heads or {}
     for path in found:
         relative = path.relative_to(root).as_posix()
         bare = git(path, 'rev-parse', '--is-bare-repository') == 'true'
@@ -101,15 +104,21 @@ def source_preservation(base, config):
         entry = frozen.get(relative)
         managed = 'refs/heads/' + source.baseline_branch(entry) if entry and source.baseline_branch(entry) else None
         losses = [key for key, value in local.items() if remote.get(key) != value
-                  and not (key == managed and value == entry['commit_sha'] and value in remote.values())]
+                  and not (key == managed and value == entry['commit_sha']
+                           and (value in remote.values() or retained_heads.get(relative) == value))]
         unchecked = [] if bare else [row[2:] for row in git(path, 'ls-files', '-v', '-z').split('\0')
                                      if row and (row[0].islower() or row[0] == 'S')]
         changed = [] if bare else sorted(set(filter(None, (git(path, 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z') + git(path, 'diff', '--no-ext-diff', '--no-textconv', '--cached', '--name-only', '-z')).split('\0'))))
+        clone = operation.get('steps', {}).get('clone:' + relative, {})
+        if (operation.get('kind') == 'takeover' and operation.get('run_id') == task.get('run_id')
+                and clone.get('before', {}).get('exists') is False and clone.get('receipt')
+                and not (path / '.git/index').exists() and all(child.name == '.git' for child in path.iterdir())):
+            changed = []  # 受管 no-checkout 中间态，没有用户删除源码。
         untracked = [] if bare else list(filter(None, git(path, 'ls-files', '--others', '--exclude-standard', '-z').split('\0')))
         ignored = [] if bare else list(filter(None, git(path, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z').split('\0')))
         unique = [name for name in untracked + ignored if not generated(config, relative, name)]
         head = git(path, 'rev-parse', 'HEAD')
-        if head not in remote.values() and head not in local.values():
+        if head not in remote.values() and head not in local.values() and head != retained_heads.get(relative):
             losses.append('detached HEAD')
         result.append({'path': relative, 'head': head, 'remote_verified': trusted, 'remote_error': remote_error,
                        'unpreserved_refs': losses, 'changed_files': changed, 'unique_files': unique, 'unchecked_files': unchecked,
@@ -124,5 +133,5 @@ def source_preservation(base, config):
             for name in files + [name for name in names if (path / name).is_symlink()]:
                 unknown.append((path / name).relative_to(root).as_posix())
     return {'repositories': result, 'unknown_files': sorted(unknown),
-            'boundary': '仅供源码保全核验，不授权删除；删除由清理操作另行核验范围与处置决定。远端只核对同名引用及完整 SHA，未核实项由 Agent 与研发处理；本地 reflog 和悬空对象随源码删除丢弃，不作为持久成果。',
+            'boundary': '仅供源码保全核验，不授权归位或删除；清理操作另行核验范围与处置决定。远端只核对同名引用及完整 SHA，未核实项由 Agent 与研发处理；归位保留的目标 HEAD 不视为丢失，本地 reflog 和悬空对象不作为持久保全。',
             'requires_decision': bool(unknown or any(row['unpreserved_refs'] or row['changed_files'] or row['unique_files'] or row['unchecked_files'] or not row['remote_verified'] for row in result))}
