@@ -87,6 +87,11 @@ for file in \
   projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py tests/test_jira_watermark.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
+  projects/tapdata/skills/tapdata-task/references/takeover.md \
+  projects/tapdata/skills/tapdata-task/references/design.md \
+  projects/tapdata/skills/tapdata-task/references/delivery.md \
+  projects/tapdata/skills/tapdata-ci-test/references/case-design.md \
+  projects/tapdata/skills/tapdata-ci-test/references/execution.md \
   projects/tapdata/skills/tapdata-wiki/SKILL.md projects/tapdata/skills/tapdata-ci-test/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md skills/shared/ao-requirement/SKILL.md skills/shared/ao-requirement/references/design-types.md \
   skills/shared/ao-feedback/SKILL.md docs/usage/problem-feedback.md \

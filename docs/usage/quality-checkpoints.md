@@ -401,7 +401,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
   --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_station"
 ```
 
-工具只在以下条件满足时返回 preflight_ready：从 Jira「已链接工作项」派生的受管 Test 非空，每个 Test 的 Test Type 与用例版本可回读，且Manual/Unit 在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项并由用户基于当前 SHA 的 PASS 证据逐项 `accept`；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 或存在上述有效具体提审例外，且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test、未逐项确认、Head 漂移、`defer/accept_risk/rework` 都会列为待办；Checks 缺失、跳过或失败按具体例外核对，未知或等待不能据此放行。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+工具按当前 Project 核对 Test 要求：显式不要求独立 Test 的流程，或满足[充分 IT 验收路径](#非阻断-jira-状态同步)的无关联 Test 场景，不强制补建；已有 Test、缺失或损坏的链接事实仍完整核验。其它要求独立 Test 的流程须从 Jira「已链接工作项」取得非空受管 Test。对实际关联的每个 Test，Test Type 与用例版本须可回读，Manual/Unit 在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项并由用户基于当前 SHA 的 PASS 证据逐项 `accept`；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 或存在上述有效具体提审例外，且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。适用流程要求关联却没有符合关系和类型的 Test、实际关联项未逐项确认、Head 漂移、`defer/accept_risk/rework` 都会列为待办；Checks 缺失、跳过或失败按具体例外核对，未知或等待不能据此放行。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
 
 ## 影响版本与优先修复线
 
