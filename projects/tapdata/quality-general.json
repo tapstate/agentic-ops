@@ -4,6 +4,7 @@
   "task_classes": ["general_task"],
   "change_only_verification": ["source_sync", "ci"],
   "change_only_pr": true,
+  "allow_no_source_change_plan": true,
   "jira": {
     "automatic_transition_attempts": [],
     "manual_transitions": [],

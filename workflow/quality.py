@@ -72,6 +72,8 @@ def config(base, task=None):
         if result.get("schema_version") != 1:
             raise ValueError("不支持的质量配置版本")
         change_only = result.get("change_only_verification", [])
+        if type(result.get("allow_no_source_change_plan", False)) is not bool:
+            raise ValueError("allow_no_source_change_plan 必须为布尔值")
         if (not isinstance(change_only, list) or not set(change_only) <= {"source_sync", "ci"}
                 or type(result.get("change_only_pr", False)) is not bool):
             raise ValueError("无源码变化仅允许省略来源合并、CI 和 PR，本地验证及审查仍须保留")
@@ -183,10 +185,13 @@ def plan_problems(model, rules, ctx):
     from workflow import verification
     problems = structured_plan_problems(model, rules, ctx) + verification.plan_problems(rules, ctx)
     if contract is not None:
+        from workflow import plan_review
         plan = ctx["facts"].get(contract["fact_key"])
         if not isinstance(plan, dict):
             return problems + ["方案事实 %s 必须是 JSON 对象" % contract["fact_key"]]
         for key in contract["required_fields"]:
+            if key == 'changes' and plan_review.no_source_change_plan(plan, rules, ctx):
+                continue
             value = plan.get(key)
             if not isinstance(value, (str, list, dict)) or not value or (isinstance(value, str) and not value.strip()):
                 problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
