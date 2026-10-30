@@ -41,6 +41,7 @@
     },
     "status_sync": {
       "schema_version": 1,
+      "allow_accepted_it_without_test": true,
       "task_classes": ["defect_fix", "feature_change"],
       "attempts": {
         "takeover": {

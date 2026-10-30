@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Jira 非阻断状态同步和 PR Ready 验收测试；不访问外部 Jira/GitHub。"""
 import json
+import copy
+import test_quality as fixtures
 import shutil
 import subprocess
 import sys
@@ -11,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import jira_status, jira_tests, pr_ready, task_store  # noqa: E402
+from workflow import jira_status, jira_tests, pr_ready, task_store, verification  # noqa: E402
 from station_fixture import save_task as save_station_task
 
 
@@ -819,7 +821,7 @@ class SubmissionClosureTests(unittest.TestCase):
         rules = {'task_classes': [], 'pr_ready': {'required_verification': []}}
         with mock.patch.object(pr_ready, 'local_head', side_effect=lambda r: ('a' if r['repository'] == 'owner/first' else 'b') * 40), \
              mock.patch.object(pr_ready.quality, 'config', return_value=rules), \
-             mock.patch.object(pr_ready, '_jira_test_tasks', return_value=([], 'fixture:jira', [], [])), \
+             mock.patch.object(jira_tests, 'acceptance_tests', return_value=([], [], [])), \
              mock.patch.object(pr_ready, 'linked_test_confirmation_problems', return_value=[]), \
              mock.patch.object(pr_ready, 'quality_problems', return_value=[]), \
              mock.patch.object(pr_ready.ci, 'current_states', return_value=self.observations):
@@ -916,6 +918,80 @@ class SubmissionClosureTests(unittest.TestCase):
         self.assertIn('customfield_10413', reused['confirmed'])
         self.task['facts']['implementation_plan']['objective'] = '范围改变'; save_station_task(self.base, self.task)
         self.assertIn('customfield_10413', jira_collect.collect(self.base, self.task, 'acceptance', snapshot)['pending'])
+
+
+class AcceptedITTests(unittest.TestCase):
+    def setUp(self):
+        f = fixtures.TestCoverageClosureTests(); f.setUp()
+        self.rules = json.loads((ROOT / 'projects/tapdata/quality.json').read_text())
+        self.ctx, self.material = f.ctx, f.material
+        self.ctx.update(issue_key='TAP-123', run_id='original-run')
+        self.repo, self.row = f.repo, f.row
+        self.model = {}
+        verification.record(self.model, self.material, self.ctx, self.rules)
+        local = copy.deepcopy(self.material); local['kind'] = 'local'
+        verification.record(self.model, local, self.ctx, self.rules)
+        self.report = {'checkpoints': {'q4-acceptance': {'reviewed': True, 'outcome': 'accept', 'due': ['it']}},
+            'items': {'it': {'plan': {'method': 'unit', 'timing': 'after_fix', 'expected_result': 'PASS',
+                                    'repository': f.repo, 'scope': f.row['scope'],
+                                    'target_revision': f.head},
+                             'decision_valid': True, 'decision': {'decision': {'outcome': 'accept'}}}}}
+        self.doc = {'issue': {'key': 'TAP-123', 'fields': {'issuelinks': []}}}
+
+    def accepted(self):
+        return jira_tests.accepted_it(self.model, self.report, self.ctx, self.rules)
+
+    def test_complete_it_acceptance_without_extra_test(self):
+        self.assertTrue(self.accepted())
+        self.assertTrue(jira_tests.linked_tests(self.doc, 'TAP-123', self.rules)[0])
+
+    def test_confirmation_and_manual_scenarios_are_not_exempt(self):
+        for field, value in [('reviewed', False), ('outcome', 'accept_risk'), ('due', [])]:
+            with self.subTest(field=field):
+                point = self.report['checkpoints']['q4-acceptance']; old = point[field]
+                point[field] = value; self.assertFalse(self.accepted()); point[field] = old
+        for field, value in [('timing', 'before_fix'), ('expected_result', 'FAIL')]:
+            plan = self.report['items']['it']['plan']; old = plan[field]
+            plan[field] = value; self.assertFalse(self.accepted()); plan[field] = old
+        for method in ('manual', 'taptest'):
+            self.report['items']['it']['plan']['method'] = method
+            self.assertFalse(self.accepted())
+
+    def test_changed_head_ci_plan_and_missing_material_fail_closed(self):
+        for field, value in [('live_revision', 'b' * 40), ('ci_digest', 'different')]:
+            old = self.ctx['repositories'][self.repo][field]
+            self.ctx['repositories'][self.repo][field] = value
+            self.assertFalse(self.accepted()); self.ctx['repositories'][self.repo][field] = old
+        self.row['case_strategy'] = 'changed plan'; self.assertFalse(self.accepted())
+        self.setUp(); del self.model['verification'][self.repo]['local']; self.assertFalse(self.accepted())
+
+    def test_non_pass_zero_skips_and_unwritten_are_not_coverage(self):
+        for kind in ('local', 'ci'):
+            result = self.model['verification'][self.repo][kind]['data']['results'][0]
+            for field, value in [('result', 'SKIPPED'), ('tests', 0), ('skipped', 1), ('errors', 1)]:
+                with self.subTest(kind=kind, field=field):
+                    old = result[field]; result[field] = value
+                    self.assertFalse(self.accepted()); result[field] = old
+            case = result['case_coverage']['cases'][0]; old = case['status']
+            case['status'] = 'missing'; self.assertFalse(self.accepted()); case['status'] = old
+        self.row.update(level='L3', framework_supported=False); self.assertFalse(self.accepted())
+
+    def test_live_admission_preserves_existing_links_and_default_policy(self):
+        from workflow import jira_status, quality
+        task = {'issue_key': 'TAP-123'}
+        with mock.patch.object(jira_status, 'config', return_value={}) as config, \
+             mock.patch.object(quality, 'load', return_value={}), \
+             mock.patch.object(quality, 'context', return_value=self.ctx), \
+             mock.patch.object(quality, 'report', return_value=self.report), \
+             mock.patch.object(quality, 'replay', return_value=self.model):
+            self.assertTrue(jira_tests.acceptance_tests('.', task, self.doc, self.rules)[0])
+            config.return_value = {'allow_accepted_it_without_test': True}
+            self.assertEqual(([], [], []), jira_tests.acceptance_tests('.', task, self.doc, self.rules))
+            for links in (None, [{}], [{'type': {'inward': 'is tested by'}, 'inwardIssue': {
+                    'key': 'TAP-456', 'fields': {'issuetype': {'name': 'Test'}}}}]):
+                self.doc['issue']['fields']['issuelinks'] = links
+                self.assertTrue(jira_tests.acceptance_tests('.', task, self.doc, self.rules)[0])
+
 
 
 if __name__ == "__main__":
