@@ -2867,6 +2867,39 @@ class TestCoverageClosureTests(unittest.TestCase):
                                  'source_ref': 'fixture:issue-readback', 'observed_at': proof()['at']}]
         self.refresh()
 
+    def test_compact_summary_keeps_case_mapping_and_tail_without_ci_repetition(self):
+        body = self.packet['pull_requests'][0]['body']
+        self.assertIn('模块:行为 / L1 / behavior', body)
+        self.assertIn('复用', body)
+        self.assertIn('fixture:verify.py', body)
+        self.assertIn('已有断言覆盖目标行为', body)
+        self.assertNotIn(self.result['report_ref'], body)
+        self.assertNotIn('PASS', body)
+        self.assertGreater(body.count('\n'), 5)
+        self.assertEqual(1, body.count('AgenticOps 版本 '))
+        content, _, footer = body.rpartition('\n\n---\n\n')
+        self.packet['pull_requests'][0]['body'] = '## 变更说明\n\n人工说明保留。\n\n' + content + '\n\n## 风险与依赖\n\n依赖另仓发布。\n\n---\n\n关联任务：TAP-123\n\n' + footer
+        self.assertEqual([], self.problems())
+        self.packet['pull_requests'][0]['body'] = footer + '\n\n' + content
+        self.assertTrue(self.problems())
+
+    def test_legacy_current_summary_keeps_admission_but_not_stale_evidence(self):
+        self.packet['pull_requests'][0]['body'] = self.c.legacy_summary([self.row], self.material, self.version)
+        self.assertEqual([], self.problems())
+        self.version = 'main-v1.0-3-changed'
+        self.assertTrue(self.problems())
+        self.assertEqual(self.head, self.material['head_revision'])
+
+    def test_summary_retains_nonexecution_and_missing_case_dispositions(self):
+        self.missing(); self.link_issue()
+        body = self.packet['pull_requests'][0]['body']
+        self.assertIn('应写未写', body)
+        self.assertIn('用例尚未完成', body)
+        self.assertIn('NOT\\_RUN', body)
+        self.assertIn('研发跟进补测', body)
+        self.assertIn('fixture:confirmation-1', body)
+        self.assertEqual([], self.problems())
+
     def test_existing_coverage_needs_no_issue_and_draft_can_pass_preflight(self):
         self.assertEqual([], self.problems())
         self.assertEqual([], self.packet['issues'])

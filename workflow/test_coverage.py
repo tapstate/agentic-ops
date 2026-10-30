@@ -182,7 +182,7 @@ def case_details(row, coverage):
     return ' / '.join(parts)
 
 
-def summary(plan, material, version, model=None, policy=None):
+def legacy_summary(plan, material, version, model=None, policy=None):
     rows = {(r['scope'], r.get('level')): r for r in material.get('results', [])}
     lines = ['### 测试覆盖与编写情况', '', 'AgenticOps 版本 ' + text(version), '',
              '验证代码：' + text(material['head_revision']), '',
@@ -217,6 +217,54 @@ def summary(plan, material, version, model=None, policy=None):
             elif row.get('level') != 'N/A' and result.get('result') != 'PASS':
                 cells[-1] += '；测试闭环未完成（' + ('研发已明确处置' if result.get('decision') else '待研发处置') + '）'
         lines.append('| ' + ' | '.join(cells) + ' |')
+    return '\n'.join(lines)
+
+
+def summary(plan, material, version, model=None, policy=None):
+    """只投影用例变化、场景映射和缺口；正常 CI 流水留在 Checks/报告。"""
+    from workflow import it_manual
+    rows = {(r['scope'], r.get('level')): r for r in material.get('results', [])}
+    lines = ['### IT 用例与覆盖', '',
+             '| 应测场景 / 级别 | 用例处理与定位 | 覆盖与缺口 |',
+             '| --- | --- | --- |']
+    for row in plan:
+        result = rows.get((row['scope'], row['level']), {})
+        coverage = result.get('case_coverage') or {}
+        if policy and it_manual.required(row, policy):
+            cells = [row['scope'] + ' / ' + row['level'], '手动替代；自动化待补',
+                     it_manual.summary(row, model or {}, policy)]
+            # 手动执行不是 CI 流水，保留用例、版本、真实结果和跟进。
+            lines.append('| ' + text(cells[0]) + ' | ' + text(cells[1]) + ' | ' + cells[2] + ' |')
+            continue
+        actual = {c.get('id'): c for c in coverage.get('cases', [])}
+        cases = row.get('cases') or [{'id': '', 'change': '', 'reason': row.get('case_strategy', '')}]
+        for planned in cases:
+            case = actual.get(planned['id'], {})
+            change = {'reuse': '复用', 'modify': '修改', 'new': '新增'}.get(planned['change'], '范围说明')
+            location = case.get('case_ref') or planned.get('baseline_ref') or '待核验'
+            status = {'covered': '已覆盖', 'missing': '应写未写', 'not_applicable': '不适用'}.get(coverage.get('status'), '待核验')
+            details = [status]
+            if case.get('status') == 'missing':
+                details.append('用例尚未完成')
+            if case.get('result', result.get('result', 'UNKNOWN')) != 'PASS':
+                details.extend([case.get('result', result.get('result', 'UNKNOWN')), case.get('report_ref', result.get('report_ref', '待核验'))])
+            if result.get('result', 'UNKNOWN') != 'PASS' and result.get('result') != case.get('result'):
+                details.extend([result.get('result', 'UNKNOWN'), result.get('report_ref', '待核验')])
+            if status != '已覆盖':
+                details.append(coverage.get('reason', '待核验'))
+            for decision in (coverage.get('decision') or {}, result.get('decision') or {}):
+                details.extend(str(value) for value in (decision.get('reason'), decision.get('follow_up'),
+                               (decision.get('proof') or {}).get('reference')) if value)
+            if policy and row.get('level') != 'N/A' and result.get('result') != 'PASS':
+                details.append('测试闭环未完成（' + ('研发已明确处置' if result.get('decision') else '待研发处置') + '）')
+            cells = [row['scope'] + ' / ' + row['level'] + (' / ' + planned['id'] if planned['id'] else ''),
+                     change + '；' + location + '；' + planned['reason'], '；'.join(details)]
+            rendered = [text(cell) for cell in cells]
+            follow = coverage.get('issue') or {}
+            if not policy and issue_url(follow.get('url'), follow.get('repository')):
+                rendered[-1] += '；[补测 Issue](' + follow['url'] + ')'
+            lines.append('| ' + ' | '.join(rendered) + ' |')
+    lines.extend(['', '---', '', '验证代码：' + text(material['head_revision']), '', 'AgenticOps 版本 ' + text(version)])
     return '\n'.join(lines)
 
 
@@ -282,7 +330,10 @@ def publication_problems(task, packet, model, ctx, rules, version):
                 or pr.get('headRefOid') != ctx['repositories'][name]['live_revision']
                 or pr.get('state') != 'OPEN' or not observation(pr)):
             errors.append(name + ' 缺少当前 PR 身份、Head、OPEN 及来源时间回读')
-        if expected not in visible(pr.get('body')):
+        content, _, footer = expected.rpartition('\n\n---\n\n')
+        body = visible(pr.get('body'))
+        current = content in body and footer in body and body.index(content) < body.index(footer)
+        if not current and legacy_summary(plan, material, version, model, policy) not in body:
             errors.append(name + ' PR 正文缺少当前测试总结或实际 AgenticOps 版本标识')
         for row in plan:
             result = next((r for r in material['results'] if r['scope'] == row['scope'] and r.get('level') == row['level']), {})
