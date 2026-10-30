@@ -577,7 +577,7 @@ Fix Details 面向任务交付，PR 面向单仓审查。Agent 使用同一批�
 
 正文适用短标题、段落和列表；真正需要映射或比较时才用小表格。关键风险和未完成项直接可见，不藏在折叠区。必要证据实际可访问；仅本机材料说明保全位置与恢复限制。原操作版本、当前安装版本和本次文案使用版本分别表述，不能把升级后的版本覆盖为故障发生版本。
 
-对已核验为字面文本的新草稿，绑定连接器实际支持 HTML 写入和 HTML 回读时，可使用 `workflow/jira_literal_html.py` 增加标题、段落和标签强调。它是无状态协议辅助，不发送、不写账本、不增加质量事件表示或门禁。原确认文本仍进入既有 draft/confirm/prepare_write；发送前在当前 run 的 interaction-path 以 `jira-html-<operation_id>.html` 保存 HTML 原意图，文件位置可由原操作稳定推导；原生调用显式选择 HTML 格式。参数从当前连接器获取，不写入平台无关 Skill，不猜测旧安装或任意平台支持。
+对已核验为字面文本的新草稿，绑定连接器实际支持 HTML 写入和 HTML 回读时，可使用 `workflow/jira_literal_html.py` 增加标题、段落和标签强调。它是无状态协议辅助，不发送、不写账本、不增加质量事件表示或门禁。原确认文本仍进入既有 draft/confirm/prepare_write；发送前在当前 run 的 interaction-path 以 `jira-html-<operation_id>.txt` 保存原始 UTF-8 HTML 意图；`.txt` 沿用 interaction-path 现有文件名合同，文件内容不转义、不转换为纯文本，文件位置可由原操作稳定推导；原生调用显式选择 HTML 格式。参数从当前连接器获取，不写入平台无关 Skill，不猜测旧安装或任意平台支持。
 
 ```sh
 python3 <product-root>/workflow/jira_literal_html.py render --body-file <原确认正文> > <HTML原意图>
