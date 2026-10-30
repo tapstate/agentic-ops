@@ -66,6 +66,7 @@ run_product tests/test_station_resources.py
 run_product tests/test_station_archive_selection.py
 run_product tests/test_station_records.py
 run_product tests/test_task_handoff.py
+run_product tests/test_jira_literal_html.py
 run_product tests/test_execution.py
 run_product tests/test_jira_coordination.py
 run_product tests/test_station_clean.py

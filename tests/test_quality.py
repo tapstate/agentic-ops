@@ -2417,6 +2417,33 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(record['operation_id'], result['operation_id'])
         self.assertEqual('范围 P-01~P-11', result['body'])
 
+    def test_literal_html_readback_reuses_created_intent_and_old_event_schema(self):
+        from workflow import jira_literal_html
+        original = 'TAP-123：首轮验证\n\n处置：P-01~P-11；路径 a\\b'
+        expected_html = jira_literal_html.render(original)
+        self.apply('draft', {'id': 'html', 'body': original})
+        record = self.view()['publications']['html']
+        self.apply('confirm', {'id': 'html', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'html', 'digest': record['digest']})['publications']['html']
+        self.apply('receipt', {'id': 'html', 'operation_id': record['operation_id'], 'result': 'created', 'comment_id': '102'})
+        receipt = {'site': record['site'], 'issue_key': 'TAP-123', 'comment_id': '102',
+                   'body': expected_html, 'source_ref': 'fixture:jira/102'}
+        converted = jira_literal_html.compare(original, expected_html, receipt, record['site'], 'TAP-123', '102')
+        self.assertEqual('created', self.view()['publications']['html']['status'])
+        payload = {'id': 'html', 'operation_id': record['operation_id'], **converted}
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaises(ValueError):
+            self.apply('readback', dict(payload, operation_id='different'))
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        self.assertEqual('verified', self.apply('readback', payload)['publications']['html']['status'])
+        saved = quality.load(self.base, self.task)
+        self.assertEqual('exact-text', saved['events'][-1]['command']['payload']['body_representation'])
+        publication = quality.replay(saved)['publications']['html']
+        self.assertEqual(original, publication['body'])
+        self.assertEqual(record['operation_id'], publication['operation_id'])
+        with self.assertRaises(ValueError):
+            self.apply('prepare_write', {'id': 'html', 'digest': record['digest']})
+
     def test_legacy_comment_events_replay_without_rewriting_body(self):
         profile = self.product / 'projects/tapdata/quality.json'
         current = profile.read_text(); rules = json.loads(current); rules['comment_format'] = 'human-text-v1'

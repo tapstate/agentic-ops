@@ -82,6 +82,7 @@ for file in \
   workflow/task.py workflow/task_store.py workflow/station_context.py tests/test_station_context.py workflow/project_rules.py workflow/repair_strategy.py tests/test_station_compatibility.py tests/test_repair_strategy.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
+  workflow/jira_literal_html.py tests/test_jira_literal_html.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/jira_tests.py workflow/pr_ready.py \
   contracts/quality-action.schema.json contracts/quality-state.schema.json \
   projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py tests/test_jira_watermark.py \
