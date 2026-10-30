@@ -107,9 +107,7 @@
             "Fix Details"
           ],
           "value_type": "string",
-          "source": [
-            "repositories"
-          ],
+          "source": [],
           "required_when": false,
           "collect_at": "acceptance",
           "decision_owner": "Engineering DRI",
@@ -340,9 +338,7 @@
             "components"
           ],
           "value_type": "option-with-child",
-          "source": [
-            "repositories"
-          ],
+          "source": [],
           "required_when": true,
           "collect_at": "design_review",
           "decision_owner": "Engineering DRI",
@@ -378,10 +374,7 @@
             "Fix Details"
           ],
           "value_type": "string",
-          "source": [
-            "facts.fix_plan",
-            "repositories"
-          ],
+          "source": [],
           "required_when": true,
           "collect_at": "acceptance",
           "decision_owner": "Engineering DRI",
