@@ -596,6 +596,8 @@ TapData 精确接受 `Tests Passed`、`PULL REQUEST SUBMITTED`、`MERGED`、`完
 
 在 intake、design_review、acceptance、pr_review、transition 的相关人工节点执行 `jira_status.py collect --checkpoint <节点> --issue-key <key> --expected-run-id <run> --input <json> --dir <station>`。输入包含 `snapshot`（原生 issue、transitions.fields、source_ref）与可选 `proposals`（字段 ID 到建议值）。输出按字段 ID 去重，保留所有转换用途，统一展示已有值、可复用确认、本节点待决、未来待采及动态未知项；建议值不是 Jira 已写事实。
 
+TapData 的 `Fix Details` 仅在采集到期或原生表单要求提前采集时，由已有质量记录生成交付总结素材，不使用完整仓库对象或实施计划作为修复结果的后备建议。`Module` 按原生字段选项由研发确认，不将仓库对象当作模块选项。内部工程定位数据（例如 `worktree.path`）不进入这两类字段建议；显式提议、Jira 原值及实际生成的交付材料仍接受完整敏感检查，不能借此隐藏不合格材料或自动确认字段。
+
 TapData 功能与缺陷接管的经办人一致性由 Profile 的 `require_current_assignee` 对 Jira 和当前用户实时 accountId 核验，不重复索要人工证明。经办人字段安排在 `transition` 人工采集节点；原生转换表单若明确将其列为必填，则仍按该表单提前采集。缺少或不匹配的经办人继续拒绝自动接管流转；修改负责人不属于自动填写。该配置调整不改变工位持久状态格式，已有字段确认和尝试回执继续读取，已知未发送的预检缺项可沿原 operation 重检。
 
 一次向研发展示全部本节点 pending。取得真实决定后，使用相同输入增加 `field_digests`（每个提议值对应 collect 返回的字段摘要）和 `proof`（actor/source/reference/at），执行相同参数的 `confirm`。确认绑定值、选项、依赖和责任人；无关评论及内部 revision 不导致重问。条件必填根据拟确认值计算，未来才知道的验收结果不在设计阶段索要。确认不执行 Jira 写入，Agent 按原生权限回填后仍须回读。

@@ -18,6 +18,68 @@ from station_fixture import save_task as save_station_task
 from station_fixture import task_state_snapshot
 
 class JiraStatusTests(unittest.TestCase):
+    def seed_two_repository_collection(self, task_class):
+        self.task['task_class'] = task_class
+        self.task['repositories'] = [
+            {'repository': name, 'worktree': {'status': 'prepared',
+             'path': '/Users/fixture/station/source/' + name}}
+            for name in ('tapdata/tapdata', 'tapdata/tapdata-web')]
+        save_station_task(self.base, self.task)
+        # 工位加载按宿主目录生成路径；模拟 macOS 用户目录下的同一投影。
+        for repo in self.task['repositories']:
+            repo['worktree']['path'] = '/Users/fixture/station/source/' + repo['repository']
+        return self.snapshot()
+
+    def test_two_repository_fix_details_wait_for_actual_summary(self):
+        from workflow import jira_collect
+        for task_class in ('feature_change', 'defect_fix'):
+            with self.subTest(task_class=task_class):
+                snapshot = self.seed_two_repository_collection(task_class)
+                before = task_state_snapshot(self.base)
+                for checkpoint in ('intake', 'design_review'):
+                    packet = jira_collect.collect(self.base, self.task, checkpoint, snapshot)
+                    self.assertIn('customfield_10093', packet['future'])
+                    self.assertEqual([], packet['fields']['customfield_10093']['suggestions'])
+                if task_class == 'defect_fix':
+                    self.assertIn('customfield_10098', packet['pending'])
+                    self.assertEqual([], packet['fields']['customfield_10098']['suggestions'])
+                    self.assertFalse(packet['fields']['customfield_10098']['valid_value'])
+                packet = jira_collect.collect(self.base, self.task, 'acceptance', snapshot)
+                suggestion = packet['fields']['customfield_10093']['suggestions'][0]
+                self.assertEqual('actual_verification', suggestion['source'])
+                self.assertIn('待核验', suggestion['value'])
+                self.assertIn('tapdata/tapdata-web', suggestion['value'])
+                self.assertNotIn('/Users/', json.dumps(packet))
+                self.assertNotIn('customfield_10093', packet['confirmed'])
+                self.assertEqual(before, task_state_snapshot(self.base))
+
+    def test_native_required_fix_details_collects_summary_early(self):
+        from workflow import jira_collect
+        snapshot = self.seed_two_repository_collection('feature_change')
+        snapshot['transitions'][0]['fields']['customfield_10093'] = {
+            'name': 'Fix Details', 'schema': {'type': 'string'}, 'required': True}
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot)
+        self.assertIn('customfield_10093', packet['pending'])
+        self.assertNotIn('customfield_10093', packet['future'])
+        self.assertEqual('actual_verification',
+                         packet['fields']['customfield_10093']['suggestions'][0]['source'])
+        self.assertFalse(packet['fields']['customfield_10093']['valid_value'])
+
+    def test_fix_details_explicit_sensitive_values_still_rejected(self):
+        from workflow import jira_collect
+        snapshot = self.seed_two_repository_collection('feature_change')
+        before = task_state_snapshot(self.base)
+        for value in ('/Users/fixture/private/report', 'password=fixture-secret'):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, '采集结果含敏感内容'):
+                    jira_collect.collect(self.base, self.task, 'design_review', snapshot,
+                                         {'customfield_10093': value})
+                snapshot['issue']['fields']['customfield_10093'] = value
+                with self.assertRaisesRegex(ValueError, 'Jira 采集快照含敏感内容'):
+                    jira_collect.collect(self.base, self.task, 'design_review', snapshot)
+                del snapshot['issue']['fields']['customfield_10093']
+        self.assertEqual(before, task_state_snapshot(self.base))
+
     def test_sensitive_packet_reports_location_without_disclosing_value(self):
         from workflow import jira_collect
         spec = json.loads((ROOT / "projects/tapdata/admission.json").read_text())
