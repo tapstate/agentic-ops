@@ -45,8 +45,9 @@ def render(body):
 
 class LiteralDocument(HTMLParser):
     """仅接受本展示合同的节点；未知结构、属性、链接、媒体均拒绝。"""
-    def __init__(self):
+    def __init__(self, plain=False):
         super().__init__(convert_charrefs=True)
+        self.plain = plain
         self.stack = []
         self.blocks = []
         self.current = None
@@ -83,6 +84,8 @@ class LiteralDocument(HTMLParser):
             if data.strip():
                 raise RepresentationError('HTML 块外存在正文')
             return
+        if self.plain and any(char in data for char in '\r\n'):
+            raise RepresentationError('纯文本换行必须由 p 或 br 表达，不能将 HTML 源码空白当作换行')
         kind = 'strong' if self.stack[-1] == 'strong' else 'text'
         parts = self.current[1]
         if parts and parts[-1][0] == kind:
@@ -103,10 +106,10 @@ class LiteralDocument(HTMLParser):
         raise RepresentationError('不接纳 HTML 处理指令')
 
 
-def document(value):
+def document(value, plain=False):
     if not isinstance(value, str) or not value.strip() or '\x00' in value:
         raise RepresentationError('缺少有效 HTML 正文')
-    parser = LiteralDocument()
+    parser = LiteralDocument(plain=plain)
     parser.feed(value)
     parser.close()
     if parser.stack or not parser.blocks:
@@ -114,8 +117,8 @@ def document(value):
     return parser.blocks
 
 
-def compare(body, expected_html, readback, site, issue_key, comment_id):
-    """比对保存的 HTML 原意图及正文；不把文本相同视为任意结构相同。"""
+def readback_metadata(readback, site, issue_key, comment_id):
+    """仅核验原生材料的目标与来源；原操作及作者绑定仍由所属接口检查。"""
     if not isinstance(readback, dict):
         raise RepresentationError('回读必须为原生来源对象')
     for key, value in (('site', site), ('issue_key', issue_key), ('comment_id', comment_id)):
@@ -123,6 +126,14 @@ def compare(body, expected_html, readback, site, issue_key, comment_id):
             raise RepresentationError('回读目标或评论 ID 不匹配')
     if not isinstance(readback.get('source_ref'), str) or not readback['source_ref'].strip():
         raise RepresentationError('回读缺少原生来源')
+    return {'site': site, 'issue_key': issue_key, 'comment_id': comment_id,
+            'source_ref': readback['source_ref'],
+            **({'author_account_id': readback['author_account_id']} if 'author_account_id' in readback else {})}
+
+
+def compare(body, expected_html, readback, site, issue_key, comment_id):
+    """比对保存的 HTML 原意图及正文；不把文本相同视为任意结构相同。"""
+    metadata = readback_metadata(readback, site, issue_key, comment_id)
     expected = document(expected_html)
     plain = '\n\n'.join(''.join(part[1] for part in block[1]) for block in expected)
     if literal_text(plain) != literal_text(body):
@@ -130,10 +141,19 @@ def compare(body, expected_html, readback, site, issue_key, comment_id):
     if expected != document(readback.get('body')):
         raise RepresentationError('HTML 回读正文或结构不匹配，保持待核对，不得重发')
     # 转换结果仅供已有 readback 接口核验原操作/作者等绑定；不声称 verified。
-    return {'body': literal_text(body), 'body_representation': 'exact-text',
-            'site': site, 'issue_key': issue_key, 'comment_id': comment_id,
-            'source_ref': readback['source_ref'],
-            **({'author_account_id': readback['author_account_id']} if 'author_account_id' in readback else {})}
+    return {'body': literal_text(body), 'body_representation': 'exact-text', **metadata}
+
+
+def compare_plain(body, readback, site, issue_key, comment_id):
+    """只核验原确认纯文本的无格式原生段落；不重建旧 HTML 发送意图。"""
+    metadata = readback_metadata(readback, site, issue_key, comment_id)
+    actual = document(readback.get('body'), plain=True)
+    if any(tag != 'p' or any(kind != 'text' for kind, _ in parts) for tag, parts in actual):
+        raise RepresentationError('纯文本回读只接受无格式段落和换行；展示或富文本必须核对原 HTML 意图')
+    plain = '\n\n'.join(''.join(value for _, value in parts) for _, parts in actual)
+    if literal_text(plain) != literal_text(body):
+        raise RepresentationError('原生段落与原确认正文不一致，保持待核对，不得重发')
+    return {'body': literal_text(body), 'body_representation': 'exact-text', **metadata}
 
 
 def unique_object(pairs):
@@ -151,17 +171,23 @@ def main():
     render_parser = sub.add_parser('render', help='展示已确认的字面正文；将输出保存为原发送 HTML 意图')
     render_parser.add_argument('--body-file', required=True)
     compare_parser = sub.add_parser('compare', help='核对原 HTML 意图和原生回读；输出已有 readback 所需文本')
-    for name in ('body-file', 'expected-html-file', 'readback', 'site', 'issue-key', 'comment-id'):
-        compare_parser.add_argument('--' + name, required=True)
+    compare_parser.add_argument('--expected-html-file', required=True)
+    plain_parser = sub.add_parser('compare-plain', help='核验原确认纯文本的无格式原生段落；不生成 HTML 意图')
+    for command_parser in (compare_parser, plain_parser):
+        for name in ('body-file', 'readback', 'site', 'issue-key', 'comment-id'):
+            command_parser.add_argument('--' + name, required=True)
     args = parser.parse_args()
     try:
         body = Path(args.body_file).read_bytes().decode('utf-8')
         if args.action == 'render':
             print(render(body))
         else:
-            result = compare(body, Path(args.expected_html_file).read_text(encoding='utf-8'),
-                             json.loads(Path(args.readback).read_text(encoding='utf-8'), object_pairs_hook=unique_object),
-                             args.site, args.issue_key, args.comment_id)
+            readback = json.loads(Path(args.readback).read_text(encoding='utf-8'), object_pairs_hook=unique_object)
+            if args.action == 'compare-plain':
+                result = compare_plain(body, readback, args.site, args.issue_key, args.comment_id)
+            else:
+                result = compare(body, Path(args.expected_html_file).read_text(encoding='utf-8'),
+                                 readback, args.site, args.issue_key, args.comment_id)
             print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, TypeError) as error:

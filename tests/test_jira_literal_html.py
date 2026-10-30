@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import contextlib
 import io
+import html
 import json
 import tempfile
 import unittest
@@ -94,6 +95,48 @@ class LiteralHtmlTests(unittest.TestCase):
         for value in ('', '\x00', '甲\r乙', None):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 body.render(value)
+
+    def test_plain_native_paragraphs_preserve_backslashes_without_a_new_intent(self):
+        from unittest import mock
+        native = ''.join('<p>' + html.escape(block).replace('\n', '<br>') + '</p>'
+                         for block in self.original.split('\n\n'))
+        receipt = dict(self.receipt, body=native)
+        with mock.patch.object(body, 'render', side_effect=AssertionError('不能补造旧发送意图')):
+            result = body.compare_plain(self.original, receipt, 'https://example.test', 'TAP-123', '100')
+        self.assertEqual(self.original, result['body'])
+        self.assertEqual('exact-text', result['body_representation'])
+        self.assertEqual('fixture-user', result['author_account_id'])
+        self.assertNotIn('status', result)
+        for actual in (self.expected, native.replace('<p>', '<h3>').replace('</p>', '</h3>'),
+                       native.replace('处置：', '<strong>处置：</strong>'),
+                       native.replace('a\\b', 'ab'), native.replace('\\n', '\n'),
+                       native.replace('P-11', 'P-12'), native.replace('<br>', '</p><p>'),
+                       native.replace('<br>', '\n'), native.replace('<br>', '&#10;'),
+                       native.replace('<p>', '<p style="display:none">'),
+                       native.replace('P-11', '<a href="https://wrong.test">P-11</a>')):
+            with self.subTest(actual=actual[-40:]), self.assertRaises(ValueError):
+                body.compare_plain(self.original, dict(receipt, body=actual), 'https://example.test', 'TAP-123', '100')
+        for changed in ({'comment_id': '101'}, {'source_ref': ''}, {'site': 'https://other.test'}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                body.compare_plain(self.original, dict(receipt, **changed), 'https://example.test', 'TAP-123', '100')
+
+    def test_plain_cli_reads_existing_comment_without_an_html_intent_file(self):
+        from unittest import mock
+        original = '范围 P-01~P-11\n\n路径 a\\b；字面 \\n'
+        native = '<p>范围 P-01~P-11</p><p>路径 a\\b；字面 \\n</p>'
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            (root / 'plain').write_text(original)
+            (root / 'readback').write_text(json.dumps(dict(self.receipt, body=native)))
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            argv = ['jira_literal_html.py', 'compare-plain', '--body-file', str(root / 'plain'),
+                    '--readback', str(root / 'readback'), '--site', 'https://example.test',
+                    '--issue-key', 'TAP-123', '--comment-id', '100']
+            output = io.StringIO()
+            with mock.patch.object(sys, 'argv', argv), contextlib.redirect_stdout(output):
+                self.assertEqual(0, body.main())
+            self.assertEqual(original, json.loads(output.getvalue())['body'])
+            self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
 
 
 if __name__ == '__main__':
