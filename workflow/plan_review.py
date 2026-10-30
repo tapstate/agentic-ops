@@ -87,14 +87,28 @@ def environment_problems(plan, declaration, ctx, model, rules):
     return errors
 
 
+def no_source_change_plan(plan, rules, ctx):
+    """显式空修改方案与实际源码同时成立；当前尚未编码本身不是豁免理由。"""
+    from workflow.verification import unchanged_repository
+    scope = plan.get('scope_rationale') if isinstance(plan, dict) else None
+    repositories = ctx.get('repositories', {})
+    return bool((rules or {}).get('allow_no_source_change_plan') is True
+                and isinstance(scope, dict) and plan.get('changes') == []
+                and scope.get('changes') == [] and repositories
+                and all(unchanged_repository(repo) for repo in repositories.values()))
+
+
 def problems(plan, declaration, ctx, model, rules=None):
     errors = []
+    no_changes = no_source_change_plan(plan, rules, ctx)
     for key, schema in declaration['sections'].items():
         if key not in plan:
             errors.append('方案 ' + key + ' 缺失')
         else:
             errors += shape(plan[key], schema, '方案.' + key)
     for key in declaration['nonempty']:
+        if no_changes and key == 'scope_rationale.changes':
+            continue
         if not get(plan, key):
             errors.append('方案 ' + key + ' 不能为空')
     # 结构有误也继续检查其它可读区域，便于同一 Q2 决策包列全。
@@ -131,7 +145,7 @@ def problems(plan, declaration, ctx, model, rules=None):
     changes = scope.get('changes', []) if isinstance(scope, dict) else []
     changes = changes if isinstance(changes, list) else []
     for row in valid:
-        if not any(isinstance(c, dict) and c.get('repository') == row.get('repository') and c.get('module') == row.get('module') for c in changes):
+        if not no_changes and not any(isinstance(c, dict) and c.get('repository') == row.get('repository') and c.get('module') == row.get('module') for c in changes):
             errors.append('AC 实现模块未解释修改必要性：' + str(row.get('module')))
 
     for section in declaration['repository_sections']:

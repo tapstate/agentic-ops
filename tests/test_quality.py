@@ -2729,6 +2729,59 @@ class FeatureFlowTests(unittest.TestCase):
 
 
 
+class NoSourceChangePlanTests(unittest.TestCase):
+    def setUp(self):
+        self.rules = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())
+        self.rules.update(json.loads((ROOT / 'projects/tapdata/quality-general.json').read_text()))
+        self.plan = dict(objective='核验已有成果', changes=[], acceptance=['报告有可回查证据'],
+                         risks=['证据缺失'], rollback='保留原成果')
+        self.plan.update(feature_review('报告有可回查证据', 'tapdata/tapdata', '验收报告', 'case-a'))
+        self.plan['scope_rationale']['changes'] = []
+        self.plan['integration_tests'][0].update(level='N/A', cases=[], rationale='不修改业务代码')
+        self.ctx = {'facts': {'implementation_plan': self.plan, 'acceptance_criteria': '报告有可回查证据'},
+                    'repositories': {'tapdata/tapdata': {'base_sha': 'a' * 40, 'live_revision': 'a' * 40}}}
+        self.model = {'items': {'case-a': {'plan': {'timing': 'after_fix', 'repository': 'tapdata/tapdata'}}}}
+
+    def problems(self):
+        return quality.plan_problems(self.model, self.rules, self.ctx)
+
+    def test_explicit_empty_plan_preserves_acceptance_and_other_requirements(self):
+        self.assertEqual([], self.problems())
+        self.plan['acceptance_mapping'][0]['case_ids'] = []
+        self.assertIn('AC 映射缺少用例引用', self.problems())
+        self.plan['rollback'] = ''
+        self.assertTrue(any('rollback' in p for p in self.problems()))
+
+    def test_missing_or_changed_sources_cannot_use_empty_plan(self):
+        for revision in ('b' * 40, 'unavailable', 'worktree:dirty', None):
+            with self.subTest(revision=revision):
+                self.ctx['repositories']['tapdata/tapdata']['live_revision'] = revision
+                self.assertTrue(any('changes' in p for p in self.problems()))
+        self.ctx['repositories'] = {}
+        self.assertTrue(any('changes' in p for p in self.problems()))
+
+    def test_multirepo_partial_change_and_missing_baseline(self):
+        self.ctx['repositories']['other/repo'] = {'base_sha': 'a' * 40, 'live_revision': 'b' * 40}
+        self.assertTrue(any('changes' in p for p in self.problems()))
+        del self.ctx['repositories']['other/repo']
+        del self.ctx['repositories']['tapdata/tapdata']['base_sha']
+        self.assertTrue(any('changes' in p for p in self.problems()))
+
+    def test_feature_contract_and_nonempty_or_missing_intent_not_relaxed(self):
+        self.rules.pop('allow_no_source_change_plan')
+        self.assertTrue(any('changes' in p for p in self.problems()))
+        self.rules['allow_no_source_change_plan'] = True
+        for value in (None, '', {}, ['将修改业务代码']):
+            with self.subTest(value=value):
+                self.plan['changes'] = value
+                self.assertTrue(any('scope_rationale.changes' in p for p in self.problems()))
+
+    def test_material_checks_still_require_local_validation_and_review(self):
+        from workflow import verification
+        problems = verification.problems({}, self.ctx, ['local', 'review', 'ci', 'source_sync'], self.rules)
+        self.assertEqual(['tapdata/tapdata 缺少 local 验证材料', 'tapdata/tapdata 缺少 review 验证材料'], problems)
+
+
 class GeneralFlowTests(FeatureFlowTests):
     task_class = "general_task"
     issue_type_id = "10008"
