@@ -13,6 +13,18 @@ from workflow import station, station_archive, station_operation, task_store, ta
 
 
 class HandoffTests(unittest.TestCase):
+    def test_literal_range_readback_preserves_handoff_target_and_payload(self):
+        candidate = {'site': 'https://example.test', 'packet': {'issue_key': 'TAP-123'},
+                     'body': '剩余 P-01~P-11；路径 a\\b'}
+        receipt = {'site': candidate['site'], 'issue_key': 'TAP-123', 'comment_id': '101',
+                   'source_ref': 'fixture:jira/101', 'body': r'剩余 P-01\~P-11；路径 a\b',
+                   'body_representation': 'literal-markdown-v1'}
+        self.assertEqual('101', task_handoff.verify_readback(candidate, receipt)['comment_id'])
+        for changed in ({'issue_key': 'TAP-124'}, {'body_representation': 'exact-text'},
+                        {'body': r'剩余 P-01\~P-12；路径 a\b'}, {'body': r'剩余 P-01\~P-11；路径 ab'}):
+            with self.assertRaises(ValueError):
+                task_handoff.verify_readback(candidate, dict(receipt, **changed))
+
     setUp = records.RecordTests.setUp
     prepare_engineering = records.RecordTests.prepare_engineering
     write = records.RecordTests.write

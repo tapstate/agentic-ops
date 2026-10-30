@@ -2373,8 +2373,8 @@ class QualityTests(unittest.TestCase):
 
     def test_literal_markdown_readback_preserves_backslashes_and_real_differences(self):
         from workflow.quality_write import body_matches
-        original = '统计 [旧_新] *字面*；路径 a\\b；正则 \\n'
-        returned = '统计 \\[旧\\_新\\] \\*字面\\*；路径 a\\b；正则 \\n'
+        original = '统计 [旧_新] *字面* P-01~P-11 L-02~L-06；路径 a\\b；正则 \\n'
+        returned = '统计 \\[旧\\_新\\] \\*字面\\* P-01\\~P-11 L-02\\~L-06；路径 a\\b；正则 \\n'
         self.assertFalse(body_matches(original, returned))
         self.assertTrue(body_matches(original, returned, 'literal-markdown-v1'))
         for bad in (returned + 'extra', returned.replace('新', '变更'), returned.replace('a\\b', 'ab'),
@@ -2392,6 +2392,30 @@ class QualityTests(unittest.TestCase):
         self.assertEqual('unknown', self.view()['publications']['literal']['status'])
         self.assertEqual('verified', self.apply('readback', payload)['publications']['literal']['status'])
         with self.assertRaises(ValueError): self.apply('prepare_write', {'id': 'literal', 'digest': record['digest']})
+
+    def test_created_literal_range_readback_keeps_identity_and_original_intent(self):
+        from workflow.quality_write import body_matches
+        self.assertTrue(body_matches(r'原文 \~ 与 ~', r'原文 \\~ 与 \~', 'literal-markdown-v1'))
+        self.assertFalse(body_matches(r'原文 \~', r'原文 ~', 'literal-markdown-v1'))
+        self.assertFalse(body_matches('~', r'\\~', 'literal-markdown-v1'))
+        self.apply('draft', {'id': 'range', 'body': '范围 P-01~P-11'})
+        record = self.view()['publications']['range']
+        self.apply('confirm', {'id': 'range', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'range', 'digest': record['digest']})['publications']['range']
+        self.apply('receipt', {'id': 'range', 'operation_id': record['operation_id'], 'result': 'created', 'comment_id': '101'})
+        payload = {'id': 'range', 'operation_id': record['operation_id'], 'site': record['site'],
+                   'issue_key': 'TAP-123', 'comment_id': '101', 'source_ref': 'fixture:jira/101',
+                   'body': r'范围 P-01\~P-11', 'body_representation': 'literal-markdown-v1'}
+        for changed in ({'comment_id': '102'}, {'operation_id': 'other'}, {'site': 'https://other.test'},
+                        {'body': r'范围 P-01\~P-12'}, {'body_representation': 'exact-text'}):
+            before = quality.state_path(self.base, self.task).read_bytes()
+            with self.assertRaises(ValueError):
+                self.apply('readback', dict(payload, **changed))
+            self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        result = self.apply('readback', payload)['publications']['range']
+        self.assertEqual('verified', result['status'])
+        self.assertEqual(record['operation_id'], result['operation_id'])
+        self.assertEqual('范围 P-01~P-11', result['body'])
 
     def test_legacy_comment_events_replay_without_rewriting_body(self):
         profile = self.product / 'projects/tapdata/quality.json'

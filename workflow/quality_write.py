@@ -214,11 +214,11 @@ def body_matches(expected, actual, representation="exact-text"):
         return True
     if representation != "literal-markdown-v1":
         return False
-    # Jira Markdown 回读会为字面 [, ], _ 和 * 加反斜杠。
+    # Jira Markdown 回读会为字面 [, ], _, * 和 ~ 加反斜杠。
     # 向前逐字符匹配而非反转义，保留原文已有反斜杠及所有其它差异。
     index = 0
     for char in expected:
-        if char in "[]_*" and actual[index:index + 2] == "\\" + char:
+        if char in "[]_*~" and actual[index:index + 2] == "\\" + char:
             index += 2
         elif actual[index:index + 1] == char:
             index += 1
