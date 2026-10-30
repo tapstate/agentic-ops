@@ -157,7 +157,7 @@ def tests_passed_ready(base, task, snapshot):
     outcome = quality.checkpoint_outcome(checkpoint)
     if outcome != "accept":
         return False, "quality_not_verified", ["%s 关联用例验收必须由用户确认通过，不能以不适用或风险处置进入 Tests Passed" % checkpoint_id], []
-    problems, tests, ignored = jira_tests.linked_tests(snapshot, task["issue_key"], quality_rules)
+    problems, tests, ignored = jira_tests.acceptance_tests(base, task, snapshot, quality_rules)
     problems.extend(jira_tests.confirmation_problems(report, tests, quality_rules))
     if problems:
         return False, "linked_test_facts_not_ready", problems, ignored

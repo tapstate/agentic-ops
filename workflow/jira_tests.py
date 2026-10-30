@@ -47,6 +47,78 @@ def _details(document):
     return by_key, problems
 
 
+def accepted_it(model, report, ctx, rules):
+    """Reuse current IT evidence and real acceptance; never infer external Test facts."""
+    from workflow import quality, verification, it_manual
+    point = report.get("checkpoints", {}).get(acceptance_checkpoint(rules), {})
+    if not point.get("reviewed") or point.get("outcome") != "accept" or not point.get("due"):
+        return False
+    if verification.plan_problems(rules, ctx):
+        return False
+    rows = verification.plan_rows(rules, ctx)
+    if not rows or not (rules.get("verification_plan") or {}).get("case_coverage"):
+        return False
+    if verification.problems(model, ctx, ["local", "ci"], rules):
+        return False
+    policy = it_manual.config(rules)
+    for item_id in point["due"]:
+        item = report["items"][item_id]
+        if (item["plan"].get("method") != "unit" or item["plan"].get("timing") != "after_fix"
+                or item["plan"].get("expected_result") != "PASS"
+                or not quality.item_accepted(item, ("accept",))):
+            return False
+    for row in rows:
+        if (row.get("level") == "N/A" or row.get("framework_supported") is not True
+                or (policy and it_manual.required(row, policy))):
+            return False
+        repo, scope = row["repository"], row["scope"]
+        revision = ctx["repositories"][repo].get("live_revision", "")
+        if not quality.exact_commit(revision):
+            return False
+        if not any(report["items"][i]["plan"].get("repository") == repo
+                   and report["items"][i]["plan"].get("scope") == scope
+                   and report["items"][i]["plan"].get("target_revision") == revision for i in point["due"]):
+            return False
+        for kind in ("local", "ci"):
+            data = model.get("verification", {}).get(repo, {}).get(kind, {}).get("data", {})
+            if data.get("target_revision") != revision:
+                return False
+            results = [r for r in data.get("results", [])
+                       if r.get("scope") == scope and r.get("level") == row["level"]]
+            if len(results) != 1:
+                return False
+            result = results[0]
+            if (result.get("result") != "PASS" or type(result.get("tests")) is not int
+                    or result["tests"] <= 0 or any(type(result.get(k)) is not int or result[k] != 0
+                                                  for k in ("failures", "errors", "skipped"))):
+                return False
+            coverage = result.get("case_coverage", {})
+            cases = coverage.get("cases", [])
+            if (coverage.get("status") != "covered" or coverage.get("framework_supported") is not True
+                    or len(cases) != len(row["cases"])
+                    or {c.get("id") for c in cases} != {c["id"] for c in row["cases"]}
+                    or any(c.get("status") != "written" or c.get("result") != "PASS"
+                           or not c.get("case_ref") or not c.get("report_ref") for c in cases)):
+                return False
+    return True
+
+
+def acceptance_tests(base, task, document, rules):
+    """Shared live admission for status sync and PR Ready; historical replay stays unchanged."""
+    from workflow import jira_status, quality
+    original = linked_tests(document, task["issue_key"], rules)
+    if not original[0] or not (rules.get("verification_plan") or {}).get("case_coverage"):
+        return original
+    effective = rules
+    if jira_status.config(base, task).get("allow_accepted_it_without_test") is True:
+        state = quality.load(base, task)
+        ctx = quality.context(base, task)
+        report = quality.report(state, rules, ctx, base=base, task=task)
+        if accepted_it(quality.replay(state), report, ctx, rules):
+            effective = dict(rules, pr_ready=dict(rules.get("pr_ready", {}), require_linked_test_tasks=False))
+    return linked_tests(document, task["issue_key"], effective)
+
+
 def linked_tests(document, issue_key, rules):
     """返回 (problems, managed, ignored)。
 

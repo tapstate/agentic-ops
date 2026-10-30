@@ -314,7 +314,7 @@ flowchart TD
 
 缺陷进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
 
-Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。接管阶段不要求创建 Test；编码完成后由用户与 Agent 根据已确认的验收方案创建或复用 Test，并通过「已链接工作项」关联缺陷。只有当前状态为 `In Progress`、Q4 总体处置为 `accept`、Manual/Unit 有当前完整提交 SHA 的 PASS 证据及逐项 `accept`，TapTest 满足项目状态条件、并且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
+Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。接管阶段不要求创建 Test；编码完成后先核对下述充分 IT 验收路径；不满足该路径时由用户与 Agent 根据已确认的验收方案创建或复用 Test，并通过「已链接工作项」关联缺陷。只有当前状态为 `In Progress`、Q4 总体处置为 `accept`、Manual/Unit 有当前完整提交 SHA 的 PASS 证据及逐项 `accept`，TapTest 满足项目状态条件、并且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
 
 输入由 Agent 从 Jira 实时读取，至少包含任务、字段、当前用户、可用 transitions 和可回查来源：
 
@@ -330,7 +330,9 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 }
 ```
 
-`linked_test_details` 只在 Tests Passed 或 PR Ready 核对时必需：它是 Agent 从 Jira/Xray Test Details 读取的事实，不由 AgenticOps 推断或写入。无法读取时，工具会要求用户提供关联 Test key、Test Type、用例版本引用和 Jira 来源。`Manual`、`TapTest`、`Unit` 是当前受管类型；`TapCE` 显式忽略但不算通过。若只有 TapCE、类型不支持、关联缺失或 Jira Validator 仍要求 TapCE，用户调整 Jira 或验收方案后重新读取并重做预检；不得盲目重放已经发起的 Jira 状态转换。
+项目可在 `jira.status_sync.allow_accepted_it_without_test` 显式启用充分 IT 验收路径（默认关闭，TapData 启用）。仅原生回读确认无关联 Test，且全部计划场景框架支持、无需手动替代、当前完整 SHA 的本地和 CI 材料有效、逐场景及逐用例全部 PASS（非零用例，无失败/错误/跳过）、同仓同 scope 的 Unit 检查项及 Q4 有效接受时，不要求额外创建 Test。复用现有计划、执行和用户决定，不新增豁免登记。已有 Test、未知或损坏链接仍完整核验；不适用、风险接受、缺测和失效材料不能替代充分 IT。该条件只作用于当前准入，不改质量规则快照或历史事件，原 run 的有效确认继续复用；PR Checks、Jira 转换表单及服务端 Validator 仍独立核验。
+
+`linked_test_details` 在存在关联 Test 的 Tests Passed 或 PR Ready 核对时必需：它是 Agent 从 Jira/Xray Test Details 读取的事实，不由 AgenticOps 推断或写入。无法读取时，工具会要求用户提供关联 Test key、Test Type、用例版本引用和 Jira 来源。`Manual`、`TapTest`、`Unit` 是当前受管类型；`TapCE` 显式忽略但不算通过。若只有 TapCE、类型不支持、关联缺失或 Jira Validator 仍要求 TapCE，用户调整 Jira 或验收方案后重新读取并重做预检；不得盲目重放已经发起的 Jira 状态转换。
 
 ```sh
 python3 "$agenticops_root/workflow/jira_status.py" prepare --expected-run-id "$task_run" \

@@ -195,7 +195,9 @@ def check(base, issue_key, jira_input):
         context = quality.context(base, task)
         delivery_task = dict(task, repositories=[repo for repo in task.get("repositories", [])
             if not verification.unchanged_repository(context["repositories"][repo["repository"]])])
-    linked_problems, source_ref, linked_tests, ignored_tests = _jira_test_tasks(jira_input, issue_key, rules)
+    snapshot = jira_status.read_input(jira_input)
+    source_ref = snapshot["source_ref"]
+    linked_problems, linked_tests, ignored_tests = jira_tests.acceptance_tests(base, task, snapshot, rules)
     linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
     groups = {
         "linked_test_tasks": linked_problems,
