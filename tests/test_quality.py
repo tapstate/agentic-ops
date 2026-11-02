@@ -2155,7 +2155,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
 
     def test_q3_is_automatic_only_after_all_confirmed_after_fix_evidence_passes(self):
-        self.plan(); self.plan("case-b", "manual")
+        self.plan(checkpoint="q3-draft"); self.plan("case-b", "manual", checkpoint="q3-draft")
         self.select(); self.select("case-b")
         with self.assertRaisesRegex(ValueError, "首轮执行证据"):
             self.automatic_checkpoint()
@@ -2165,8 +2165,29 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(checkpoint["reviewed"])
         self.assertEqual(checkpoint["mode"], "automatic")
         self.assertEqual(checkpoint["outcome"], "observed")
+        self.assertIsNone(view["items"]["case-a"]["decision"])
+        self.assertIsNone(view["items"]["case-b"]["decision"])
+        self.assertTrue(any("case-a 尚无有效处置" in p for p in view["checkpoints"]["q4-acceptance"]["problems"]))
+        self.assertTrue(any("case-b 尚无有效处置" in p for p in view["checkpoints"]["q4-acceptance"]["problems"]))
         with self.assertRaisesRegex(ValueError, "自动记录"):
             self.checkpoint("q3-draft")
+        self.publish_checkpoint("q3-draft")
+        self.decide()
+        self.assertTrue(self.view()["checkpoints"]["q3-draft"]["reviewed"])
+        self.assertFalse(self.view()["checkpoints"]["q3-draft"]["published"])
+        self.automatic_checkpoint()
+        self.decide("case-b")
+        self.assertTrue(self.view()["checkpoints"]["q3-draft"]["reviewed"])
+        model = quality.replay(quality.load(self.base, self.task))
+        ctx = quality.context(self.base, self.task)
+        for revision in ("b" * 40, "a" * 40 + ":worktree:" + "b" * 64):
+            ctx["repositories"]["tapdata/tapdata"]["live_revision"] = revision
+            self.assertTrue(any("当前源码版本不一致" in p for p in quality.automatic_checkpoint_problems(
+                model, "q3-draft", quality.config(self.base, self.task), ctx)))
+        self.decide(outcome="rework", owner="tester", follow_up="补测")
+        self.assertTrue(any("case-a 用户要求补测/返工" in p for p in self.view()["checkpoints"]["q3-draft"]["problems"]))
+        self.execute(result="FAIL", execution_id="run-2", kind="assertion")
+        self.assertFalse(self.view()["checkpoints"]["q3-draft"]["reviewed"])
 
     def test_live_code_change_invalidates_after_but_not_reproduction(self):
         self.task["repositories"] = self.task["repositories"][:1]
@@ -2650,7 +2671,7 @@ class FeatureFlowTests(unittest.TestCase):
             detail='执行前由夹具准备并核验 Python 运行环境，不影响返回值修改')
         Path(plan_path).write_text(json.dumps(implementation_plan))
         self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
-        plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
+        plan = {"id": "behavior", "checkpoint": "q3-draft", "timing": "after_fix",
                 "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",
                 "repository": self.repo, "target_revision": frozen, "criterion": "value 返回 1",
                 "steps": "python -B verify.py", "expected_result": "PASS", "scope": "feature.py"}
