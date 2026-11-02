@@ -721,16 +721,28 @@ os.execv(path,[path]+args)
         bare, state = self.hotfix_fixture(trust=False)
         self.assertEqual(2, self.hotfix_call().returncode)
         body = self.area / 'pr-body'
-        body.write_text(body.read_text() + '\n维护者补充：保留审查意见。\n')
+        original = body.read_text()
+        self.assertIn('最近版本标签（本地可达）：未找到', original)
+        self.assertIn(f'目标 main 基线：`{self.base}`', original)
+        self.git('tag', 'v1.5', self.base)
+        self.git('tag', 'v9.0', self.head)  # 候选上的标签不是 main 基线的版本。
+        generated = (f'- 最近版本标签（本地可达）：未找到，本地标签可能不完整\n'
+                     f'- 目标 main 基线：`{self.base}`\n- 发布类型：Hotfix，不创建版本 Tag')
+        body.write_text(original.replace(generated, '- 版本基线：``') + '\n维护者补充：保留审查意见。\n')
         self.write('product.txt', 'review fix')
         self.git('add', '.')
         self.git('commit', '-qm', 'review fix')
         revised = self.git('rev-parse', 'HEAD')
-        for _ in range(2):
-            result = self.hotfix_call()
-            self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        result = self.hotfix_call()
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        body.write_text(body.read_text().replace(f'目标 main 基线：`{self.base}`', '目标 main 基线：`outdated`'))
+        result = self.hotfix_call()
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
         self.assertEqual(revised, self.git('rev-parse', 'develop', root=bare))
         self.assertIn(f'agentic-ops-fixed-head:{revised}', body.read_text())
+        self.assertIn('最近版本标签（本地可达）：`v1.5`', body.read_text())
+        self.assertIn(f'目标 main 基线：`{self.base}`', body.read_text())
+        self.assertNotIn('版本基线：``', body.read_text())
         self.assertIn('维护者补充', body.read_text())
         self.assertEqual(4, self.count())
         self.assertEqual(self.base, self.git('rev-parse', 'main', root=bare))
@@ -847,6 +859,15 @@ for page in (rows[:100],rows[100:]):
         self.shell(f'RELEASE_BASE_COMMIT={self.base} RELEASE_VERIFIED_AT=fixture\n'
                    f'release_write_pr_body {shlex.quote(str(body))} "" develop main {self.head} AO-262')
         self.assertNotIn('合并后收尾', body.read_text())
+        self.assertIn('最近版本标签（本地可达）：未找到', body.read_text())
+        self.assertIn(f'目标 main 基线：`{self.base}`', body.read_text())
+        self.assertNotIn('版本基线：``', body.read_text())
+        self.git('tag', 'v1.4', self.base)
+        self.git('tag', 'v9.0', self.head)
+        self.shell(f'RELEASE_BASE_COMMIT={self.base} RELEASE_VERIFIED_AT=fixture\n'
+                   f'release_write_pr_body {shlex.quote(str(body))} "" develop main {self.head} AO-262')
+        self.assertIn('最近版本标签（本地可达）：`v1.4`', body.read_text())
+        self.assertNotIn('v9.0', body.read_text())
 
     def test_inspect_reports_legacy_archive_conflict_before_tag_exists(self):
         commit = self.merge()

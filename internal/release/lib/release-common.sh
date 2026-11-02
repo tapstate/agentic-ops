@@ -1068,6 +1068,17 @@ release_recover_merged_candidate() {
 
 }
 
+release_hotfix_baseline_lines() {
+  local root="${repo_root:-$PWD}" tag
+  tag="$(git -C "$root" describe --tags --first-parent --abbrev=0 --match 'v[0-9]*' "$RELEASE_BASE_COMMIT" 2>/dev/null || true)"
+  if [ -n "$tag" ]; then
+    printf '%s\n' "- 最近版本标签（本地可达）：\`$tag\`（之后可能包含其他 Hotfix）"
+  else
+    printf '%s\n' '- 最近版本标签（本地可达）：未找到，本地标签可能不完整'
+  fi
+  printf '%s\n' "- 目标 main 基线：\`$RELEASE_BASE_COMMIT\`" '- 发布类型：Hotfix，不创建版本 Tag'
+}
+
 release_write_pr_body() {
   local body_file="$1"
   local version="$2"
@@ -1077,7 +1088,13 @@ release_write_pr_body() {
   local jira_id="${6:-}"
   local protection_mode="${7:-hard}"
   local jira_evidence=""
-  local protection_warning=""
+  local protection_warning="" baseline
+
+  if [ -n "$version" ]; then
+    baseline="- 版本基线：\`$version\`"
+  else
+    baseline="$(release_hotfix_baseline_lines)"
+  fi
 
   if [ -n "$jira_id" ]; then
     jira_evidence="- Jira 任务：\`$jira_id\`"
@@ -1089,7 +1106,7 @@ release_write_pr_body() {
   cat > "$body_file" <<EOF
 ## 发布证据
 
-- 版本基线：\`$version\`
+$baseline
 $jira_evidence
 - 源分支：\`$source_branch\`
 - 目标分支：\`$target_branch\`
@@ -1137,7 +1154,7 @@ release_find_or_create_pr() {
       return 1
     }
     # 调用方已经核验新候选、证据及操作授权；返工复用原 PR，只刷新受管证据行。
-    local facts old_body
+    local facts old_body hotfix_baseline=""
     facts="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" --repo "$repository" --json baseRefName,headRefName,headRefOid,state \
       --jq '[.baseRefName,.headRefName,.headRefOid,.state] | @tsv')" || return 1
     [ "$facts" = "$(printf 'main\tdevelop\t%s\tOPEN' "$head")" ] || return 1
@@ -1145,9 +1162,12 @@ release_find_or_create_pr() {
     if ! "${AGENTIC_OPS_GH_BIN:-gh}" pr view "$RELEASE_PR_URL" --repo "$repository" --json body --jq .body > "$old_body"; then
       rm -f "$old_body" "$body_file"; return 1
     fi
-    if ! python3 - "$old_body" "$body_file" "$identity" "$head" "$RELEASE_BASE_COMMIT" "$RELEASE_VERIFIED_AT" <<'PYBODY'
+    if [ "$publish_mode" = hotfix ]; then
+      hotfix_baseline="$(release_hotfix_baseline_lines)"
+    fi
+    if ! python3 - "$old_body" "$body_file" "$identity" "$head" "$RELEASE_BASE_COMMIT" "$RELEASE_VERIFIED_AT" "$hotfix_baseline" <<'PYBODY'
 import pathlib, re, sys
-old, new, identity, head, base, verified = sys.argv[1:]
+old, new, identity, head, base, verified, hotfix_baseline = sys.argv[1:]
 body = pathlib.Path(old).read_text()
 fixed = re.findall(r"^<!-- agentic-ops-fixed-head:([0-9a-f]{40,64}) -->$", body, re.M)
 bindings = re.findall(r"^<!-- agentic-ops-release:([^:]+):([0-9a-f]{40,64}) -->$", body, re.M)
@@ -1157,6 +1177,13 @@ body = body.replace(f"<!-- agentic-ops-fixed-head:{fixed[0]} -->", f"<!-- agenti
 body = body.replace(f"<!-- agentic-ops-release:{identity}:{bindings[0][1]} -->", f"<!-- agentic-ops-release:{identity}:{base} -->")
 body = re.sub(r"^- 待合并 HEAD：.*$", lambda _: f"- 待合并 HEAD：`{head}`", body, flags=re.M)
 body = re.sub(r"^- 本地验证完成时间（UTC）：.*$", lambda _: f"- 本地验证完成时间（UTC）：`{verified}`", body, flags=re.M)
+if hotfix_baseline:
+    lines = hotfix_baseline.splitlines()
+    if re.search(r"^- 版本基线：``$", body, re.M):
+        body = re.sub(r"^- 版本基线：``$", lambda _: hotfix_baseline, body, count=1, flags=re.M)
+    else:
+        for prefix, line in zip(("最近版本标签（本地可达）", "目标 main 基线", "发布类型"), lines):
+            body = re.sub(r"^- " + re.escape(prefix) + r"：.*$", lambda _: line, body, flags=re.M)
 pathlib.Path(new).write_text(body)
 PYBODY
     then rm -f "$old_body" "$body_file"; return 1; fi
