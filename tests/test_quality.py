@@ -2373,8 +2373,8 @@ class QualityTests(unittest.TestCase):
 
     def test_literal_markdown_readback_preserves_backslashes_and_real_differences(self):
         from workflow.quality_write import body_matches
-        original = '统计 [旧_新] *字面*；路径 a\\b；正则 \\n'
-        returned = '统计 \\[旧\\_新\\] \\*字面\\*；路径 a\\b；正则 \\n'
+        original = '统计 [旧_新] *字面* P-01~P-11 L-02~L-06；路径 a\\b；正则 \\n'
+        returned = '统计 \\[旧\\_新\\] \\*字面\\* P-01\\~P-11 L-02\\~L-06；路径 a\\b；正则 \\n'
         self.assertFalse(body_matches(original, returned))
         self.assertTrue(body_matches(original, returned, 'literal-markdown-v1'))
         for bad in (returned + 'extra', returned.replace('新', '变更'), returned.replace('a\\b', 'ab'),
@@ -2392,6 +2392,57 @@ class QualityTests(unittest.TestCase):
         self.assertEqual('unknown', self.view()['publications']['literal']['status'])
         self.assertEqual('verified', self.apply('readback', payload)['publications']['literal']['status'])
         with self.assertRaises(ValueError): self.apply('prepare_write', {'id': 'literal', 'digest': record['digest']})
+
+    def test_created_literal_range_readback_keeps_identity_and_original_intent(self):
+        from workflow.quality_write import body_matches
+        self.assertTrue(body_matches(r'原文 \~ 与 ~', r'原文 \\~ 与 \~', 'literal-markdown-v1'))
+        self.assertFalse(body_matches(r'原文 \~', r'原文 ~', 'literal-markdown-v1'))
+        self.assertFalse(body_matches('~', r'\\~', 'literal-markdown-v1'))
+        self.apply('draft', {'id': 'range', 'body': '范围 P-01~P-11'})
+        record = self.view()['publications']['range']
+        self.apply('confirm', {'id': 'range', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'range', 'digest': record['digest']})['publications']['range']
+        self.apply('receipt', {'id': 'range', 'operation_id': record['operation_id'], 'result': 'created', 'comment_id': '101'})
+        payload = {'id': 'range', 'operation_id': record['operation_id'], 'site': record['site'],
+                   'issue_key': 'TAP-123', 'comment_id': '101', 'source_ref': 'fixture:jira/101',
+                   'body': r'范围 P-01\~P-11', 'body_representation': 'literal-markdown-v1'}
+        for changed in ({'comment_id': '102'}, {'operation_id': 'other'}, {'site': 'https://other.test'},
+                        {'body': r'范围 P-01\~P-12'}, {'body_representation': 'exact-text'}):
+            before = quality.state_path(self.base, self.task).read_bytes()
+            with self.assertRaises(ValueError):
+                self.apply('readback', dict(payload, **changed))
+            self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        result = self.apply('readback', payload)['publications']['range']
+        self.assertEqual('verified', result['status'])
+        self.assertEqual(record['operation_id'], result['operation_id'])
+        self.assertEqual('范围 P-01~P-11', result['body'])
+
+    def test_literal_html_readback_reuses_created_intent_and_old_event_schema(self):
+        from workflow import jira_literal_html
+        original = 'TAP-123：首轮验证\n\n处置：P-01~P-11；路径 a\\b'
+        expected_html = jira_literal_html.render(original)
+        self.apply('draft', {'id': 'html', 'body': original})
+        record = self.view()['publications']['html']
+        self.apply('confirm', {'id': 'html', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'html', 'digest': record['digest']})['publications']['html']
+        self.apply('receipt', {'id': 'html', 'operation_id': record['operation_id'], 'result': 'created', 'comment_id': '102'})
+        receipt = {'site': record['site'], 'issue_key': 'TAP-123', 'comment_id': '102',
+                   'body': expected_html, 'source_ref': 'fixture:jira/102'}
+        converted = jira_literal_html.compare(original, expected_html, receipt, record['site'], 'TAP-123', '102')
+        self.assertEqual('created', self.view()['publications']['html']['status'])
+        payload = {'id': 'html', 'operation_id': record['operation_id'], **converted}
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaises(ValueError):
+            self.apply('readback', dict(payload, operation_id='different'))
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        self.assertEqual('verified', self.apply('readback', payload)['publications']['html']['status'])
+        saved = quality.load(self.base, self.task)
+        self.assertEqual('exact-text', saved['events'][-1]['command']['payload']['body_representation'])
+        publication = quality.replay(saved)['publications']['html']
+        self.assertEqual(original, publication['body'])
+        self.assertEqual(record['operation_id'], publication['operation_id'])
+        with self.assertRaises(ValueError):
+            self.apply('prepare_write', {'id': 'html', 'digest': record['digest']})
 
     def test_legacy_comment_events_replay_without_rewriting_body(self):
         profile = self.product / 'projects/tapdata/quality.json'
@@ -2842,6 +2893,39 @@ class TestCoverageClosureTests(unittest.TestCase):
         self.packet['issues'] = [{'repository': repository, 'url': url, 'body': '关联 PR：' + self.url,
                                  'source_ref': 'fixture:issue-readback', 'observed_at': proof()['at']}]
         self.refresh()
+
+    def test_compact_summary_keeps_case_mapping_and_tail_without_ci_repetition(self):
+        body = self.packet['pull_requests'][0]['body']
+        self.assertIn('模块:行为 / L1 / behavior', body)
+        self.assertIn('复用', body)
+        self.assertIn('fixture:verify.py', body)
+        self.assertIn('已有断言覆盖目标行为', body)
+        self.assertNotIn(self.result['report_ref'], body)
+        self.assertNotIn('PASS', body)
+        self.assertGreater(body.count('\n'), 5)
+        self.assertEqual(1, body.count('AgenticOps 版本 '))
+        content, _, footer = body.rpartition('\n\n---\n\n')
+        self.packet['pull_requests'][0]['body'] = '## 变更说明\n\n人工说明保留。\n\n' + content + '\n\n## 风险与依赖\n\n依赖另仓发布。\n\n---\n\n关联任务：TAP-123\n\n' + footer
+        self.assertEqual([], self.problems())
+        self.packet['pull_requests'][0]['body'] = footer + '\n\n' + content
+        self.assertTrue(self.problems())
+
+    def test_legacy_current_summary_keeps_admission_but_not_stale_evidence(self):
+        self.packet['pull_requests'][0]['body'] = self.c.legacy_summary([self.row], self.material, self.version)
+        self.assertEqual([], self.problems())
+        self.version = 'main-v1.0-3-changed'
+        self.assertTrue(self.problems())
+        self.assertEqual(self.head, self.material['head_revision'])
+
+    def test_summary_retains_nonexecution_and_missing_case_dispositions(self):
+        self.missing(); self.link_issue()
+        body = self.packet['pull_requests'][0]['body']
+        self.assertIn('应写未写', body)
+        self.assertIn('用例尚未完成', body)
+        self.assertIn('NOT\\_RUN', body)
+        self.assertIn('研发跟进补测', body)
+        self.assertIn('fixture:confirmation-1', body)
+        self.assertEqual([], self.problems())
 
     def test_existing_coverage_needs_no_issue_and_draft_can_pass_preflight(self):
         self.assertEqual([], self.problems())

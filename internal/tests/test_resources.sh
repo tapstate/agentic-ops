@@ -82,11 +82,17 @@ for file in \
   workflow/task.py workflow/task_store.py workflow/station_context.py tests/test_station_context.py workflow/project_rules.py workflow/repair_strategy.py tests/test_station_compatibility.py tests/test_repair_strategy.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
+  workflow/jira_literal_html.py tests/test_jira_literal_html.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/jira_tests.py workflow/pr_ready.py \
   contracts/quality-action.schema.json contracts/quality-state.schema.json \
   projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py tests/test_jira_watermark.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
+  projects/tapdata/skills/tapdata-task/references/takeover.md \
+  projects/tapdata/skills/tapdata-task/references/design.md \
+  projects/tapdata/skills/tapdata-task/references/delivery.md \
+  projects/tapdata/skills/tapdata-ci-test/references/case-design.md \
+  projects/tapdata/skills/tapdata-ci-test/references/execution.md \
   projects/tapdata/skills/tapdata-wiki/SKILL.md projects/tapdata/skills/tapdata-ci-test/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md skills/shared/ao-requirement/SKILL.md skills/shared/ao-requirement/references/design-types.md \
   skills/shared/ao-feedback/SKILL.md docs/usage/problem-feedback.md \
