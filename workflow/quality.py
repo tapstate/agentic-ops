@@ -382,6 +382,10 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx, *, check_artifa
         if not exact_commit(plan["target_revision"]):
             problems.append("%s 尚未绑定最终完整提交 SHA" % key)
             continue
+        live = ctx["repositories"][plan["repository"]].get("live_revision")
+        if check_artifacts and live and live != plan["target_revision"]:
+            problems.append("%s 的首轮执行证据与当前源码版本不一致" % key)
+            continue
         keys = ("case_ref", "case_version", "method", "repository", "target_revision")
         executions = [e for e in view["executions"] if all(e[k] == plan[k] for k in keys)]
         if not executions:
@@ -480,6 +484,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, 
     if checkpoint not in ids:
         raise ValueError("未知检查点")
     index = ids.index(checkpoint)
+    configured_automatic = rules["checkpoints"][index].get("confirmation") == "automatic"
     views = {k: item_view(v, rules, ctx) for k, v in model["items"].items()}
     due = {k: v for k, v in views.items() if ids.index(v["plan"]["checkpoint"]) <= index}
     problems = []
@@ -487,9 +492,10 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, 
         if "jira_status" in view:
             if not item_accepted(view):
                 problems.append("%s 关联 Jira 状态未满足" % key)
-        elif not view["decision_valid"]:
+        elif (not view["decision_valid"] and not
+              (configured_automatic and view["plan"]["timing"] == "after_fix")):
             problems.append("%s 尚无有效处置" % key)
-        elif view["decision"]["decision"]["outcome"] == "rework":
+        elif view["decision_valid"] and view["decision"]["decision"]["outcome"] == "rework":
             problems.append("%s 用户要求补测/返工" % key)
     if index >= ids.index(rules["selection_checkpoint"]):
         problems += source_revision_problems(ctx)
@@ -533,13 +539,23 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, 
                                     for repo, entries in model.get("verification", {}).items()}
         snapshot["failures"] = ctx.get("failures", {})
     record = model["checkpoints"].get(checkpoint)
-    configured_automatic = rules["checkpoints"][index].get("confirmation") == "automatic"
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
               "problems": problems, "decision": record, "mode": "automatic" if configured_automatic else "user"}
     if configured_automatic and not checking_automatic:
         result["automatic_digest"] = automatic_checkpoint_digest(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
         result["problems"] += automatic_checkpoint_problems(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
-        result["reviewed"] = (record or {}).get("digest") == result["automatic_digest"] and not result["problems"]
+        recorded_digest = (record or {}).get("digest")
+        current_digest = result["automatic_digest"]
+        if recorded_digest and recorded_digest != current_digest:
+            # 回放时从原事件推导记录当时的逐项决定，排除后续验收决定；
+            # 不改变写入和历史事件使用的摘要。
+            at_observation = copy.deepcopy(model)
+            decisions = model.get("_automatic_decisions", {}).get(checkpoint, {})
+            for key, view in due.items():
+                if view["plan"]["timing"] == "after_fix":
+                    at_observation["items"][key]["decision"] = copy.deepcopy(decisions.get(key))
+            current_digest = automatic_checkpoint_digest(at_observation, checkpoint, rules, ctx, check_artifacts=check_artifacts)
+        result["reviewed"] = recorded_digest == current_digest and not result["problems"]
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
     status_items = [v for v in due.values() if v["plan"]["timing"] == "after_fix"]
@@ -551,6 +567,8 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False, *, 
     point = rules["checkpoints"][index]
     handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
     handoff_return = "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。"
+    if configured_automatic:
+        handoff_request = "核对已选修复后检查项及缺失证据；结果符合预期后自动记录首轮事实，最终验收按后续检查点处理。"
     if checkpoint == linked_checkpoint:
         handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联当前任务；"
                            "重新读取 Test Type、用例版本和链接。按项目配置核对受管类型，若无法形成受管用例请调整 Jira 或验收方案后重试。")
@@ -730,6 +748,10 @@ def reduce(model, command, rules, ctx, *, historical=False):
         if problems:
             raise ValueError("；".join(problems))
         model["checkpoints"][p["checkpoint"]] = dict(p, mode="automatic")
+        model.setdefault("_automatic_decisions", {})[p["checkpoint"]] = {
+            key: copy.deepcopy(item["decision"]) for key, item in model["items"].items()
+            if item["plan"]["timing"] == "after_fix"
+        }
     else:
         from workflow import quality_write
         quality_write.reduce(model, command, rules, ctx, check_artifacts=not historical)
@@ -940,8 +962,9 @@ def advance_problems(base, task, target):
     for cp in points:
         view = current["checkpoints"][cp]
         if not view["reviewed"] or checkpoint_outcome(view) == "rework":
-            problems.append("质量检查点 %s（%s）尚未确认处置：%s；%s 使用 quality.py status 的 handoff 展示具体用例、步骤、预期、版本和证据要求。"
-                            % (cp, view["handoff"]["title"], "；".join(view["problems"]), view["handoff"]["request"]))
+            pending = "首轮事实尚未有效记录" if view["mode"] == "automatic" else "尚未确认处置"
+            problems.append("质量检查点 %s（%s）%s：%s；%s 使用 quality.py status 的 handoff 展示具体用例、步骤、预期、版本和证据要求。"
+                            % (cp, view["handoff"]["title"], pending, "；".join(view["problems"]), view["handoff"]["request"]))
         checkpoint_decision = (view["decision"] or {}).get("decision", {})
         if checkpoint_decision.get("deadline") and datetime.fromisoformat(
                 checkpoint_decision["deadline"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):
