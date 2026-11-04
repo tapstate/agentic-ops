@@ -80,6 +80,13 @@ def existing_warnings(base, task):
                        "recovery": "先回读定位原操作，禁止盲目重发" if status == "unknown"
                        else "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
 
+    from workflow import jira_worklog
+    worklogs = jira_worklog.all_pending(base)
+    if worklogs:
+        add('jira_worklog', 'unknown' if any(row['status'] == 'intent' for row in worklogs) else 'deferred',
+            '工时有未结算、未计量或待登记工作段；保留原材料并按工时入口核实')
+        result[-1]['worklogs'] = worklogs
+
     watermark = jira_watermark.status(base, task)
     if watermark["outcome"] != "verified":
         unresolved = (watermark["outcome"] in ("ready", "unknown", "failed") or

@@ -521,6 +521,10 @@ def _cmd_advance_locked(args):
         for p in problems:
             print("阻止推进：%s" % p, file=sys.stderr)
         return 3
+    from workflow import jira_worklog
+    worklog_warning = jira_worklog.settle_boundary(args.dir, task)
+    if worklog_warning:
+        print(worklog_warning, file=sys.stderr)
     if target == "completed":
         from workflow import station
         station.apply_completion(task, station.completion_proof(args.dir, task))

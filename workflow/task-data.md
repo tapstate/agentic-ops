@@ -14,6 +14,10 @@ Agent 先从原合同、Jira 决定、Git 和项目材料核实差异。当前�
 
 验收须证明共享调用方能读取同一修补结果、任务事实不变、未确认不写入、并发漂移拒绝、失败保全与重试、清理收尾；格式通过不等于项目任务完成。
 
+## 工时数据依赖
+
+工时功能由 `workflow.jira_worklog` 管理，需求版本为 1，材料为 `evidence/jira-worklog-<JIRA-KEY>.json` schema 1，校验入口为 `load`。依赖当前工位身份、显式 issue/run、会话执行控制及原生 Jira 回读；未接管段仅在同任务成功建 run 后绑定。缺失材料按未启用处理，不回算历史，损坏或不理解的记录保全并核实。计时、原意图和回执只沿所属 CLI 写入，不经 task data apply；状态、等待排除及清理保全合同只在[工时指引](../docs/usage/quality-checkpoints.md#工位自动工时登记)维护。保持现有任务信封与 epoch，不将此新材料强制为旧任务必填项。
+
 ## 接管操作依赖
 
 接管恢复需求版本为 1，由 `workflow.station_takeover` 与 `workflow.station_operation` 拥有；公共 operation 的 schema_version 仍为 1，读取和摘要校验以 station_operation.read 为准。它依赖 task_store 核验的同任务 current、Project 的工程 Profile/分支规则、原 clone/fetch 意图及 Git 实际对象；不通过 task data apply 改写操作。
