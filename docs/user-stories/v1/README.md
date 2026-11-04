@@ -12,7 +12,7 @@ PROD-003 将现役验收与[目标用户故事](prod-003-multi-repository-task.m
 
 PROD-003 覆盖以 Jira 任务为入口、沿 GitHub 成果继续未完成任务的验收：跨版本按所属功能合同核验，Agent 整理差异、研发确认后受控修补；新工位通过 Jira/Git 恢复成果，旧模式边界见工位合同，不把退出重建当通用要求。
 
-PROD-003 的质量交付合同覆盖阶段总结评论、Issue Analysis 实施方案、Fix Details 修复总结及 GitHub PR Ready 回读闭环；具体 Checks 例外复用当前 run 的决定与证据，升级采用以工位合同的功能校验边界为准。
+PROD-003 的质量交付合同覆盖阶段总结评论、Issue Analysis 实施方案、Fix Details 修复总结、[工位工时登记](../../usage/quality-checkpoints.md#工位自动工时登记)及 GitHub PR Ready 回读闭环；具体 Checks 例外复用当前 run 的决定与证据，升级采用以工位合同的功能校验边界为准。工时验收区分本地计时/回执模拟与真实 Jira/Tempo 写入，原有任务证据继续保留。
 
 
 INT-001 负责提交候选按影响验收、发布四项证据复用与隔离补验、精确候选绑定、失败失效与证据 v6 的人工信任根升级合同；维护指引提供唯一正式入口和诊断用法，不在故事文档保存运行计划。

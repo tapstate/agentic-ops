@@ -9,6 +9,8 @@ metadata:
 
 先读取工位绑定和[开发环境指引](../../runbooks/test-environment.md)。当前工位 config 保存多份配置，runtime 只保留一个活动现场；各配置共享当前工位源码，不把配置名称解释为分支或独立源码。使用工位绑定的 Product Root 中的项目脚本，不复制中央脚本到工位，不修改 `.agenticops/` 状态。
 
+绑定研发任务时，按[工时合同](../../../../docs/usage/quality-checkpoints.md#工位自动工时登记)先结算上一分类，再以 environment 记录构建装配、启动与环境排障；等待研发输入或结束返回前暂停，恢复另开段。空闲环境维护不创建业务 run 或伪造 Jira 工时归属。
+
 ## 空闲工位连接已有 TM
 
 用户要求在空闲工位部署 develop FE 并连接已有 TM 时，先按[外部 TM 设计与交接合同](../../runbooks/test-environment.md#空闲工位连接外部-tm-的目标设计)核验工位空闲、源码和有效授权。使用 prepare-source 准备当前 develop 对应的完整工程；该入口不创建业务 run，已有 dirty、ignored 生成物、非目标分支或分叉先按原合同处理，不能覆盖。两个 FE 共用一次完整构建，不为每个节点分别构建或裁剪 TM Jar/WebUI。

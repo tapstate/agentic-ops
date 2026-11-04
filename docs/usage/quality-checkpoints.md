@@ -49,6 +49,44 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 已知未发送可用 `receipt result=deferred` 说明原因；未知结果记 unknown。deferred 或未发送的过期草稿由待办返回标准正文及 draft_command，重新按当前事实确认；标记或预检来源未就绪时只给出补齐步骤，不附带 confirm/prepare_write。未知评论只给出原 operation 的 readback；回执已冻结则交接维护，不输出不可执行命令。字段成功但评论失败只恢复评论，不刷新四项标记。回执保存失败保留远端评论 ID 和来源，不回滚或重跑已成功接管，不用 Q1 评论替代摘要，也不阻止无依赖分析。
 
+## 工位自动工时登记
+
+本节描述源码候选的工时能力，实际工位须核验绑定安装是否含 `workflow/jira_worklog.py` 及其帮助；源码验证不等于已发布或 Jira/Tempo 联调通过。Agent 按任务授权自动调用计时和原生 Jira 写入，不要求研发逐笔填报或确认；不使用工具 Hook，不监听平台会话，不把工作段耗时冒充人工投入。现有接管四项字段、摘要、阶段评论、Issue Analysis/Fix Details、版本和状态同步、测试及 PR/CI 证据继续保留。
+
+### 分类与等待
+
+工时分类为 `takeover`（接管）、`plan`（分析与方案）、`environment`（环境准备）、`development`（开发）、`test`（测试）、`pr`（PR 与交付），分类不新增 Workflow 阶段。按实际工作切换，不用现有阶段、评论或 Jira 状态时间相减；同一时段只归一个分类。构建、启动和测试本身执行计时，等待用户确认、等审查、纯排队/等 CI、停工及其它任务处理不计；等 CI 时继续编码，应先切回开发分类。
+
+接管读取与预检前可在空闲工位开始 `takeover`，成功建 run 后沿原段结算并绑定当前 run；未接管成功的工作段保留原任务身份，不伪造 run 或成功。准备源码属于接管，构建装配与启动属于环境。切换、等待或返回用户前 `pause`；恢复工作另开工作段。正常阶段推进会结算已有活动段，但不根据阶段自动补算。新会话、升级接续或异常退出后，先以 `recover` 将原未结尾段保留为未计量，再开新段；同一会话隔夜恢复也执行此步骤，不从活动时间推断离线时长。明确等待边界由 Agent 发起，程序不能保证任意平台异常时自动停表。
+
+### 计时与原生登记
+
+使用绑定安装的 Python 入口，`--dir` 为工位。每个工作段生成一次稳定 `segment-id`（8—80 位小写 ASCII 字母、数字及连字符），重试复用；建 run 后所有写调用带 `--expected-run-id`，空闲接管前省略。说明使用简洁单行本次工作，不包含版本、工位、run、用户名、起止时间或登记 ID。
+
+```sh
+python3 <agenticops-root>/workflow/jira_worklog.py start --dir <工位> --issue-key <JIRA-KEY> --expected-run-id <run-id> --segment-id <稳定段ID> --category plan --summary '定位缓存阻塞并确定修复方案'
+python3 <agenticops-root>/workflow/jira_worklog.py pause --dir <工位> --issue-key <JIRA-KEY> --expected-run-id <run-id> --segment-id <稳定段ID>
+python3 <agenticops-root>/workflow/jira_worklog.py status --dir <工位> --issue-key <JIRA-KEY>
+```
+
+在接管完成、检查点、暂停返回及退出前主动处理已结算段；不等整个任务结束，也不为每条工具调用建一条工时。同一工作尚未发送时可 `resume --segment-id <原段ID>`，累计实际执行片段并排除中间等待；已发送或返工另开段。零秒段不登记，不向上取整虚增耗时。Worklog 使用原生开始时间和耗时，说明仅为“环节｜本次工作”，如“测试｜并发回归通过，12 项”。作者由当前 Jira 登录用户产生，不冒充任务经办人；防重元数据只存 Worklog property，不进入说明正文。
+
+默认复用现有 MCP，无需另配 API Token 或新增 Jira 客户端，沿用 Jira 登记时自动扣减剩余预估的行为，不自动加回。发送前沿接管入口核验当前归属，再用同一连接读取站点、任务 ID/key、当前用户、四项标记及完整 Worklog 列表，作为 `prepare --snapshot <文件>` 输入。快照保留 `site/source_ref/issue/current_user`、`worklogs_complete=true/worklogs`，实际核验工具后声明 `capabilities.worklog_create=true`、`capabilities.worklog_property_edit=true`。程序保存创建意图、既有 ID 和精确目标后，输出 `addOrEditJiraIssueWorklog` 调用，说明只含分类和本次工作。
+
+实测当前 MCP/Jira `timeSpent` 不接受秒单位，小数分钟会成为整分钟，因此 MCP 载荷只用向下取整的整数分钟：不足一分钟保留原段，继续同一工作时用 resume 累计；已登记段的秒级余量仍保留在原记录和保全材料，不冒充全部登记。REST 秒级能力与 MCP 分开，不用小数分钟或上取整补差。
+
+创建后立即保存返回的 Worklog ID，再读完分页并展开 `properties`，用 `bind --snapshot <文件>` 核对原作者、目标、开始时间、整数分钟对应的秒数及正文；快照保留原 `site/source_ref/issue/current_user`、`worklogs_complete=true/worklogs`，成功响应的 ID 放在 `created_worklog_id`。只有绑定到唯一新工时后，才输出 `editJiraEntityProperty`，写入 `atlassian-mcp.agenticops.worklog`（MCP 允许的属性命名空间）。已有其它归属不覆盖。再次回读属性和工时，用 `complete --snapshot` 置为 verified。MCP 可返回 Markdown 正文，按当前表示校验，不要求伪造 ADF。
+
+创建响应丢失时，bind 仅从创建前不存在且原作者、目标、开始时间、秒数和正文全部匹配的记录中定位；没有或不唯一就保留未知，不能再次创建。已绑定 ID 后的属性失败只恢复同一 ID 的属性，不新建 Worklog；补写相同属性值可幂等收敛。两步写入不是跨服务事务，不承诺全局强互斥或跨工位严格恰好一次。verified 不再发送；已产生意图后再次 prepare 不输出创建载荷。“没有查到”不等于未写入。只有原创建明确返回 400/401/403/404/413/422 且能证明未生效时，才用 retry 导入原 `rejected_request_digest/http_status/rejection_ref` 和完整列表恢复同一意图；已发现新工时或已绑定 ID 禁止重建。
+
+已有 REST 原子属性意图仍沿原载荷回读；拥有直接 API 能力时可声明 `capabilities.worklog_properties=true`、`capabilities.adjust_estimate_leave=true` 使用秒数和 `agenticops.worklog` 属性，不将旧意图改为 MCP 模式或改变原预估策略。没有适用原生能力时 defer 保存已知未发送原因，继续无依赖工作。输入来源和能力由 Agent 实际核验，程序不认证外部事实；普通评论不能冒充 Worklog。
+
+### 恢复与保全
+
+工时功能拥有 `evidence/jira-worklog-<JIRA-KEY>.json`，只存计时、待发送内容及回执；Jira Worklog 是工时事实源，不建立分析台账。缺文件表示尚未启用，不从旧任务历史补造工时；残缺或未知格式保全后核实，不手改状态。原 run 恢复不重置段，旧 run 记录不能直接作为新 run 的发送依据。归属改变先暂停受影响同步，新会话不接续旧计时尾段。
+
+待登记、未计量和未知写入进入既有 `sync_actions`、警告及接续材料；归档可保留已有 JSON 状态，跨工位从 Jira 接续点核对原属性和载荷后续办，不重新推算时间。清理前停止计时，先同步或把剩余段和原发送线索保存在可回查的接续材料；未知操作按既有 `unresolved_operations` 要求定位，不能随本地文件删除丢失。completed 后只核对已有发送意图，不新增工时；应在完成前结算和同步，剩余警告如实交接。计时和同步失败只影响工时记录，不作为质量通过、业务阶段完成或系统级阻塞的替代判据。
+
 ## 同步待办与有限回执恢复
 
 TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。`takeover` 完成视图及恢复边界见[工位合同](../architecture/single-task-station.md#接管完成视图与恢复)。水印命令也返回相同待办，标记核验后直接提供摘要 draft_command；按实际返回的下一步继续。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。

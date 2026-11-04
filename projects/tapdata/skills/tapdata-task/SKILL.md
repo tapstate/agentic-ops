@@ -24,6 +24,7 @@ metadata:
 
 ## 始终保留的边界
 
+- 工位自动登记工时按[工时合同](../../../../docs/usage/quality-checkpoints.md#工位自动工时登记)执行：接管前开始 takeover，分析/方案、环境、开发、测试及 PR 按实际工作分类；切换、等用户/审查/CI、返回用户前 pause，正常节点主动同步已结算段。新会话及异常恢复先 recover 未结尾段，不补算离线时间。Worklog 说明只写“环节｜本次工作”，现有回写保留；原生能力不足保留 deferred，未知发送只回读。退出前保全剩余段，不以工时同步失败阻断无依赖研发。
 - 写入绑定 issue/run，阶段推进另带 expected-stage，生命周期与范围操作使用 expected-revision 和稳定 operation-id；拒绝后先回读，不换身份重放旧决定。证据使用 interaction-path；任务释放后不写旧运行证据。
 - 编码前以一轮方案确认覆盖实施、验收及后续动作授权，已有有效决定复用；范围、风险或验收预期变化时只补缺少的决定并沿现役接口重新绑定，不能自行签发授权或手改状态。
 - Q3 是满足 Q2 已选修复后项的首轮事实，使用 auto_checkpoint，不是人工验收；Q4 Manual/Unit 使用当前完整 SHA 的证据及真实验收，TapTest 按项目状态合同。充分 IT、Manual Test 与已有 Test 分别按现役规则核验；风险接受、未执行、零用例和旧 PASS 不能冒充通过。
