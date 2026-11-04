@@ -39,6 +39,7 @@ run_general_suite() {
   run_product tests/test_station_source.py
   run_product tests/test_station_source_update.py
   run_product tests/test_shared_skills.py
+  run_product tests/test_dbforge.py
   run_product tests/test_shared_repositories.py
   run_product tests/test_repository_recovery.py
   run_product tests/test_task_identity.py

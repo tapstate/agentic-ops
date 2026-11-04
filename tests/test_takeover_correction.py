@@ -21,6 +21,13 @@ class TakeoverCorrectionTests(unittest.TestCase):
     write = fixture.StationTests.write
     git = fixture.StationTests.git
 
+    def test_project_tools_prepare_once_for_new_takeover_and_not_on_resume(self):
+        self.prepare_engineering()
+        with mock.patch.object(station_takeover, "prepare_tools") as prepare:
+            station.takeover(self.ws, self.request, "op-dbforge-tools", 0)
+            station.takeover(self.ws, self.request, "op-dbforge-tools", 0)
+        prepare.assert_called_once_with(self.ws, self.request)
+
     def branches(self):
         self.prepare_engineering()
         self.git(self.remote, "branch", "release-v4.21.0", "develop")

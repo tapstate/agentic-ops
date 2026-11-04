@@ -60,6 +60,13 @@ def inputs(base, request):
     return module, config, catalog, profile
 
 
+def prepare_tools(base, request):
+    """复用项目已有解析模块的辅助准备；仅新操作调用，不用于恢复或更正。"""
+    module, _, _, _ = inputs(base, request)
+    if hasattr(module, "prepare_tools"):
+        module.prepare_tools(base)
+
+
 def preflight(base, request):
     module, config, catalog, profile = inputs(base, request)
     value = module.preflight(base, request["version"], config, catalog, profile,

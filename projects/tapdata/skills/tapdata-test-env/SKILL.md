@@ -1,11 +1,21 @@
 ---
 name: tapdata-test-env
-description: 配置、部署、更新、检查、切换或卸载 TapData 工位 Docker 开发环境；复用多份命名配置，每工位一个活动环境，按节点选择 TM、FE、APIServer，使用宿主机构建的完整 Launcher 和指定外部 MongoDB。不管理生产环境、数据库生命周期或源码分支。
+description: 配置、部署、更新、检查或卸载 TapData 研发环境；已有发行包优先 DBForge，当前任务构建包使用工位 Docker 开发环境。不管理生产环境或源码分支。
 metadata:
   product: agenticops
 ---
 
 # TapData 开发环境
+
+## 先选择部署来源
+
+数据库实例或服务侧已有发行包的 TapData 部署，先使用共享 [ao-dbforge](../../../../skills/shared/ao-dbforge/SKILL.md) 查询能力并申请租约；该技能负责下载 CLI、token 配置、原请求回读和释放。当前任务修改后构建的 TapData 直接走下述 Docker 流程，确保实际加载当前制品；不能用 DBForge 请求中的版本/分支字段替代制品交付证明。
+
+已有发行包需核验服务侧包、架构、组件、许可、端点及业务认证；`tapdata/dedicated/single` 可选择 managed Mongo，HA 的 Mongo 前置条件以实际服务为准。服务不支持、明确部署失败或制品/许可条件无法满足时，说明原因并沿原部署授权回退本地 Docker；创建结果未知先按原请求回读。切换前说明停止旧实例的影响，仍沿工位单活动环境与成果保全合同，不自动迁移数据库或删除共享 Mongo。DBForge 租约用唯一 record 关联当前命名环境，退出时先释放并回读，再处理本地运行材料；不套用 Docker 的卸载命令。
+
+`TAPDATA_EDITION=oss` 不会把企业发行包转换为 OSS；企业包需管理员为实际实例准备有效许可证。AgenticOps 不代签许可证、不禁用许可检查，也不以 `active` 回执替代应用可用性验证。完整 tar 包的 API Server 需按容器预算显式配置 `API_WORKER_COUNT`（单实例开发验证可用 `-env API_WORKER_COUNT=1`），避免按宿主核数启动过多 worker。就绪后分别验证 TM、WebUI 静态资源、API `/status` 和引擎连接，再报告部署成功。
+
+以下为 Docker 开发环境的现役操作，具体 DBForge 参数与通用收尾只在共享技能维护。
 
 先读取工位绑定和[开发环境指引](../../runbooks/test-environment.md)。当前工位 config 保存多份配置，runtime 只保留一个活动现场；各配置共享当前工位源码，不把配置名称解释为分支或独立源码。使用工位绑定的 Product Root 中的项目脚本，不复制中央脚本到工位，不修改 `.agenticops/` 状态。
 

@@ -64,7 +64,7 @@ stories:
     category: product
     title: 低成本适配产品项目
     document: docs/user-stories/v1/prod-004-adapt-project.md
-    protected_paths: [projects/**]
+    protected_paths: [projects/**, tests/test_dbforge.py]
     acceptance_checks: [python_runtime, resource_contracts, product_install_boundary, release_workflow]
     evidence_requirements:
       - 项目 Profile、准入规则和生成视图一致性
