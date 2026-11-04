@@ -1,5 +1,7 @@
 ## 接管与恢复
 
+新接管预检通过后，TapData 项目入口会尝试更新已安装的 DBForge CLI；首次实际使用由共享 [ao-dbforge](../../../../../skills/shared/ao-dbforge/SKILL.md) 安装和配置。未安装、更新失败或 token 尚未填写不阻塞无依赖的接管工作；读取本次返回结果，不重复更新。原 run、同一在途操作恢复和分支更正不触发这项工具更新。
+
 接管前、恢复及每个新工作段先按[归属合同](../../../../../docs/architecture/single-task-station.md#jira-任务级接管协调与授权)原生读取 Jira 站点、任务 ID、当前用户与四项标记。完整分支预检和 run/op 持久化后，重新读取归属并写四项标记、回读接管评论，紧接着处理项目状态同步，再恢复源码准备；不再发协调评论或报活。异主先核实人工交接、旧执行者停写和在途操作。旧协调记录用 coordination status/retire 核验退出；清理不清空远端标记。旧安装按实际合同，不手改状态迁移。
 
 用户以 Jira key 要求继续已有任务、跨版本升级后接续，或升级前保全进展时，使用共享 [ao-task-resume](../../../../../skills/shared/ao-task-resume/SKILL.md)。Jira/GitHub 保存有效设计、决定、真实历史基线与完整 Head、验证和剩余事项；缺项由 AI 核实并协助用户补齐。该技能只整理可信输入，接管、授权、质量和状态写入仍使用本 Skill 的现役入口，不解析旧 epoch 或复制旧 PASS。

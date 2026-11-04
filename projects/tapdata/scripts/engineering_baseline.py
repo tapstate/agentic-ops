@@ -1,11 +1,31 @@
-"""把现役 TapData 分支解析结果转换为完整工程基线；不准备或修改仓库。"""
+"""TapData 完整工程基线解析及新接管的辅助工具准备；不修改源码仓库。"""
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import subprocess
+import sys
 import tempfile
 
 from workflow import engineering_baseline as baseline
 from projects.tapdata.scripts.align_branches import build_plan
+
+
+def prepare_tools(station):
+    """新任务预检后更新已安装 DBForge；不要求所有研发先配置数据库工具。"""
+    root = Path(__file__).resolve().parents[3]
+    if not (root / ".local/tools/dbforge/dbforge-cli").is_file():
+        return
+    helper = root / "skills/shared/ao-dbforge/scripts/dbforge.py"
+    try:
+        result = subprocess.run([sys.executable, str(helper), "update", "--if-installed"],
+                                capture_output=True, text=True, timeout=180)
+        value = json.loads(result.stdout)
+        status = value.get("status", "incomplete")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        status = "incomplete"
+    print("[tapdata] DBForge CLI 更新：%s；失败时保留旧版，继续无依赖工作" % status,
+          file=sys.stderr, flush=True)
 
 
 def preflight(station, version, config, catalog, profile, *, optional=(), explicit_branches=None):

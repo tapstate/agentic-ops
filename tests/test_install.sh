@@ -127,7 +127,7 @@ for agent_skill_root in .agents/skills .claude/skills; do
   done
 done
 for agent_skill_root in .agents/skills .claude/skills; do
-  for shared_skill in ao-requirement ao-task-resume ao-feedback; do
+  for shared_skill in ao-requirement ao-task-resume ao-feedback ao-dbforge; do
     test -L "$maintainer_root/$agent_skill_root/$shared_skill"
     test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$maintainer_root/$agent_skill_root/$shared_skill")" = "$maintainer_root/skills/shared/$shared_skill"
   done
@@ -290,6 +290,8 @@ test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
 test -f "$install_root/skills/shared/ao-requirement/SKILL.md"
 test -f "$install_root/skills/shared/ao-task-resume/SKILL.md"
 test -f "$install_root/skills/shared/ao-feedback/SKILL.md"
+test -f "$install_root/skills/shared/ao-dbforge/SKILL.md"
+test -f "$install_root/skills/shared/ao-dbforge/scripts/dbforge.py"
 test -f "$install_root/docs/usage/problem-feedback.md"
 test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
@@ -496,7 +498,7 @@ test ! -e "$station/.claude/settings.json"
 test ! -e "$station/.codex/hooks.json"
 test -f "$station/.test-agent/settings.json"
 for agent_skill_root in .agents/skills .claude/skills; do
-  for shared_skill in ao-requirement ao-task-resume ao-feedback; do
+  for shared_skill in ao-requirement ao-task-resume ao-feedback ao-dbforge; do
     test -L "$station/$agent_skill_root/$shared_skill"
     test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/$shared_skill")" = "$install_root/skills/shared/$shared_skill"
   done

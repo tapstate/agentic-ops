@@ -68,6 +68,7 @@ def takeover(base, request, operation_id, expected_revision):
         def prepare_request():
             jira_ownership.preflight(base, issue, request.get('jira_snapshot', {}), request['task_class'])
             value = station_takeover.preflight(base, request)
+            station_takeover.prepare_tools(base, request)
             return value
         operation = operations.begin(base, "takeover", operation_id, expected_revision, request,
                                      before_create=prepare_request)

@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+共享 [ao-dbforge](../skills/shared/ao-dbforge/SKILL.md) 维护下载式 CLI、用户级 token 配置、租约与原生 IT 接入的使用边界；TapData 的环境技能负责预置发行包与当前任务 Docker 制品选择，接管入口负责新任务前更新已安装工具，测试技能负责显式环境选择及真实报告核验。它不引用 DBForge 源码、不创建第二套任务状态，也不改变现有质量验收合同。
+
 功能执行分工、异常接续及逻辑闭环验收唯一见[确定性执行与 AI 接续原则](maintenance-guide.md#确定性执行与-ai-接续原则)；数据分类由数据生命周期规范维护，反馈授权与提交由问题反馈流程维护。此开发规范不新增运行层，也不表示现役功能已满足全部目标。
 
 数据分类、作用、生命周期及功能写入/保全/恢复/清理责任唯一维护于[数据生命周期开发规范](development-data-lifecycle.md)。该规范约束功能开发，各能力的源码实现与目标差异由工位合同集中说明；[工位合同](architecture/single-task-station.md#任务生命周期目标合同)定义操作与接管行为，[PROD-003](user-stories/v1/prod-003-multi-repository-task.md#目标用户故事)维护验收场景。使用指引保留现役命令，不把目标操作名当成可用命令。任务级 Jira 接管协调的规则、当前源码回读能力及旧安装差异集中在[工位合同](architecture/single-task-station.md#jira-任务级接管协调与授权)，开发规范和用户故事分别维护职责与验收，不重复定义计时规则。
