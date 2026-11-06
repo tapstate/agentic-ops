@@ -41,6 +41,9 @@
     },
     {
       "$ref": "#/$defs/jira_status"
+    },
+    {
+      "$ref": "#/$defs/publication_decision"
     }
   ],
   "$defs": {
@@ -604,7 +607,9 @@
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
             },
-            "takeover_snapshot": {"type": "object"},
+            "takeover_snapshot": {
+              "type": "object"
+            },
             "digest": {
               "type": "string",
               "minLength": 1,
@@ -716,7 +721,10 @@
               "minLength": 1,
               "pattern": "\\S"
             },
-            "author_account_id": {"type": "string", "minLength": 1},
+            "author_account_id": {
+              "type": "string",
+              "minLength": 1
+            },
             "body_representation": {
               "type": "string",
               "enum": [
@@ -781,6 +789,56 @@
           },
           "required": [
             "snapshot"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "publication_decision": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "publication_decision"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "checkpoint": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "snapshot": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "source_ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "publication_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "checkpoint",
+            "snapshot",
+            "reason",
+            "source_ref"
           ],
           "additionalProperties": false
         }

@@ -45,6 +45,13 @@ def load_state(base, task):
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("schema_version") != 1 or document.get("issue_key") != task["issue_key"] or document.get("run_id") != task["run_id"] or not isinstance(document.get("attempts"), dict):
         raise ValueError("Jira 状态同步记录损坏或不属于当前 task/run")
+    writes = document.get("field_writes", {})
+    if not isinstance(writes, dict) or any(not isinstance(row, dict) or row.get("operation_id") != key
+            or row.get("status") not in ("intent", "verified", "not_written")
+            or not all(isinstance(row.get(name), dict) and row[name] for name in ("fields", "before", "digests"))
+            or set(row["fields"]) != set(row["before"]) or set(row["fields"]) != set(row["digests"])
+            for key, row in writes.items()):
+        raise ValueError("字段写入意图损坏，保留原材料核实")
     return document
 
 
@@ -57,13 +64,35 @@ def save_state(base, task, state, recovery=None):
         else:
             trigger, original = recovery
             sync_recovery.require_receipt(base, current)
-            if load_state(base, current)["attempts"].get(trigger) != original:
-                raise ValueError("原 Jira 意图已变化，拒绝过期回执")
-            sync_recovery.validate_update(original, state["attempts"][trigger],
-                {"completed_at", "readback_ref", "readback_status", "outcome", "reason", "message", "guidance"})
+            if trigger.startswith("field:"):
+                key = trigger.split(":", 1)[1]
+                if load_state(base, current).get("field_writes", {}).get(key) != original:
+                    raise ValueError("原字段意图已变化，拒绝过期回执")
+                sync_recovery.validate_update(original, state["field_writes"][key], {"status", "readback_ref"})
+            else:
+                if load_state(base, current)["attempts"].get(trigger) != original:
+                    raise ValueError("原 Jira 意图已变化，拒绝过期回执")
+                sync_recovery.validate_update(original, state["attempts"][trigger],
+                    {"completed_at", "readback_ref", "readback_status", "outcome", "reason", "message", "guidance"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 状态回执")
         task_store._write_json_atomic(state_path(base, task), state)
+
+
+def pending_field_writes(base, task):
+    """保留同一任务旧 run 的未知字段写入，不能由重置掩盖。"""
+    result = []
+    for path in sorted(task_store.task_directory(base, task["issue_key"]).glob("jira-status-*.json")):
+        if not re.fullmatch(r"jira-status-[0-9a-f]{24}\.json", path.name):
+            continue
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        old_task = dict(task, run_id=saved["run_id"])
+        if path != state_path(base, old_task):
+            raise ValueError("Jira 状态文件名与 run 不匹配")
+        for key, record in load_state(base, old_task).get("field_writes", {}).items():
+            if record["status"] == "intent":
+                result.append(dict(record, run_id=old_task["run_id"]))
+    return result
 
 
 def config(base, task):
@@ -475,7 +504,7 @@ def main():
     p = sub.add_parser("status")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--dir", default=".")
-    for name in ("collect", "confirm"):
+    for name in ("collect", "confirm", "prepare_fields", "readback_fields"):
         p = sub.add_parser(name)
         p.add_argument("--issue-key", required=True)
         p.add_argument("--expected-run-id", required=True)
@@ -486,22 +515,26 @@ def main():
     try:
         task_store.station_project(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
-        with task_store.task_run_lock(args.dir, issue, execution=args.command != "status", ownership=args.command != "complete"):
+        with task_store.task_run_lock(args.dir, issue, execution=args.command != "status", ownership=args.command not in ("complete", "readback_fields")):
             task = task_store.read_task(args.dir, issue)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
-                if args.command != "complete":
+                if args.command not in ("complete", "readback_fields"):
                     from workflow import station_takeover
                     if getattr(args, 'trigger', None) == 'takeover':
                         station_takeover.require_external(args.dir, task)
                     else:
                         task_store.require_development(args.dir, task)
-            if args.command in ("collect", "confirm"):
+            if args.command in ("collect", "confirm", "prepare_fields", "readback_fields"):
                 from workflow import jira_collect
                 document = json.loads(Path(args.input).read_text())
                 snapshot = document["snapshot"]
                 proposals = document.get("proposals", {})
-                if args.command == "collect":
+                if args.command == "prepare_fields":
+                    result = jira_collect.prepare_fields(args.dir, task, args.checkpoint, document)
+                elif args.command == "readback_fields":
+                    result = jira_collect.readback_fields(args.dir, task, document)
+                elif args.command == "collect":
                     result = jira_collect.collect(args.dir, task, args.checkpoint, snapshot, proposals)
                 else:
                     result = jira_collect.confirm(args.dir, issue, args.expected_run_id, args.checkpoint,

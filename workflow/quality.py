@@ -77,8 +77,8 @@ def config(base, task=None):
         if (not isinstance(change_only, list) or not set(change_only) <= {"source_sync", "ci"}
                 or type(result.get("change_only_pr", False)) is not bool):
             raise ValueError("无源码变化仅允许省略来源合并、CI 和 PR，本地验证及审查仍须保留")
-        if result.get("publication_mode", "deferred-summary") not in ("checkpoint", "deferred-summary"):
-            raise ValueError("publication_mode 只支持 checkpoint 或历史 deferred-summary")
+        if result.get("publication_mode", "deferred-summary") not in ("checkpoint", "collaboration", "deferred-summary"):
+            raise ValueError("publication_mode 只支持 collaboration、checkpoint 或历史 deferred-summary")
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
@@ -782,6 +782,10 @@ def report(state, rules, ctx, *, base, task):
         selection['reviewed'] = False
         selection['outcome'] = checkpoint_outcome(selection)
     for cp, view in checkpoints.items():
+        resolution = model.get("publication_decisions", {}).get(cp, {})
+        view["publication_snapshot"] = snapshot(model, rules, ctx, cp)
+        view["publication_resolved"] = bool(view["reviewed"] and resolution.get("snapshot") == view["publication_snapshot"])
+        view["publication_resolution"] = resolution if view["publication_resolved"] else None
         view["published"] = view['reviewed'] and any(r.get("checkpoint") == cp and r["snapshot_current"] and r["status"] == "verified"
                                 for r in publications.values())
         if view["reviewed"]:

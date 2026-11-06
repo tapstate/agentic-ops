@@ -2,7 +2,7 @@
 
 ## 接管摘要发布与回读
 
-接管准备成功后，先按下述四项标记流程写入并回读，再从 `external_sync.py status` 获取 `takeover_comment`。摘要只包含 AgenticOps 接管版本、当前 Agent 所用 Jira 连接的登录用户显示名、当前 run_id、项目 Workflow 的 task_class，以及冻结工程基线中的全部仓库及来源分支列表。操作人保存 accountId 供核对，不使用 Jira Assignee、系统登录名或 Agent 应用用户名；Jira Cloud 返回的 displayName 用于显示。Tag/SHA 基线明确显示“无分支（Tag／SHA：…）”，不把临时检出分支或后续工作分支当作来源分支。内部发布编号不进入评论正文。
+接管准备成功后，先按下述四项标记流程写入并回读，再从 `external_sync.py status` 获取 `takeover_comment`。摘要只包含当前 Jira 登录用户显示名和已确认的源码来源列表，并明确源码准备状态；版本、工位和 run 保留在四项接管字段，不重复进入正文。操作人保存 accountId 供核对，不使用 Jira Assignee、系统登录名或 Agent 应用用户名；Jira Cloud 返回的 displayName 用于显示。Tag/SHA 基线明确显示“无分支（Tag／SHA：…）”，不把临时检出分支或后续工作分支当作来源分支。内部发布编号不进入评论正文。
 
 ### 四项接管标记
 
@@ -43,7 +43,7 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 ### 摘要发送与防重
 
-复用接管及对应 Jira 回写的有效授权，按待办稳定 id 执行 `draft`、`confirm`、`prepare_write`。接管摘要的 prepare_write 必须携带新读取的 `takeover_snapshot`（site、source_ref、含 ID 的 issue 及 current_user）；程序核对四项标记和登录身份仍与原意图一致，再允许生成评论发送意图。标记已被其它工位/run 改写时，不发送过期摘要。独立协调评论已停用，旧记录先核实退役；本评论列出预检全部仓库来源，标签为“版本”，不宣称源码准备完成。评论后紧接着处理适用的 Jira 状态同步，再恢复源码准备。
+复用接管及对应 Jira 回写的有效授权，按待办稳定 id 执行 `draft`、`confirm`、`prepare_write`。接管摘要的 prepare_write 必须携带新读取的 `takeover_snapshot`（site、source_ref、含 ID 的 issue 及 current_user）；程序核对四项标记和登录身份仍与原意图一致，再允许生成评论发送意图。标记已被其它工位/run 改写时，不发送过期摘要。独立协调评论已停用，旧记录先核实退役；本评论列出预检全部仓库来源，不重复技术标记，不宣称源码准备完成。评论后紧接着处理适用的 Jira 状态同步，再恢复源码准备。
 
 取得评论 ID 后记 `receipt result=created`，回读目标、ID、完整正文和作者；`readback` 的 `author_account_id` 必须匹配原 Jira 登录用户。已验证评论不重发；发送意图、超时或结果不明时保留原 id、正文和 operation_id，查全相关评论并唯一定位原评论，不重新生成正文或新 id。无法唯一定位时保留未知，不能把“暂时没查到”当作未发送；不承诺跨服务严格恰好一次。旧版已发送评论仍按其原正文和回执回读，不因升级补发新版摘要。明确更正来源分支后按新来源生成替代说明，普通重试不新增评论。
 
@@ -89,7 +89,7 @@ python3 <agenticops-root>/workflow/jira_worklog.py status --dir <工位> --issue
 
 ## 同步待办与有限回执恢复
 
-TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。`takeover` 完成视图及恢复边界见[工位合同](../architecture/single-task-station.md#接管完成视图与恢复)。水印命令也返回相同待办，标记核验后直接提供摘要 draft_command；按实际返回的下一步继续。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。
+TapData 的 `publication_mode=collaboration` 启用接管摘要和协作信息评估；历史 `checkpoint` 模式仍按原合同恢复。`takeover` 完成视图及恢复边界见[工位合同](../architecture/single-task-station.md#接管完成视图与恢复)。水印命令也返回相同待办，标记核验后直接提供摘要 draft_command；按实际返回的下一步继续。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 保留有效确认；协作模式由 Agent 判断新增信息，同轮相关进展合并为普通草稿，不要求逐检查点发布。
 
 Agent 在当前授权内处理动作；缺少授权时先询问对应动作范围。评论按现有 draft/confirm/prepare_write、原生调用、receipt/readback 顺序处理。稳定 id 复用原记录；尚未发送的过期草稿重新生成确认，已经发送或结果不明的记录只先回读原目标和原正文。新确认不授权重复发送。`refresh_required` 只表示当前材料变化，不撤销原外部调用事实。
 
@@ -97,7 +97,7 @@ Agent 在当前授权内处理动作；缺少授权时先询问对应动作范�
 
 completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md)：epoch 28 在冻结前可回读已确认范围内的原意图；归档草稿、冻结证据或发布意图已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
 
-已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置，但仅 `checkpoint` 主动生成接管及检查点动作。
+已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置；`checkpoint` 生成逐检查点评论，`collaboration` 生成协作信息评估和字段同步动作。
 
 ## 源码定位与实时核验
 
@@ -611,7 +611,7 @@ Fix Details 面向任务交付，PR 面向单仓审查。Agent 使用同一批�
 
 ### Jira 回写内容与字面 HTML 展示
 
-回写按内容职责复用有限模板，不增加状态或独立发布链。接管及源码来源更正使用现有稳定正文；Q1—Q6 使用当前阶段生成器，先给结论、实质变化、缺口与下一步，既有模板的固定字段和恢复信息不得手工删减。Issue Analysis 展示问题依据、方案、范围和风险；Fix Details 展示实际变更、验证、限制及方案偏离。测试/CI/审查异常评论采用“现象与影响、版本及证据、归因与处置、剩余事项”，不堆全量日志。Manual Test 的定义与执行记录、兼容跟进、问题反馈分别沿[测试缺口合同](#测试编写缺口与-pr-总结)和[反馈合同](problem-feedback.md)，不复制字段规则。状态、人员、版本、接管标记和关联关系使用字段映射及精确回读，不套正文模板；归档接续载荷保持原协议。
+回写按内容职责复用有限模板，不增加状态或独立发布链。接管及源码来源更正使用现有稳定正文；Q1—Q6 的确认记录与评论发布分离；新协作评论按下述简洁合同组织，旧已发送或结果未知的正文不得改写。Issue Analysis 展示问题依据、方案、范围和风险；Fix Details 展示实际变更、验证、限制及方案偏离。测试/CI/审查异常评论采用“现象与影响、版本及证据、归因与处置、剩余事项”，不堆全量日志。Manual Test 的定义与执行记录、兼容跟进、问题反馈分别沿[测试缺口合同](#测试编写缺口与-pr-总结)和[反馈合同](problem-feedback.md)，不复制字段规则。状态、人员、版本、接管标记和关联关系使用字段映射及精确回读，不套正文模板；归档接续载荷保持原协议。
 
 正文适用短标题、段落和列表；真正需要映射或比较时才用小表格。关键风险和未完成项直接可见，不藏在折叠区。必要证据实际可访问；仅本机材料说明保全位置与恢复限制。原操作版本、当前安装版本和本次文案使用版本分别表述，不能把升级后的版本覆盖为故障发生版本。
 
@@ -632,9 +632,15 @@ python3 <product-root>/workflow/jira_literal_html.py compare --body-file <原确
 
 实施方案（功能的 implementation_plan、缺陷的 fix_plan）写入 Issue Analysis；实际提交、执行结果、验收决定和剩余限制形成 Fix Details。`jira_status collect` 在对应阶段提供人读字段提议，不自动确认或覆盖 Jira 已有内容；已有内容需合并人工修改，确认完整字段值后原生写入并回读。字段写入失败只留下同步待办，不重复在评论发布全文。Story Test Design Review Result 在 design_review 随方案一次确认实际审批选项，acceptance 复用有效决定；方案、选项或责任人变化后重新核对，不根据 PASS 猜填审批结论。
 
-TapData 每个检查点确认后尽力回写 Jira，评论失败或未回读仅产生警告，不阻止阶段推进或 PR Ready。使用 status 返回的阶段总结 publication_body；实施方案写入 Issue Analysis，修复总结写入 Fix Details，均通过现有字段采集包确认、原生写入并回读。评论不展开方案正文或结构化 JSON，也不冒充字段同步完成；完整结构化证据保存在本地。真实测试、方案确认及必要验收条件仍须满足。
+TapData 评论面向研发、测试和审查人。首次接管、方案确定或实质变化、需协作的阻塞、验证/提审/交付形成新结论时发布；同轮相关信息合并，无变化查询、等待及纯内部检查点推进不发评论。阻塞即时告知。正文按“结论、必要依据、后续动作”组织，通常一至三段或三至五项，约 200 字为参考而非截断限制。保留未执行、跳过、失败、未知及覆盖限制，风险接受不等于 PASS。优先链接 PR、具体提交和可访问报告，不堆内部状态码、运行编号、AO 标识和重复基线；详细方案及修复结论进入专用字段。历史结论变化追加简短更正，不静默改写历史。
 
-方案确认时一并告知用户将把 Q1/Q2、合格的 Q3 首轮事实和最终 Q4 内容回写 Jira。用户可在同一真实回复确认方案、验收方式、任务授权及合格 Q3 的自动回写/推送/Draft PR；该回复可被引用完成多项选择和评论确认，不要求逐条回复。Q4 的 Manual/Unit 仍须基于当前 SHA 的证据请求最终验收；全部为 TapTest 时按状态自动汇总。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
+`publication_body` 是简短素材。Agent 结合真实事实形成普通 `draft`（不绑定单一 checkpoint），复用有效授权沿 confirm/prepare_write、原生写入及 receipt/readback；同一条已回读评论可覆盖多个有效确认。每个确认沿 quality apply 的 `publication_decision` 保存 `checkpoint`、status 返回的 `publication_snapshot`（输入键为 `snapshot`）、`reason`、`source_ref`，合并已发布评论时另带 `publication_id`。无新增信息省略该 ID，记录具体理由和可核验依据；它表示无需新评论，不冒充 published。确认或证据变化后重新评估；已存在的在途评论必须先回读，不能用无需发布掩盖未知结果。内部记录继续使用原质量日志，不新增台账。
+
+方案确认后、实施前同步 Issue Analysis；修改形成且首轮验证后同步阶段性 Fix Details，明确待验收，最终验收或 CI 结论变化后更新。字段采集不是同步成功：先读取完整原值，保留人工内容并形成 proposals，复用有效决定 confirm，再执行 `jira_status prepare_fields --checkpoint <节点> --input <文件>`。输入复用 snapshot/proposals，增加稳定 operation_id；返回 native_request 后由 Agent 原生写入，保存原操作并执行 `readback_fields`，输入带原 operation_id 和原生 snapshot。所有入口均带 issue-key、expected-run-id、dir。明确未写入时可向 readback_fields 提交 result=not_written，snapshot.operation_result 须包含原 operation_id、effect=not_written 和 source_ref，并核验原写前值；只有明确拒绝才能解除未知，不能从未查到推断。回读仅验证原全文，不将旧操作成功解释为当前方案已同步；待办按当前材料判断新鲜度。字段缺值、仅 ID 或无法表示完整富文本时先补查，不当空值覆盖。普通文本保持真实原生值；含媒体或格式结构的字段须使用可保留结构的原生表示，不自行扁平化。
+
+字段或评论失败只暂停依赖的同步，继续无依赖研发；创建响应丢失先按原意图、目标、作者、正文及返回 ID 定位，无法唯一定位时保留未知，不重发。新操作和旧记录沿所属入口恢复，不修改旧事件或旧正文。跨工位需要的当前方案、实际成果、源码与证据引用保存在 Jira 字段和既有持久接续材料，不能仅留本机路径；清理前核验可取回性。评论简化不改变 Q1—Q6、状态转换、PR Ready 或成果保全要求。
+
+方案确认时一并告知用户将同步确认方案、实际修复及新增协作结论。用户可在同一真实回复确认方案、验收方式、任务授权及合格 Q3 的自动回写/推送/Draft PR；该回复可被引用完成多项选择和评论确认，不要求逐条回复。Q4 的 Manual/Unit 仍须基于当前 SHA 的证据请求最终验收；全部为 TapTest 时按状态自动汇总。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
 
 确需停下时，必须解释当前检查点要核对什么，并把 `handoff` 转成用户可执行的说明：用例/步骤、预期、执行人、环境、仓库及完整 SHA，要求返回日志/报告与实际结果，列出可选处置和仍可继续的工作。缺少 SHA 的日志先补来源，不猜目标版本；恢复同一 run 时不重复问已有效确认的问题。
 

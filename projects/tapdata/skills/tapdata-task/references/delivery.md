@@ -23,7 +23,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 
 - 创建或编辑 PR 正文时，按[PR 正文发布与回读](../../../../../docs/usage/quality-checkpoints.md#pr-正文发布与回读)每仓准备真实多行 UTF-8 文件，调用 `workflow/pr_body.py preflight`；CLI 用 `--body-file`，不把正文拼入 Shell。原生写入后回读 `number,url,body` 并用 `compare` 核对目标与全文，再报告描述已核验。提示不自动替换合法转义；已存在 PR 保留人工修改，未知结果先回读原 PR，不重建。纯正文修正不触发来源分支合并或代码重验，正文问题不阻塞无依赖工作；测试总结、实际 `AgenticOps 版本 XXX` 标识与补测关联按项目 PR Ready 合同核对。
 
-- 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
+- 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点按质量合同评估新增信息，同轮评论合并，字段全文分别同步，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
 - completed 后只可按[有限回执恢复](../../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出脚本先处理可确定事项；未知外部结果保留原操作信息并交接，不重复发送，对明确未发送或仅同步记录缺项，不阻断无依赖清理；外部结果未知仍先回读原操作并停止受影响清理及归档。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
 - 提交与 PR 准备遵循[分支修复与测试维护](../../../runbooks/build-test-and-local-run.md#测试与提交边界)：业务及适用普通 `test` 与 IT强制分开提交，前者可合入低版本，后者不得回补；核验合入方式保留回补边界；用户回补后回读实际 release 成果并完成独立功能验证，再创建或更新 PR。不代办跨分支合入，不以 develop 报告替换 release 证据。
@@ -44,7 +44,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - PR 审查按[审查返工](../../../../../docs/usage/quality-checkpoints.md#pr-审查返工)完整回读普通评论及行内线程，逐项修复或说明依据；改变验收预期交研发决定。相同失败沿用原 problem_id，使用失败工具的 review 来源累计轮次，修改后重验当前代码并回读当前 PR CI；不以线程过时或已关闭替代问题核对。
 - PR 合入、发布、Tag、rebase、强推和保护分支写入不被任务授权覆盖。检出来源分支合并到任务工作分支也须明确纳入方案授权，不因需要保持最新而绕过授权。
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-station>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
-- 每个检查点确认后尽力回写简洁人读评论，保留 draft/confirm/prepare_write/receipt/readback。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
+- 有新增协作结论才回写简洁评论，同轮合并，保留 draft/confirm/prepare_write/receipt/readback；沿质量合同记录 publication_decision，重复查询或纯内部推进不刷评论。Issue Analysis / Fix Details 的 collect/confirm 不等于写入，必须 prepare_fields、原生写入并 readback_fields。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
 - 未迁移能力优先使用 Agent 原生能力；没有安全路径时只暂停当前副作用步骤。
 
 归档写入失败时，按[任务授权指引](../../../../../docs/usage/task-authorization.md#清理与退出)展示指定快照、失败原因和实际清理结果，引导研发明确授权修复后重试或放弃。复用原操作和失败摘要，不自动丢弃，不以新 clean 操作绕过；回读结果不明时先核实。

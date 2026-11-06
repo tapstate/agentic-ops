@@ -562,7 +562,7 @@ class QualityTests(unittest.TestCase):
         self.assertNotIn("implementation_plan", q1)
         self.checkpoint("q2-plan")
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        self.assertIn("Issue Analysis", body)
+        self.assertNotIn("实施方案：写入", body)
         for raw in ('"changes":', 'implementation_plan', '目标断言', '新增行为'):
             self.assertNotIn(raw, body)
         proposal = jira_field_body(self.base, self.task, "issue_analysis")
@@ -712,7 +712,8 @@ class QualityTests(unittest.TestCase):
         original_suggestion = packet["fields"]["customfield_example"]["suggestions"]
         self.plan(); self.select(); self.execute()
         changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, proposals)
-        self.assertEqual(["customfield_example"], changed["confirmed"])
+        self.assertEqual([], changed["confirmed"])
+        self.assertIn("customfield_example", changed["pending"])
         self.assertNotEqual(original_suggestion, changed["fields"]["customfield_example"]["suggestions"])
         updated = {"customfield_example": "人工保留：当前首轮验证 PASS，仍待最终验收。"}
         changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, updated)
@@ -955,7 +956,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(authorization.cmd_grant(args), 0)
         self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        self.assertIn("Issue Analysis", body)
+        self.assertNotIn("实施方案：写入", body)
         self.assertNotIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
         self.assertNotIn("fix_plan", self.task["facts"])
         self.execute(result="FAIL", kind="assertion")
@@ -1555,7 +1556,7 @@ class QualityTests(unittest.TestCase):
         self.automatic_checkpoint()
         for checkpoint in ("q3-draft", "q4-acceptance"):
             body = self.view()["checkpoints"][checkpoint]["publication_body"]
-            self.assertIn("结果：PASS；版本：" + "a" * 40, body)
+            self.assertIn("：PASS；依据：", body)
             self.assertIn("fixture:report/current-pass", body)
             self.assertNotIn("historical-fail", body)
             self.assertNotIn("结果：FAIL", body)
@@ -1607,8 +1608,8 @@ class QualityTests(unittest.TestCase):
     def test_checkpoint_comment_is_human_text_and_normalized_readback_checks_body(self):
         self.plan(); self.select(); self.execute(); self.automatic_checkpoint()
         body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
-        self.assertIn("记录：AO-", body)
-        self.assertIn("验证 case:case-a", body)
+        self.assertNotIn("记录：AO-", body)
+        self.assertIn("目标故障路径：PASS", body)
         self.assertNotIn('"executions":', body)
         self.apply("draft", {"id": "human", "checkpoint": "q3-draft", "body": body})
         record = self.view()["publications"]["human"]
@@ -2267,11 +2268,19 @@ class QualityTests(unittest.TestCase):
                                 case.checkpoint(point)
                             from workflow import external_sync
                             pending = external_sync.actions(case.base, case.task)['sync_actions']
-                            points = {row['checkpoint']: row for row in pending if row.get('kind') == 'checkpoint_comment'}
+                            points = {row['checkpoint']: row for row in pending if row.get('kind') in ('checkpoint_comment', 'publication_review')}
                             for point, view in case.view()['checkpoints'].items():
                                 self.assertEqual(points[point]['body'], view['publication_body'])
-                            for point in case.view()['checkpoints']:
-                                case.publish_checkpoint(point)
+                            published = {}
+                            for point, view in case.view()['checkpoints'].items():
+                                body = view['publication_body']
+                                if body not in published:
+                                    case.publish_checkpoint(point)
+                                    published[body] = point
+                                else:
+                                    case.apply('publication_decision', {'checkpoint': point,
+                                        'snapshot': view['publication_snapshot'], 'publication_id': published[body],
+                                        'reason': '同轮相同事实已经发布', 'source_ref': 'fixture:merged'})
                             self.assertFalse(any(row['kind'] == 'checkpoint_comment' for row in external_sync.actions(case.base, case.task)['sync_actions']))
                             self.assertTrue(all(v['reviewed'] for v in case.view()['checkpoints'].values()))
                         saved = quality.state_path(case.base, case.task).read_text()
@@ -2484,6 +2493,31 @@ class QualityTests(unittest.TestCase):
             'issue_key': 'TAP-123', 'comment_id': '100', 'body': body, 'source_ref': 'fixture:legacy/100'})
         self.assertEqual('verified', self.view()['publications']['legacy']['status'])
 
+    def test_publication_resolution_merges_without_claiming_unpublished_success(self):
+        from workflow import external_sync
+        self.plan(); self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        cp = 'q1-intake'
+        packet = self.view()['checkpoints'][cp]
+        self.apply('publication_decision', {'checkpoint': cp, 'snapshot': packet['publication_snapshot'],
+            'reason': '接管摘要已有相同信息，无新增结论', 'source_ref': 'fixture:takeover'})
+        view = self.view()['checkpoints'][cp]
+        self.assertTrue(view['publication_resolved']); self.assertFalse(view['published'])
+        self.assertFalse(any(r.get('checkpoint') == cp for r in external_sync.actions(self.base, self.task)['sync_actions']))
+        record = self.apply('draft', {'id': 'merged', 'body': '已确认修复错误传播；保留回退。'})['publications']['merged']
+        self.apply('confirm', {'id': 'merged', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'merged', 'digest': record['digest']})['publications']['merged']
+        cp = 'q2-plan'; packet = self.view()['checkpoints'][cp]
+        decision = {'checkpoint': cp, 'snapshot': packet['publication_snapshot'],
+            'reason': '本轮方案集中反馈', 'source_ref': 'fixture:comment', 'publication_id': 'merged'}
+        with self.assertRaisesRegex(ValueError, '先回读原操作'):
+            self.apply('publication_decision', decision)
+        self.apply('readback', {'id': 'merged', 'operation_id': record['operation_id'], 'site': record['site'],
+            'issue_key': 'TAP-123', 'comment_id': 'merged-comment', 'body': record['body'], 'source_ref': 'fixture:comment'})
+        self.apply('publication_decision', decision)
+        self.assertTrue(self.view()['checkpoints'][cp]['publication_resolved'])
+        self.task['facts']['fix_plan']['risks'].append('新增风险'); self.save_task()
+        self.assertFalse(self.view()['checkpoints'][cp]['publication_resolved'])
+
     def test_stage_summary_omits_complex_plan_but_keeps_current_results_and_risks(self):
         from workflow.quality_write import jira_field_body
         self.feature_profile()
@@ -2496,7 +2530,7 @@ class QualityTests(unittest.TestCase):
         self.assertIn('repo-19', jira_field_body(self.base, self.task, 'issue_analysis'))
         self.execute(); self.automatic_checkpoint(); self.decide(); self.checkpoint('q4-acceptance')
         q4 = self.view()['checkpoints']['q4-acceptance']['publication_body']
-        self.assertIn('Fix Details', q4); self.assertNotIn('repo-19', q4)
+        self.assertIn('PASS', q4); self.assertNotIn('repo-19', q4)
         details = jira_field_body(self.base, self.task, 'fix_details')
         self.assertIn('验收处置：验收通过', details); self.assertIn('当前处置依据）：PASS', details)
         self.assertIn('fixture:report/run-1', details)
@@ -2730,7 +2764,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.checkpoint("q3-draft")
         body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
         self.assertIn("范围 feature.py:value", body)
-        self.assertIn("用例/失败/错误/跳过计数 1/0/0/0", body)
+        self.assertIn("用例/失败/错误/跳过 1/0/0/0", body)
         self.cli("task.py", "advance", "--note", "首轮验证完成")
         self.cli("task.py", "advance", "--note", "缺少人工验收", expected=3)
         self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
@@ -3629,10 +3663,9 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(marker_id, progress['markers']['operation_id'])
         self.assertEqual(row['body'], row['draft_command']['payload']['body'])
         self.assertEqual('not_attempted', row['status'])
-        for text in ('版本：v1.fixture', '操作人：当前登录研发', '工位：',
-                     self.task['run_id'], '本次确认的源码来源：', 'tapdata/tapdata：develop'):
+        for text in ('操作人：当前登录研发', '本次确认的源码来源：', 'tapdata/tapdata：develop'):
             self.assertIn(text, row['body'])
-        for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', str(self.base)):
+        for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', '工位：', self.task['run_id'], str(self.base)):
             self.assertNotIn(text, row['body'])
         self.assertEqual(report, self.view())
         self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])

@@ -430,6 +430,126 @@ class JiraStatusTests(unittest.TestCase):
         return jira_collect.confirm(self.base, self.task['issue_key'], self.task['run_id'], checkpoint, snapshot,
             proposals, {key: packet['fields'][key]['digest'] for key in proposals}, proof)
 
+    def test_delivery_field_pending_survives_review_stage(self):
+        from workflow import jira_collect
+        self.task['stage'] = 'implementation'
+        self.assertFalse(any(row.get('field') == 'customfield_10093'
+                             for row in jira_collect.field_sync_actions(self.base, self.task)))
+        for stage in ('pr_review', 'ci_validation', 'completed'):
+            with self.subTest(stage=stage):
+                self.task['stage'] = stage
+                self.assertTrue(any(row.get('field') == 'customfield_10093'
+                                    for row in jira_collect.field_sync_actions(self.base, self.task)))
+
+    def field_write_fixture(self):
+        snapshot = self.collect_fixture()
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        config = json.loads(path.read_text())
+        rule = config['task_classes']['defect_fix']['fields']['details']
+        config['task_classes']['defect_fix']['fields'] = {'issue_analysis': dict(
+            rule, jira_id='customfield_b', required_when=True)}
+        config['task_classes']['defect_fix']['transitions'] = []
+        path.write_text(json.dumps(config))
+        snapshot['transitions'] = []
+        snapshot['issue']['fields']['customfield_b'] = '人工备注：保留'
+        return snapshot
+
+    def test_field_write_confirmation_readback_and_material_drift(self):
+        from workflow import jira_collect, external_sync
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '人工备注：保留；实施方案：修复错误传播'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        self.assertTrue(jira_collect.field_sync_actions(self.base, self.task))
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-op'}
+        record = jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        self.assertEqual(proposals, record['native_request']['fields'])
+        self.assertTrue(any(w['kind'] == 'jira_fields:field-op' and w['status'] == 'unknown'
+                            for w in external_sync.existing_warnings(self.base, self.task)))
+        self.assertIsNone(jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)['native_request'])
+        with self.assertRaisesRegex(ValueError, '不匹配'):
+            jira_collect.readback_fields(self.base, self.task, doc)
+        snapshot['issue']['fields'].update(proposals)
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, doc)['status'])
+        self.assertEqual([], jira_collect.field_sync_actions(self.base, self.task))
+        self.task['facts']['fix_plan'] = 'changed-plan'
+        save_station_task(self.base, self.task)
+        self.assertTrue(jira_collect.field_sync_actions(self.base, self.task))
+        self.assertEqual('verified', jira_status.load_state(self.base, self.task)['field_writes']['field-op']['status'])
+
+    def test_field_conflict_and_known_rejection_preserve_original_intent(self):
+        from workflow import jira_collect
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '人工备注：保留；确认修复'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-op'}
+        snapshot['issue']['fields']['customfield_b'] = '人工新增'
+        with self.assertRaisesRegex(ValueError, '人工修改'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        snapshot['issue']['fields']['customfield_b'] = '人工备注：保留'
+        jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        with self.assertRaisesRegex(ValueError, '明确拒绝'):
+            jira_collect.readback_fields(self.base, self.task, dict(doc, result='not_written'))
+        snapshot['operation_result'] = {'operation_id': 'field-op', 'effect': 'not_written', 'source_ref': 'fixture:403'}
+        self.assertEqual('not_written', jira_collect.readback_fields(self.base, self.task, dict(doc, result='not_written'))['status'])
+        self.assertIsNone(jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)['native_request'])
+        new = jira_collect.prepare_fields(self.base, self.task, 'design_review', dict(doc, operation_id='retry-op'))
+        self.assertEqual(proposals, new['native_request']['fields'])
+
+    def test_unread_field_never_overwrites_and_unknown_operation_is_not_replayed(self):
+        from workflow import jira_collect
+        snapshot = self.field_write_fixture()
+        del snapshot['issue']['fields']['customfield_b']
+        snapshot['issue']['fields']['customFields'] = {'Issue Analysis': {'id': 'customfield_b'}}
+        proposals = {'customfield_b': '确认方案'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-op'}
+        with self.assertRaisesRegex(ValueError, '未完整读取'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        snapshot['issue']['fields']['customFields']['Issue Analysis']['value'] = None
+        with self.assertRaisesRegex(ValueError, '原确认未读取完整字段'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        self.confirm_packet('design_review', snapshot, proposals)
+        jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        with self.assertRaisesRegex(ValueError, '结果未知'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', dict(doc, operation_id='another-op'))
+        snapshot['issue']['fields']['customFields']['Issue Analysis']['value'] = proposals['customfield_b']
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, doc)['status'])
+
+    def test_unread_confirmation_cannot_overwrite_later_observed_human_content(self):
+        from workflow import jira_collect
+        snapshot = self.field_write_fixture()
+        del snapshot['issue']['fields']['customfield_b']
+        proposals = {'customfield_b': '尚未合并人工内容的方案'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        snapshot['issue']['fields']['customfield_b'] = '补读取得的人工备注'
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-op'}
+        with self.assertRaisesRegex(ValueError, '原确认未读取完整字段'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        self.assertFalse(jira_status.load_state(self.base, self.task).get('field_writes'))
+        proposals['customfield_b'] = '补读取得的人工备注；确认方案'
+        self.confirm_packet('design_review', snapshot, proposals)
+        record = jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        self.assertEqual(proposals, record['native_request']['fields'])
+
+    def test_old_run_unknown_field_write_remains_visible_and_blocks_replay(self):
+        from workflow import jira_collect, external_sync
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '人工备注：保留；确认方案'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-op'}
+        jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        old_state = jira_status.load_state(self.base, self.task)
+        old_state['run_id'] = 'old-run'
+        old_path = jira_status.state_path(self.base, dict(self.task, run_id='old-run'))
+        old_path.write_text(json.dumps(old_state))
+        current = jira_status.load_state(self.base, self.task)
+        current.pop('field_writes')
+        jira_status.save_state(self.base, self.task, current)
+        self.assertTrue(any(row['run_id'] == 'old-run' and row['kind'] == 'jira_fields:field-op'
+                            for row in external_sync.existing_warnings(self.base, self.task)))
+        with self.assertRaisesRegex(ValueError, '结果未知'):
+            jira_collect.prepare_fields(self.base, self.task, 'design_review', dict(doc, operation_id='new-op'))
+
     def test_collect_is_readonly_deduplicates_and_defers_future_fields(self):
         from workflow import jira_collect
         snapshot = self.collect_fixture()

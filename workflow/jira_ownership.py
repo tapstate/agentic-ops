@@ -75,6 +75,6 @@ def preflight(base, issue, snapshot, task_class=None):
     if task_class is not None:
         from workflow import quality
         rules = quality.config(base, {'task_class': task_class})
-        if not rules or rules.get('publication_mode') != 'checkpoint':
+        if not rules or rules.get('publication_mode') not in ('checkpoint', 'collaboration'):
             raise ValueError('Project 尚未配置接管评论发布能力，先补齐项目配置；未创建接管操作')
     return result
