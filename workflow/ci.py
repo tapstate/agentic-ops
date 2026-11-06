@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""AgenticOps CI 观察循环：按预算观察 PR 返回的检查，超时或超预算转人工。
+"""AgenticOps CI 观察循环：按预算观察 PR 返回的检查，观察预算耗尽后保留身份并接续。
 
 预算（与 agentic-ops development_change_v2 语义一致）：
   - 轮询间隔 15 秒
-  - 5 分钟内检查未开始 -> 转人工（exit 3）
-  - 开始后 10 分钟内未结束 -> 转人工（exit 3）
+  - 5 分钟内检查未开始 -> 待继续观察（exit 5）
+  - 开始后 10 分钟内未结束 -> 待继续观察（exit 5）
   - 失败归因和修复轮次由 failures.py 按任务 run 统一记录
 
-退出码：0=所有返回的检查明确成功（不证明目标用例运行）；2=有失败检查（可进入修复流程）；3=需人工介入；4=参数/环境错误。
+退出码：0=所有返回的检查明确成功（不证明目标用例运行）；2=有失败检查（可进入修复流程）；3=需人工介入；4=参数/环境错误；5=本轮观察预算耗尽，保持待核验。
 
 用法：
   python3 workflow/ci.py watch --issue-key TAP-123 --expected-run-id <当前-run-id> --repo owner/repo --pr 42 [--dir .]
@@ -207,9 +207,13 @@ def cmd_watch(args):
     started = time.monotonic()
     first_seen = None
     head = ""
+    previous_signature = None
     while True:
         try:
-            checks, head = fetch_rollup(args.repo, args.pr)
+            checks, observed_head = fetch_rollup(args.repo, args.pr)
+            if head and head != observed_head:
+                first_seen = None
+            head = observed_head
         except (RuntimeError, json.JSONDecodeError, subprocess.TimeoutExpired) as err:
             print("观察失败：%s" % err, file=sys.stderr)
             return 4
@@ -218,7 +222,10 @@ def cmd_watch(args):
             return 4
         verdict, failing = classify(checks)
         elapsed = time.monotonic() - started
-        print("[%ds] head=%s 检查=%d 判定=%s" % (elapsed, head[:8], len(checks), verdict))
+        signature = json.dumps([head, checks], sort_keys=True)
+        if signature != previous_signature:
+            print("[%ds] head=%s 检查=%d 判定=%s" % (elapsed, head[:8], len(checks), verdict))
+            previous_signature = signature
 
         if verdict == "success":
             _log(state, args, "success", head, [], checks)
@@ -240,17 +247,29 @@ def cmd_watch(args):
             if elapsed > args.start_timeout:
                 _log(state, args, "start_timeout", head, [], checks)
                 save_state(args.dir, issue, args.pr, state)
-                print("%d 秒内检查未开始，转人工（可能无适用 Workflow 或判定未知——不得降级为无需 CI）。" % args.start_timeout)
-                return 3
+                return pending_observation(state, "start_timeout", head, checks)
         else:  # pending
             if first_seen is None:
                 first_seen = time.monotonic()
             if time.monotonic() - first_seen > args.finish_timeout:
                 _log(state, args, "finish_timeout", head, [], checks)
                 save_state(args.dir, issue, args.pr, state)
-                print("检查开始后 %d 秒未结束，转人工。" % args.finish_timeout)
-                return 3
+                return pending_observation(state, "finish_timeout", head, checks)
         time.sleep(args.interval)
+
+
+def pending_observation(state, reason, head, checks):
+    """预算只结束本次轮询，不制造人工决定或改变检查结果。"""
+    print(json.dumps({"outcome": "pending", "reason": reason,
+        "issue_key": state["issue_key"], "run_id": state["run_id"],
+        "repository": state["repository"], "pr": state["pr"], "head": head,
+        "checks": [{key: row[key] for key in ("name", "context", "status", "conclusion", "state", "detailsUrl", "targetUrl")
+                    if key in row} if isinstance(row, dict) else {"state": "unknown", "reason": "检查条目不是对象"}
+                   for row in checks],
+        "resume": {"command": "ci.py watch", "issue_key": state["issue_key"],
+                   "expected_run_id": state["run_id"], "repo": state["repository"], "pr": state["pr"]},
+        "guidance": "保持待核验；沿当前 run/PR/Head 用平台等待或原 watch 继续观察，不因预算耗尽重跑 CI。无检查时核实触发条件；仅真实权限、缺口或风险决定交研发处理。Head 变化后按新候选核对报告。"}, ensure_ascii=False))
+    return 5
 
 
 def _log(state, args, verdict, head, failing, checks=None):

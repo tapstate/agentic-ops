@@ -9,6 +9,23 @@ from workflow import project_rules, quality, task_store
 CHECKPOINTS = ("intake", "design_review", "acceptance", "pr_review", "transition")
 
 
+def field_material(base, task, logical):
+    from workflow.quality_write import jira_field_body
+    return quality.digest([jira_field_body(base, task, logical),
+        [{k: r.get(k) for k in ("repository", "work_branch", "base_sha")} for r in task.get("repositories", [])]])
+
+
+def field_value(fields, key):
+    """区分明确空值与连接器仅返回字段 ID；不猜测未读取值。"""
+    if key in fields:
+        return True, fields[key]
+    for row in fields.get("customFields", {}).values():
+        if isinstance(row, dict) and row.get("id") == key and "value" in row:
+            return True, row["value"]
+    return False, None
+
+
+
 def config(base, task):
     root, project = project_rules.station_context(base)
     profile = project_rules.load_profile(root=root, project=project)
@@ -186,12 +203,14 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
         schema = meta.get("schema") or {"type": rule.get("value_type")}
         options = sorted(meta.get("allowedValues", []), key=lambda item: json.dumps(item, sort_keys=True))
         old = decisions.get(key, {})
-        current = fields.get(key)
+        observed, current = field_value(fields, key)
         value = proposals.get(key, current if present(current) else old.get("value"))
         dependencies = {path: get({"facts": task.get("facts", {}), "jira": fields}, path) for path in rule["depends_on"]}
         owner = {"role": rule["decision_owner"], "assignee": (fields.get("assignee") or {}).get("accountId")}
         semantic = {"field": key, "value": value, "schema": schema, "options": options, "dependencies": dependencies,
                     "owner": owner, "confirm_when": rule["confirm_when"]}
+        if due_field := (set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}):
+            semantic["material"] = {name: field_material(base, task, name) for name in sorted(due_field)}
         digest = quality.digest(semantic)
         needed = required(rule["required_when"], dict(fields, **proposals), metadata) or meta.get("required") is True
         due = CHECKPOINTS.index(rule["collect_at"]) <= CHECKPOINTS.index(checkpoint) or meta.get("required") is True
@@ -199,7 +218,7 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
                    transitions=sorted(set(rule["transitions"] + uses.get(key, []))),
                    suggestions=[{"source": path, "value": get(task, path)} for path in rule["source"] if present(get(task, path))],
                    auto_extract=rule["auto_extract"], current_jira_value=current,
-                   metadata_verified=bool(meta), valid_value=valid_value(value, schema, options))
+                   current_jira_observed=observed, metadata_verified=bool(meta), valid_value=valid_value(value, schema, options))
         if due and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
             from workflow.quality_write import jira_field_body
             for logical in rule["logical_keys"]:
@@ -208,6 +227,10 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
                     if proposal:
                         row["suggestions"] = [{"source": "plan_proposal" if logical == "issue_analysis" else "actual_verification",
                                                 "value": proposal}]
+        if due and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
+            row["publication_required"] = True
+            row["sync_status"] = "unread" if not observed else (
+                "matches_confirmed" if old.get("digest") == digest and current == value and row["valid_value"] else "needs_review")
         result["fields"][key] = row
         if key.startswith("unresolved:"):
             result["unknown"].append({"field": key, "due": due and needed, "reason": "字段 ID 未核验，不猜填；取得元数据后再确认值"})
@@ -246,8 +269,110 @@ def confirm(base, issue, run_id, checkpoint, snapshot, proposals, field_digests,
             if key.startswith("unresolved:") or key in packet["future"] or not row["valid_value"] or field_digests[key] != row["digest"]:
                 raise ValueError("字段值、选项、依赖或责任人变化，请重新收集：" + key)
             records[key] = {"digest": row["digest"], "value": copy.deepcopy(value), "proof": proof,
-                            "source_ref": snapshot["source_ref"], "checkpoint": checkpoint}
+                            "source_ref": snapshot["source_ref"], "checkpoint": checkpoint, "material": row.get("material", {}), "before_observed": row["current_jira_observed"],
+                            "before": copy.deepcopy(row["current_jira_value"])}
         if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(records, ensure_ascii=False)):
             raise ValueError("字段确认含敏感信息")
         jira_status.save_state(base, task, state)
         return collect(base, task, checkpoint, snapshot, proposals)
+
+
+def prepare_fields(base, task, checkpoint, document):
+    """固定已确认的完整字段值与写前值；原生写入仍由 Agent 执行。"""
+    from workflow import jira_status
+    packet = collect(base, task, checkpoint, document["snapshot"], document.get("proposals", {}))
+    proposals = document.get("proposals", {})
+    if not proposals or any(key not in packet["confirmed"] for key in proposals):
+        raise ValueError("先复用有效决定确认完整字段值，再准备写入")
+    state = jira_status.load_state(base, task)
+    writes = state.setdefault("field_writes", {})
+    key = document["operation_id"]
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError("字段写入必须有稳定 operation_id")
+    if key in writes:
+        if writes[key]["fields"] != proposals:
+            raise ValueError("原 operation_id 已绑定其它正文，先核对原操作")
+        return dict(writes[key], repeated=True, native_request=None)
+    if jira_status.pending_field_writes(base, task):
+        raise ValueError("已有字段写入结果未知，先回读原操作")
+    for field in proposals:
+        if not packet["fields"][field]["current_jira_observed"]:
+            raise ValueError("字段未完整读取，不能把省略值当空值覆盖：" + field)
+    for field in proposals:
+        decision = state["decisions"][field]
+        if not decision.get("before_observed"):
+            raise ValueError("原确认未读取完整字段；先合并人工内容并重新确认")
+        if decision.get("before") != packet["fields"][field]["current_jira_value"]:
+            raise ValueError("确认后远端字段已变化，先合并人工修改并重新确认")
+    record = {"status": "intent", "operation_id": key, "checkpoint": checkpoint,
+              "fields": copy.deepcopy(proposals), "before": {k: packet["fields"][k]["current_jira_value"] for k in proposals},
+              "digests": {k: packet["fields"][k]["digest"] for k in proposals},
+              "source_ref": document["snapshot"]["source_ref"]}
+    require_safe(project_rules.load_admission(station=base), record, "字段发送意图")
+    writes[key] = record
+    jira_status.save_state(base, task, state)
+    return dict(record, native_request={"issue_key": task["issue_key"], "fields": proposals})
+
+
+def readback_fields(base, task, document):
+    from workflow import jira_status
+    state = jira_status.load_state(base, task)
+    record = state.get("field_writes", {}).get(document["operation_id"])
+    if not record:
+        raise ValueError("没有原字段写入意图")
+    original = copy.deepcopy(record)
+    snapshot = document["snapshot"]
+    _, fields, _ = jira_status.issue_from(snapshot, task["issue_key"])
+    if not snapshot.get("source_ref"):
+        raise ValueError("字段回读缺少来源")
+    require_safe(project_rules.load_admission(station=base), snapshot, "字段回读")
+    if document.get("result") == "not_written":
+        evidence = snapshot.get("operation_result", {})
+        if (record["status"] != "intent" or evidence.get("operation_id") != document["operation_id"]
+                or evidence.get("effect") != "not_written" or not evidence.get("source_ref")
+                or any(not field_value(fields, key)[0] or field_value(fields, key)[1] != value
+                       for key, value in record["before"].items())):
+            raise ValueError("未写入必须有原操作明确拒绝依据及未变化的写前值，不能由未查到推断")
+        record.update(status="not_written", readback_ref=snapshot["source_ref"])
+    else:
+        if any(not field_value(fields, key)[0] or field_value(fields, key)[1] != value
+               for key, value in record["fields"].items()):
+            raise ValueError("字段回读不完整或正文不匹配；保留原意图，禁止盲目重发")
+        record.update(status="verified", readback_ref=snapshot["source_ref"])
+    jira_status.save_state(base, task, state, recovery=("field:" + document["operation_id"], original))
+    return record
+
+
+def field_sync_actions(base, task):
+    """只读投影：确认不是远端写入；代码或方案变化后重新整理全文。"""
+    from workflow import jira_status
+    _, spec = config(base, task)
+    state = jira_status.load_state(base, task)
+    writes = state.get("field_writes", {})
+    result = [{"id": "fields:" + key, "kind": "jira_fields", "status": "unknown",
+               "next_action": "readback_fields", "operation_id": key, "fields": row["fields"]}
+              for key, row in writes.items() if row["status"] == "intent"]
+    for logical in ("issue_analysis", "fix_details"):
+        rule = spec["fields"].get(logical)
+        if not rule:
+            continue
+        if logical == "issue_analysis":
+            due = bool(task.get("facts", {}).get("implementation_plan") or task.get("facts", {}).get("fix_plan"))
+        else:
+            due = task.get("stage") in ("pr_review", "ci_validation", "completed")
+            if task.get("stage") == "implementation":
+                model = quality.replay(quality.load(base, task))
+                due = any(item["plan"]["timing"] == "after_fix" and item["executions"]
+                          for item in model["items"].values()) or any(
+                              "local" in entries for entries in model.get("verification", {}).values())
+        if not due:
+            continue
+        key = rule["jira_id"]
+        decision = state.get("decisions", {}).get(key, {})
+        verified = decision.get("material", {}).get(logical) == field_material(base, task, logical) and any(row["status"] == "verified" and row["digests"].get(key) == decision.get("digest")
+                       and row["fields"].get(key) == decision.get("value") for row in writes.values())
+        if not verified and not any(key in row.get("fields", {}) for row in result):
+            result.append({"id": "field:" + key, "kind": "jira_field", "status": "deferred",
+                           "next_action": "collect", "checkpoint": rule["collect_at"], "field": key,
+                           "reason": logical + " 尚无已确认全文的写后回读；合并人工内容后同步"})
+    return result

@@ -72,6 +72,33 @@
             "test_coverage_exception_details"
           ],
           "require_quality_checkpoint": "q4-acceptance"
+        },
+        "pr_submitted": {
+          "local_stages": [
+            "ci_validation"
+          ],
+          "from": [
+            "Tests Passed"
+          ],
+          "to": "Pull Request Submitted",
+          "transition_id": "131",
+          "require_delivery": true,
+          "field_requirements": [
+            "original_pr_url",
+            "fix_versions"
+          ]
+        },
+        "merged": {
+          "local_stages": [
+            "ci_validation"
+          ],
+          "from": [
+            "Pull Request Submitted"
+          ],
+          "to": "Merged",
+          "transition_id": "291",
+          "require_delivery": true,
+          "field_requirements": []
         }
       },
       "field_mappings": {
@@ -151,6 +178,16 @@
           "collect_at": "Test Coverage 例外审批时",
           "auto_fill": false,
           "guidance": "仅在合规例外下填写无法覆盖原因、替代验证通过结论、残留风险、监控回滚及补测 Owner/期限；补不了则不得用例外绕过。"
+        },
+        "original_pr_url": {
+          "aliases": [
+            "customfield_10372"
+          ],
+          "local_sources": [
+            "repositories"
+          ],
+          "auto_fill": false,
+          "guidance": "从已回读的本任务真实 PR URL 补齐，多个仓库按实际字段格式保留全部关联；不猜地址。"
         }
       },
       "field_guidance": {
@@ -203,6 +240,33 @@
                 "fix_versions"
               ],
               "require_quality_checkpoint": "q4-acceptance"
+            },
+            "pr_submitted": {
+              "local_stages": [
+                "ci_validation"
+              ],
+              "from": [
+                "Tests Passed"
+              ],
+              "to": "Pull Request Submitted",
+              "transition_id": "91",
+              "require_delivery": true,
+              "field_requirements": []
+            },
+            "merged": {
+              "local_stages": [
+                "ci_validation"
+              ],
+              "from": [
+                "Pull Request Submitted"
+              ],
+              "to": "Merged",
+              "transition_id": "111",
+              "require_delivery": true,
+              "field_requirements": [
+                "customer_acceptance",
+                "fix_versions"
+              ]
             }
           },
           "field_mappings": {
@@ -235,6 +299,14 @@
               "collect_at": "接管前",
               "auto_fill": false,
               "guidance": "在 Jira 确认 Assignee 为实际 Engineering DRI；不能由 Agent 根据本地任务猜测或改派。"
+            },
+            "customer_acceptance": {
+              "aliases": [
+                "customfield_10414"
+              ],
+              "local_sources": [],
+              "auto_fill": false,
+              "guidance": "复用实际责任人的客户验收决定；缺失时集中请研发补齐，不能由合并或 CI 推断。"
             }
           },
           "field_guidance": {

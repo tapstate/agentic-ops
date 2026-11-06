@@ -367,6 +367,28 @@ class FourMarkerTests(unittest.TestCase):
         self.assertEqual(legacy['at'], upgraded['expected_fields']['customfield_10366'])
         self.assertIn('legacy_watermark', jira_watermark.load_state(self.base, self.task))
 
+    def test_takeover_cli_reports_missing_fields_without_requiring_a_run(self):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from workflow import task as task_cli, station
+        snapshot = self.snapshot()
+        del snapshot['issue']['fields']['customfield_10365']
+        rules = jira_watermark.config(self.base)
+        observations = jira_watermark.field_observations(snapshot, rules)
+        error = jira_watermark.FieldReadError(observations)
+        args = SimpleNamespace(explicit_branch=[], issue_key='TAP-123', task_class='defect_fix',
+            version='develop', profile='full-application', optional_repository=[], jira_input=None,
+            continuation_input=None, dir=str(self.base), operation_id='op-fixture-takeover', expected_revision=0)
+        output = io.StringIO()
+        with mock.patch.object(station, 'takeover', side_effect=error), redirect_stdout(output):
+            self.assertEqual(2, task_cli.cmd_takeover(args))
+        result = json.loads(output.getvalue())
+        self.assertEqual(['customfield_10365'], result['read_request']['fields'])
+        self.assertTrue(result['independent_read_only_allowed'])
+        self.assertNotIn('native_request', result)
+        self.assertIn('不自动打开浏览器', result['recovery'])
+
     def test_connector_explicit_null_omission_and_native_supplement(self):
         snapshot = self.snapshot()
         ids = list(snapshot['issue']['fields'])[:-1]
@@ -486,6 +508,17 @@ class FourMarkerTests(unittest.TestCase):
         self.task = task_store.read_task(self.base)
         view = external_sync.actions(self.base, self.task)
         self.assertEqual('prepare', view['takeover']['markers']['command']['action'])
+
+    def test_completed_missing_markers_do_not_offer_prepare(self):
+        from workflow import external_sync
+        self.task.update(stage='completed', outcome='completed')
+        save_station_task(self.base, self.task, ownership=False)
+        view = external_sync.actions(self.base, self.task)
+        self.assertIsNone(view['takeover']['next_step'])
+        self.assertNotIn('command', view['takeover']['markers'])
+        action = next(row for row in view['sync_actions'] if row['id'] == 'agenticops_version')
+        self.assertEqual('manual_handoff', action['next_action'])
+        self.assertNotIn('command', action)
 
     def test_terminal_readback_confirms_only_original_four_fields(self):
         record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())

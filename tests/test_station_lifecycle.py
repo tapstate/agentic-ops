@@ -505,6 +505,7 @@ class StationTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertFalse(report["advance_ready"])
             self.assertEqual(result["problems"], report["blockers"])
+            self.assertEqual("verify_merge", report["delivery_handoff"]["action"])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(3, task_cli.cmd_advance(args))
         self.assertEqual(before, task)

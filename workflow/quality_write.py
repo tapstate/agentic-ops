@@ -20,6 +20,8 @@ def checkpoint_body(model, checkpoint, rules, ctx, *, check_artifacts=True):
     view = quality.checkpoint_view(model, checkpoint, rules, ctx, check_artifacts=check_artifacts)
     if not view["reviewed"]:
         raise ValueError("检查点尚未有效确认，不能生成已确认评论")
+    if rules.get("comment_format") == "human-text-v3":
+        return collaboration_summary(model, checkpoint, rules, ctx, view)
     if rules.get("comment_format") == "human-text-v2":
         return stage_summary(model, checkpoint, rules, ctx, view)
     if rules.get("comment_format") == "human-text-v1":
@@ -131,6 +133,21 @@ def checkpoint_body(model, checkpoint, rules, ctx, *, check_artifacts=True):
 def reduce(model, command, rules, ctx, *, check_artifacts=True):
     action, p = command["action"], command["payload"]
     records = model["publications"]
+    if action == "publication_decision":
+        cp = p["checkpoint"]
+        view = quality.checkpoint_view(model, cp, rules, ctx, check_artifacts=check_artifacts)
+        if not view["reviewed"] or p["snapshot"] != snapshot(model, rules, ctx, cp, check_artifacts=check_artifacts):
+            raise ValueError("评论处置必须绑定当前有效确认")
+        if any(r["status"] in ("intent", "unknown", "created") for r in records.values()):
+            raise ValueError("检查点已有在途评论，先回读原操作")
+        publication = records.get(p.get("publication_id"))
+        if p.get("publication_id") and (not publication or publication["status"] != "verified"):
+            raise ValueError("合并评论必须先完成远端回读")
+        for record in records.values():
+            if record.get("checkpoint") == cp and record["status"] in ("draft", "confirmed", "deferred"):
+                record.update(status="not_required", reason=p["reason"], source_ref=p["source_ref"])
+        model.setdefault("publication_decisions", {})[cp] = dict(p)
+        return
     key = p["id"]
     if action == "draft":
         previous = records.get(key)
@@ -435,3 +452,36 @@ def check_unresolved_runs(base, task, body):
         old = quality.replay(state)
         if any(r["status"] in ("intent", "unknown", "created") and r["body"] == body for r in old["publications"].values()):
             raise ValueError("旧 run 仍有外部写入结果待核对；保留旧记录并人工核对 Jira，不能重新发送")
+
+
+def collaboration_summary(model, checkpoint, rules, ctx, view):
+    """提供简短事实素材；Agent 可合并成普通草稿，回读后关联多个确认。"""
+    decision = (view.get("decision") or {}).get("decision", {})
+    labels = {"accept": "已确认", "rework": "需要返工", "defer": "暂缓",
+              "not_applicable": "不适用", "accept_risk": "接受已披露风险"}
+    lines = [labels.get(decision.get("outcome"), "已核验首轮执行事实") + "：" +
+             decision.get("reason", (view.get("decision") or {}).get("reason", "详见验证依据"))]
+    for key, item in model["items"].items():
+        if key not in view["due"] and not (view.get("mode") == "automatic" and item["plan"]["timing"] == "after_fix"):
+            continue
+        plan = item["plan"]
+        executions = [e for e in item["executions"] if all(e[k] == plan[k] for k in
+                      ("case_ref", "case_version", "method", "repository", "target_revision"))]
+        last = executions[-1] if executions else {}
+        lines.append("%s：%s；依据：%s" % (plan["scope"], last.get("raw_result", "未执行"),
+                                              last.get("source_ref", plan["case_ref"])))
+        _follow_up(lines, (item.get("decision") or {}).get("decision", {}))
+    for repo, entries in sorted(model.get("verification", {}).items()):
+        for kind in rules.get("verification_checkpoints", {}).get(checkpoint, []):
+            if kind not in entries:
+                continue
+            for result in entries[kind]["data"].get("results", []):
+                lines.append("范围 %s：%s；用例/失败/错误/跳过 %s/%s/%s/%s；依据：%s" % (
+                    result["scope"], result["result"], result.get("tests", "未知"),
+                    result.get("failures", "未知"), result.get("errors", "未知"), result.get("skipped", "未知"), result["report_ref"]))
+                risk = result.get("decision") or {}
+                if risk:
+                    lines.append("覆盖限制：%s；处置：%s" % (risk.get("uncovered", result["scope"]), risk.get("reason", "待核验")))
+                    _follow_up(lines, risk)
+    _follow_up(lines, decision)
+    return "\n\n".join(lines)

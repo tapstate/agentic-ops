@@ -187,7 +187,7 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --check --scope
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --scope task --expected-plan-digest <预检digest> --decision-ref <有效用户决定来源> --materials preserved
 ```
 
-清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。Agent 先按用户已有决定推送并回读，或把唯一文件归置到可靠保全位置后重检；已保全内容不重复索要确认。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
+清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。Agent 先按用户已有决定推送并回读，或把唯一文件归置到可靠保全位置后重检；已保全内容不重复索要确认。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。实施方案确认可明确涵盖完成后的常规任务清理：保全成果、保留 config 和可复用源码，实际预检范围须与原决定一致；满足条件时 decision-ref 复用原方案确认，不再次索取同一批准。未涵盖清理、存在未知数据、需 discard、删除配置或扩大范围时集中请研发决定。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
 
 归档独立使用 `--action archive --handoff-input <材料文件>`，具体流程见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。不再提供 release 或 work-clean 生命周期入口；任务进行中的缓存清理、环境重建由对应功能处理。
 
@@ -209,7 +209,7 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --cancel --oper
 
 ## 完成预检与等待合并
 
-`task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 表示所有目标 PR 已推进 GitHub Ready for review 并回读确认，不表示已经合并。合并仍需独立明确授权。
+`task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 表示所有目标 PR 已推进 GitHub Ready for review 并回读确认，不表示已经合并。合并仍需独立明确授权。收到已合并消息后回读全部 PR 并记录当前候选交付，`next` 随现有完成预检返回 verify_merge、resolve_delivery_blockers 或 sync_jira_then_complete；completed 后返回 cleanup_preflight，不继续机械提示等待合并。先处理 Jira 字段、已映射状态和持久材料，再本地完成并预检清理。外部未知结果先回读，明确未执行的非依赖同步项如实交接；本地完成不等于 Jira 已同步。
 
 预检不写任务、处置或完成证据。`advance` 使用完成判定，清理任务不执行交付验收，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。
 

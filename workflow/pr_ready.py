@@ -184,6 +184,10 @@ def submission_status(task, packet):
 
 
 def check(base, issue_key, jira_input):
+    return check_snapshot(base, issue_key, jira_status.read_input(jira_input))
+
+
+def check_snapshot(base, issue_key, snapshot):
     from workflow import external_sync
     task = task_store.read_task(base, issue_key)
     rules = quality.config(base, task)
@@ -195,14 +199,13 @@ def check(base, issue_key, jira_input):
         context = quality.context(base, task)
         delivery_task = dict(task, repositories=[repo for repo in task.get("repositories", [])
             if not verification.unchanged_repository(context["repositories"][repo["repository"]])])
-    snapshot = jira_status.read_input(jira_input)
     source_ref = snapshot["source_ref"]
     linked_problems, linked_tests, ignored_tests = jira_tests.acceptance_tests(base, task, snapshot, rules)
     linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
     groups = {
         "linked_test_tasks": linked_problems,
         "pr_checks": ci_problems(base, delivery_task, packet),
-        "task_checks": quality_problems(base, task, rules, jira_status.read_input(jira_input)),
+        "task_checks": quality_problems(base, task, rules, snapshot),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", []), rules),
     }
@@ -230,7 +233,7 @@ def check(base, issue_key, jira_input):
             attempt = status["attempts"].get(trigger)
             if attempt and attempt.get("outcome") in ("satisfied", "succeeded"):
                 continue
-            status_todos.append("Jira %s 未确认；请根据状态同步记录和 Jira 提示人工处理" % labels[trigger])
+            status_todos.append("Jira %s 未确认；先复用已有事实补齐并预检，未知写入回读原操作，仅真实缺失决定交研发处理" % labels[trigger])
             if attempt:
                 status_todos.extend(item["guidance"] for item in attempt.get("guidance", [])
                                     if item.get("guidance"))
@@ -251,7 +254,7 @@ def check(base, issue_key, jira_input):
             "checks": {key: {"passed": not value, "problems": value} for key, value in groups.items()},
             "jira_status_todos": status_todos,
             "warnings": external_sync.warnings(base, task),
-            "next": ("全部目标 PR 已回读为 GitHub Ready for review；Jira 提审与合并仍遵循独立边界。" if ready else
+            "next": ("全部目标 PR 已回读为 GitHub Ready for review；按项目配置同步 Jira 提审，告知研发审查并合并后回来继续收尾；不自动合并。" if ready else
                      "预检通过，按有效授权原生推进剩余 PR 并回读；未知写入先回读，不重建或盲目重发。" if preflight_ready else
                      "处理上述预检问题后重新核对；尚不能报告 PR Ready。")}
 

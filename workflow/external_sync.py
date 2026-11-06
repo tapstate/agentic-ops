@@ -77,7 +77,8 @@ def existing_warnings(base, task):
     def add(kind, status, reason, reference="", run_id=None):
         result.append({"kind": kind, "status": status, "reason": reason,
                        "source_ref": reference, "run_id": run_id or task["run_id"],
-                       "recovery": "先回读定位原操作，禁止盲目重发" if status == "unknown"
+                       "recovery": "任务已完成；仅核对原操作回执，无法关联原操作的缺项交研发处理，不新增发送" if task.get("stage") == "completed"
+                       else "先回读定位原操作，禁止盲目重发" if status == "unknown"
                        else "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
 
     from workflow import jira_worklog
@@ -93,6 +94,9 @@ def existing_warnings(base, task):
                       (watermark["outcome"] == "stale" and watermark.get("readback_value") != watermark.get("version")))
         add("agenticops_version", "unknown" if unresolved else "deferred",
             watermark.get("reason", "水印未同步"), watermark.get("source_ref", ""))
+    for record in jira_status.pending_field_writes(base, task):
+        add("jira_fields:" + record["operation_id"], "unknown", "字段写入尚未回读；保留原操作",
+            record["source_ref"], record["run_id"])
     attempts = jira_status.load_state(base, task)["attempts"]
     for node, record in attempts.items():
         if (not isinstance(record, dict) or record.get("outcome") not in
@@ -116,7 +120,7 @@ def existing_warnings(base, task):
         for key, record in quality.replay(state)["publications"].items():
             if state["run_id"] != task["run_id"] and record["status"] not in ("intent", "unknown", "created"):
                 continue
-            if record["status"] != "verified":
+            if record["status"] not in ("verified", "not_required"):
                 add("comment:" + key, "unknown" if record["status"] in ("intent", "unknown", "created") else "deferred",
                     record.get("reason", "评论状态：" + record["status"]), record.get("source_ref", ""), state["run_id"])
     return result
@@ -124,6 +128,8 @@ def existing_warnings(base, task):
 
 def warnings(base, task, report=None):
     result = existing_warnings(base, task)
+    if task.get("stage") == "completed":
+        return result  # 终态只审计既有操作，不派生新的阶段同步义务。
 
     def add(kind, status, reason, reference=""):
         result.append({"kind": kind, "status": status, "reason": reason,
@@ -140,6 +146,11 @@ def warnings(base, task, report=None):
         due = ["takeover"]
         if task.get("stage") in ("ci_validation", "completed"):
             due.append("tests_passed")
+            if attempts.get("tests_passed", {}).get("outcome") in ("satisfied", "succeeded"):
+                due.append("pr_submitted")
+            if (attempts.get("pr_submitted", {}).get("outcome") in ("satisfied", "succeeded")
+                    and any(row.get("deliveries") for row in task.get("task_repositories", {}).values())):
+                due.append("merged")
         for node in due:
             if node in status_rules["attempts"] and node not in attempts:
                 add("jira_status:" + node, "deferred", "本节点尚无同步记录")
@@ -154,11 +165,11 @@ def warnings(base, task, report=None):
         return result
     report = report or quality.report(quality.load(base, task), rules, quality.context(base, task), base=base, task=task)
     intake_id = takeover_publication_id(base, task, report.get("publications", {}))
-    if (rules.get("publication_mode") == "checkpoint" and jira_watermark.config(base).get("schema_version") == 2
+    if (rules.get("publication_mode") in ("checkpoint", "collaboration") and jira_watermark.config(base).get("schema_version") == 2
             and task.get("source_prepared") and intake_id not in report.get("publications", {})):
         add("takeover_summary", "deferred", "接管待收尾：人读摘要尚未发起；先核验四项标记，再处理 takeover_comment")
     for checkpoint, view in report["checkpoints"].items():
-        if view["reviewed"] and not view["published"]:
+        if view["reviewed"] and not view["published"] and not view.get("publication_resolved"):
             add("checkpoint:" + checkpoint, "deferred", "检查点已确认，当前评论尚未回读验证")
     return result
 
@@ -217,9 +228,7 @@ def is_takeover_publication(task, key):
 def takeover_body(task, publication_id, watermark, repositories=None):
     """预检来源不等于源码已准备；旧已发布正文按原日志保留。"""
     lines = ['AgenticOps 已接管，开始处理本任务。',
-             '操作人：' + watermark['actor']['displayName'], '版本：' + watermark['version'],
-             '工位：' + watermark['expected_fields'][watermark['marker_fields']['station']],
-             '运行编号：' + task['run_id'], '', '本次确认的源码来源：']
+             '操作人：' + watermark['actor']['displayName'], '', '本次确认的源码来源：']
     if '-sources-' in publication_id:
         lines.insert(1, '源码来源更正：以下列表替代本 run 先前接管评论中的来源信息。')
     repositories = repositories if repositories is not None else task.get('engineering_baseline', {}).get('repositories', {})
@@ -263,7 +272,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                             marker.get("readback_ref") and marker.get("readback_value") == marker.get("version")))
     marker_action = "prepare" if marker.get("outcome") == "missing" or legacy_resolved else "complete"
     next_step = missing[0] if missing else None
-    return {"status": "complete" if not missing else "pending",
+    progress = {"status": "complete" if not missing else "pending",
             "label": "接管完成（基于已有回读）" if not missing else "接管待收尾",
             "issue_key": task["issue_key"], "run_id": task["run_id"],
             "steps": steps, "remaining": missing, "next_step": next_step,
@@ -284,6 +293,15 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                 "write_started": "unknown" if publication.get("status") in ("intent", "unknown") else publication.get("status", "not_attempted"),
                 "readback_requirements": ["comment_id", "body", "author_account_id", "source_ref"],
                 "recovery": "沿原 publication_id/operation_id 回读；未知结果不生成新评论"}}
+
+    if task.get("stage") == "completed":
+        progress.update(status="historical", label="任务已完成；接管记录仅供核对",
+                        next_step=None, reason="缺失历史回执不重新发起接管；仅核对原操作，无法关联的缺项交研发处理",
+                        ownership_note="本任务已完成；历史接管标记不授予新的外部写入权限")
+        progress["markers"]["recovery"] = "仅核对原标记操作回执；不补齐或重发标记"
+        if marker_action == "prepare":
+            progress["markers"].pop("command", None)
+    return progress
 
 
 def actions(base, task, report=None):
@@ -324,11 +342,16 @@ def actions(base, task, report=None):
             row["record"] = record
         result.append(row)
 
+    from workflow import jira_collect
+    for row in jira_collect.field_sync_actions(base, task):
+        if not active and row["status"] != "unknown":
+            row["next_action"] = "manual_handoff"
+        result.append(dict(row, issue_key=task["issue_key"], run_id=task["run_id"]))
     publications = report.get("publications", quality.replay(quality.load(base, task))["publications"])
     intake_id = takeover_publication_id(base, task, report.get("publications", {}))
     covered = set()
     for key, record in publications.items():
-        if record["status"] == "verified":
+        if record["status"] in ("verified", "not_required"):
             continue
         unknown = record["status"] in ("intent", "unknown", "created")
         cp = record.get("checkpoint")
@@ -355,15 +378,19 @@ def actions(base, task, report=None):
             result[-1]["next_action"] = "refresh_and_confirm" if active else "manual_handoff"
             if cp and report.get("checkpoints", {}).get(cp, {}).get("reviewed"):
                 result[-1]["body"] = report["checkpoints"][cp]["publication_body"]
-    if rules and rules.get("publication_mode") == "checkpoint":
+    if rules and rules.get("publication_mode") in ("checkpoint", "collaboration"):
         if intake_id not in publications:
             if takeover_sources(base, task) and jira_watermark.summary_ready(base, task):
                 add(intake_id, "takeover_comment", "not_attempted",
                     body=takeover_body(task, intake_id, jira_watermark.status(base, task), takeover_sources(base, task)))
         for cp, view in (report.get("checkpoints", {}) if enabled else {}).items():
-            if view["reviewed"] and not view["published"] and cp not in covered:
+            if view["reviewed"] and not view["published"] and not view.get("publication_resolved") and cp not in covered:
                 key = cp + "-" + quality.digest([task["run_id"], view["publication_body"]])[:20]
                 add(key, "checkpoint_comment", "not_attempted", body=view["publication_body"], checkpoint=cp)
+                if rules.get("publication_mode") == "collaboration":
+                    result[-1].update(kind="publication_review", next_action="assess_new_information",
+                        snapshot=view["publication_snapshot"],
+                        guidance="有新增协作信息才发布；同轮合并普通草稿，回读后用 publication_decision 关联；无新增信息记录原因和依据，不伪造已发布")
                 if any(record["status"] == "verified" and record["body"] == view["publication_body"] for record in publications.values()):
                     result[-1].update(next_action="manual_handoff", reason="相同正文已回读，但当前确认绑定变化；核对原记录，不重复发送")
     for warning in pending:
@@ -375,7 +402,7 @@ def actions(base, task, report=None):
             result[-1].update(run_id=warning["run_id"], next_action="maintenance_handoff",
                              reason="旧 run 外部结果未知；仅核对原操作，不借当前 run 发送或保存回执")
             continue
-        if kind == "takeover_summary" or kind.startswith(("checkpoint:", "comment:")):
+        if kind == "takeover_summary" or kind.startswith(("checkpoint:", "comment:", "jira_fields:")):
             continue
         add(kind, kind, warning["status"], reason=warning["reason"])
         if kind.startswith("jira_status:"):
@@ -398,12 +425,12 @@ def actions(base, task, report=None):
                 record.get("readback_ref") and record.get("readback_value") == record.get("version")))
             result[-1]["current_version_sync"] = "同一 run 保留原接管版本与时间；回执不改变原目标"
     progress = takeover_progress(base, task, publications,
-        summary_required=bool(rules) and rules.get("publication_mode") == "checkpoint"
+        summary_required=bool(rules) and rules.get("publication_mode") in ("checkpoint", "collaboration")
                          and jira_watermark.config(base).get("schema_version") == 2)
     for row in result:
         if row["kind"] == "agenticops_version" and jira_watermark.config(base).get("schema_version") == 2:
             row.update(progress["markers"])
-            if row["command"]["action"] == "prepare":
+            if "command" not in row or row["command"]["action"] == "prepare":
                 row["next_action"] = "read_fields_then_prepare" if can_prepare_markers else "manual_handoff"
             else:
                 row["next_action"] = "readback" if recovery else "manual_handoff"
@@ -425,9 +452,16 @@ def actions(base, task, report=None):
                     row["quality_command"] = {"action": action, "payload": {"id": intake_id, "digest": record["digest"]}}
                     row["required_input"] = (["proof（复用已有有效授权来源）"] if action == "confirm" else
                                              ["takeover_snapshot（同一连接最新原生标记及登录用户回读）"])
+    if task.get("stage") == "completed":
+        for row in result:
+            row["authorization"] = "仅核对原操作回执；本任务不新增外部发送"
+            if row["next_action"] not in ("readback", "readback_fields", "maintenance_handoff"):
+                row["next_action"] = "manual_handoff"
+                row["reason"] = "缺少可恢复的原操作回执；交研发核对历史缺项，本任务不补写同步"
+                row.pop("guidance", None)
     # 评论来源及正文仍在 prepare_write 检查；查询不把本地绝对路径加入对外正文。
     return {"takeover": progress, "sync_actions": result, "warnings": pending, "sync_diagnostics": [],
-            "sync_boundary": "只读待办不是写入成功；按授权原生执行并回读，未知结果不重发"}
+            "sync_boundary": "任务已完成；仅核对原操作回执，不新增发送" if task.get("stage") == "completed" else "只读待办不是写入成功；按授权原生执行并回读，未知结果不重发"}
 
 
 def safe_actions(base, task, report=None):
@@ -435,7 +469,7 @@ def safe_actions(base, task, report=None):
     try:
         return actions(base, task, report)
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
-        return {"takeover": {"status": "pending", "label": "接管待收尾", "reason": "证据未能完整读取", "independent_read_only_allowed": True}, "sync_actions": [], "sync_diagnostics": ["同步待办生成失败（%s），请运行 external_sync.py status 核查；不得重试已成功的本地变更" % type(error).__name__]}
+        return {"takeover": {"status": "historical" if task.get("stage") == "completed" else "pending", "label": "任务已完成；历史回执待核对" if task.get("stage") == "completed" else "接管待收尾", "reason": "证据未能完整读取", "independent_read_only_allowed": True}, "sync_actions": [], "sync_diagnostics": ["同步待办生成失败（%s），请运行 external_sync.py status 核查；不得重试已成功的本地变更" % type(error).__name__]}
 
 
 def main():

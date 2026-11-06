@@ -70,6 +70,22 @@ def concurrent_apply(base, run, revision, command, queue):
 from station_fixture import task_state_snapshot
 
 class QualityTests(unittest.TestCase):
+    def test_cli_summary_preserves_decisions_and_payloads_without_context(self):
+        report = quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task),
+                                quality.context(self.base, self.task), base=self.base, task=self.task)
+        report['sync_actions'] = [{'native_request': {'fields': {'customfield_1': 'exact'}},
+                                   'required_input': ['takeover_snapshot']}]
+        before = copy.deepcopy(report)
+        summary = quality.cli_report(report)
+        self.assertNotIn('context', summary)
+        self.assertEqual(report['sync_actions'], summary['sync_actions'])
+        for key, checkpoint in report['checkpoints'].items():
+            self.assertEqual(checkpoint['handoff'], summary['checkpoints'][key]['handoff'])
+            self.assertEqual(checkpoint['problems'], summary['checkpoints'][key]['problems'])
+        self.assertEqual(before, report)
+        self.assertIs(report, quality.cli_report(report, full=True))
+        self.assertLess(len(json.dumps(summary)), len(json.dumps(report)))
+
     def test_ci_confirmation_ignores_observation_history_but_binds_actual_run(self):
         latest = {"head": "a" * 40, "verdict": "success", "source": "fixture",
                   "ts": "first", "failing": [],
@@ -562,7 +578,7 @@ class QualityTests(unittest.TestCase):
         self.assertNotIn("implementation_plan", q1)
         self.checkpoint("q2-plan")
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        self.assertIn("Issue Analysis", body)
+        self.assertNotIn("实施方案：写入", body)
         for raw in ('"changes":', 'implementation_plan', '目标断言', '新增行为'):
             self.assertNotIn(raw, body)
         proposal = jira_field_body(self.base, self.task, "issue_analysis")
@@ -712,7 +728,8 @@ class QualityTests(unittest.TestCase):
         original_suggestion = packet["fields"]["customfield_example"]["suggestions"]
         self.plan(); self.select(); self.execute()
         changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, proposals)
-        self.assertEqual(["customfield_example"], changed["confirmed"])
+        self.assertEqual([], changed["confirmed"])
+        self.assertIn("customfield_example", changed["pending"])
         self.assertNotEqual(original_suggestion, changed["fields"]["customfield_example"]["suggestions"])
         updated = {"customfield_example": "人工保留：当前首轮验证 PASS，仍待最终验收。"}
         changed = jira_collect.collect(self.base, self.task, "acceptance", snapshot, updated)
@@ -955,7 +972,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(authorization.cmd_grant(args), 0)
         self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        self.assertIn("Issue Analysis", body)
+        self.assertNotIn("实施方案：写入", body)
         self.assertNotIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
         self.assertNotIn("fix_plan", self.task["facts"])
         self.execute(result="FAIL", kind="assertion")
@@ -1555,7 +1572,7 @@ class QualityTests(unittest.TestCase):
         self.automatic_checkpoint()
         for checkpoint in ("q3-draft", "q4-acceptance"):
             body = self.view()["checkpoints"][checkpoint]["publication_body"]
-            self.assertIn("结果：PASS；版本：" + "a" * 40, body)
+            self.assertIn("：PASS；依据：", body)
             self.assertIn("fixture:report/current-pass", body)
             self.assertNotIn("historical-fail", body)
             self.assertNotIn("结果：FAIL", body)
@@ -1607,8 +1624,8 @@ class QualityTests(unittest.TestCase):
     def test_checkpoint_comment_is_human_text_and_normalized_readback_checks_body(self):
         self.plan(); self.select(); self.execute(); self.automatic_checkpoint()
         body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
-        self.assertIn("记录：AO-", body)
-        self.assertIn("验证 case:case-a", body)
+        self.assertNotIn("记录：AO-", body)
+        self.assertIn("目标故障路径：PASS", body)
         self.assertNotIn('"executions":', body)
         self.apply("draft", {"id": "human", "checkpoint": "q3-draft", "body": body})
         record = self.view()["publications"]["human"]
@@ -1897,6 +1914,42 @@ class QualityTests(unittest.TestCase):
         path.unlink()
         self.assertEqual([], evidence.load_events(path))
 
+    def test_ci_budget_resumes_same_identity_and_keeps_original_result(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="84",
+            interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        checks = [{"name": "unit", "status": "IN_PROGRESS", "detailsUrl": "fixture:run/42/attempt/1"}, None, 17]
+        out = io.StringIO()
+        with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "a" * 40)), \
+             mock.patch.object(ci.time, "monotonic", side_effect=[0, 1, 2, 3]), contextlib.redirect_stdout(out):
+            self.assertEqual(5, ci.cmd_watch(args))
+        pending = json.loads(out.getvalue().splitlines()[-1])
+        self.assertEqual("pending", pending["outcome"])
+        self.assertEqual(self.task["run_id"], pending["resume"]["expected_run_id"])
+        self.assertEqual(checks[0]["detailsUrl"], pending["checks"][0]["detailsUrl"])
+        self.assertEqual(["unknown", "unknown"], [row["state"] for row in pending["checks"][1:]])
+        success = dict(checks[0], status="COMPLETED", conclusion="SUCCESS")
+        with mock.patch.object(ci, "fetch_rollup", return_value=([success], "a" * 40)):
+            self.assertEqual(0, ci.cmd_watch(args))
+        state = ci.load_state(self.base, "TAP-123", "84", args.repo)
+        self.assertEqual(["finish_timeout", "success"], [row["verdict"] for row in state["history"]])
+        self.assertEqual(checks, state["history"][0]["checks"])
+
+    def test_ci_head_change_resets_pending_age_and_unchanged_poll_is_quiet(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="85",
+            interval=1, start_timeout=300, finish_timeout=10, expected_run_id=self.task["run_id"])
+        pending = [{"name": "unit", "status": "IN_PROGRESS"}]
+        success = [{"name": "unit", "conclusion": "SUCCESS"}]
+        for rows, ticks, count in (
+            ([(pending, "a" * 40), (pending, "b" * 40), (success, "b" * 40)], [0, 1, 2, 3, 20, 21, 22, 23], 3),
+            ([(pending, "b" * 40), (pending, "b" * 40), (success, "b" * 40)], [0, 1, 2, 3, 4, 5, 6], 2)):
+            out = io.StringIO()
+            with mock.patch.object(ci, "fetch_rollup", side_effect=rows), \
+                 mock.patch.object(ci.time, "monotonic", side_effect=ticks), \
+                 mock.patch.object(ci.time, "sleep"), contextlib.redirect_stdout(out):
+                self.assertEqual(0, ci.cmd_watch(args))
+            self.assertEqual(count, sum(line.startswith("[") for line in out.getvalue().splitlines()))
+        self.assertEqual("b" * 40, ci.load_state(self.base, "TAP-123", "85", args.repo)["history"][-1]["head"])
+
     def test_ci_timeouts_use_monotonic_clock_and_keep_audit_timestamp(self):
         for pr, checks, ticks, verdict in (
                 ("81", [], [100, 401], "start_timeout"),
@@ -1908,7 +1961,7 @@ class QualityTests(unittest.TestCase):
                 sleep=mock.Mock(), strftime=mock.Mock(return_value="2026-09-21T00:00:00+0800"))
             with self.subTest(verdict=verdict), mock.patch.object(ci, "time", clock), mock.patch.object(
                     ci, "fetch_rollup", return_value=(checks, "a" * 40)):
-                self.assertEqual(3, ci.cmd_watch(args))
+                self.assertEqual(5, ci.cmd_watch(args))
             record = ci.load_state(self.base, "TAP-123", pr, args.repo)["history"][-1]
             self.assertEqual(verdict, record["verdict"])
             self.assertEqual("2026-09-21T00:00:00+0800", record["ts"])
@@ -1945,7 +1998,7 @@ class QualityTests(unittest.TestCase):
             interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         with mock.patch.object(ci, "fetch_rollup", return_value=([], "a" * 40)), mock.patch.object(
                 ci.time, "monotonic", side_effect=[10, 11]), mock.patch.object(ci.time, "sleep") as sleep:
-            self.assertEqual(3, ci.cmd_watch(args))
+            self.assertEqual(5, ci.cmd_watch(args))
             sleep.assert_not_called()
         self.assertEqual("start_timeout", ci.load_state(self.base, "TAP-123", "8", args.repo)["history"][-1]["verdict"])
 
@@ -2267,11 +2320,19 @@ class QualityTests(unittest.TestCase):
                                 case.checkpoint(point)
                             from workflow import external_sync
                             pending = external_sync.actions(case.base, case.task)['sync_actions']
-                            points = {row['checkpoint']: row for row in pending if row.get('kind') == 'checkpoint_comment'}
+                            points = {row['checkpoint']: row for row in pending if row.get('kind') in ('checkpoint_comment', 'publication_review')}
                             for point, view in case.view()['checkpoints'].items():
                                 self.assertEqual(points[point]['body'], view['publication_body'])
-                            for point in case.view()['checkpoints']:
-                                case.publish_checkpoint(point)
+                            published = {}
+                            for point, view in case.view()['checkpoints'].items():
+                                body = view['publication_body']
+                                if body not in published:
+                                    case.publish_checkpoint(point)
+                                    published[body] = point
+                                else:
+                                    case.apply('publication_decision', {'checkpoint': point,
+                                        'snapshot': view['publication_snapshot'], 'publication_id': published[body],
+                                        'reason': '同轮相同事实已经发布', 'source_ref': 'fixture:merged'})
                             self.assertFalse(any(row['kind'] == 'checkpoint_comment' for row in external_sync.actions(case.base, case.task)['sync_actions']))
                             self.assertTrue(all(v['reviewed'] for v in case.view()['checkpoints'].values()))
                         saved = quality.state_path(case.base, case.task).read_text()
@@ -2484,6 +2545,31 @@ class QualityTests(unittest.TestCase):
             'issue_key': 'TAP-123', 'comment_id': '100', 'body': body, 'source_ref': 'fixture:legacy/100'})
         self.assertEqual('verified', self.view()['publications']['legacy']['status'])
 
+    def test_publication_resolution_merges_without_claiming_unpublished_success(self):
+        from workflow import external_sync
+        self.plan(); self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        cp = 'q1-intake'
+        packet = self.view()['checkpoints'][cp]
+        self.apply('publication_decision', {'checkpoint': cp, 'snapshot': packet['publication_snapshot'],
+            'reason': '接管摘要已有相同信息，无新增结论', 'source_ref': 'fixture:takeover'})
+        view = self.view()['checkpoints'][cp]
+        self.assertTrue(view['publication_resolved']); self.assertFalse(view['published'])
+        self.assertFalse(any(r.get('checkpoint') == cp for r in external_sync.actions(self.base, self.task)['sync_actions']))
+        record = self.apply('draft', {'id': 'merged', 'body': '已确认修复错误传播；保留回退。'})['publications']['merged']
+        self.apply('confirm', {'id': 'merged', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'merged', 'digest': record['digest']})['publications']['merged']
+        cp = 'q2-plan'; packet = self.view()['checkpoints'][cp]
+        decision = {'checkpoint': cp, 'snapshot': packet['publication_snapshot'],
+            'reason': '本轮方案集中反馈', 'source_ref': 'fixture:comment', 'publication_id': 'merged'}
+        with self.assertRaisesRegex(ValueError, '先回读原操作'):
+            self.apply('publication_decision', decision)
+        self.apply('readback', {'id': 'merged', 'operation_id': record['operation_id'], 'site': record['site'],
+            'issue_key': 'TAP-123', 'comment_id': 'merged-comment', 'body': record['body'], 'source_ref': 'fixture:comment'})
+        self.apply('publication_decision', decision)
+        self.assertTrue(self.view()['checkpoints'][cp]['publication_resolved'])
+        self.task['facts']['fix_plan']['risks'].append('新增风险'); self.save_task()
+        self.assertFalse(self.view()['checkpoints'][cp]['publication_resolved'])
+
     def test_stage_summary_omits_complex_plan_but_keeps_current_results_and_risks(self):
         from workflow.quality_write import jira_field_body
         self.feature_profile()
@@ -2496,7 +2582,7 @@ class QualityTests(unittest.TestCase):
         self.assertIn('repo-19', jira_field_body(self.base, self.task, 'issue_analysis'))
         self.execute(); self.automatic_checkpoint(); self.decide(); self.checkpoint('q4-acceptance')
         q4 = self.view()['checkpoints']['q4-acceptance']['publication_body']
-        self.assertIn('Fix Details', q4); self.assertNotIn('repo-19', q4)
+        self.assertIn('PASS', q4); self.assertNotIn('repo-19', q4)
         details = jira_field_body(self.base, self.task, 'fix_details')
         self.assertIn('验收处置：验收通过', details); self.assertIn('当前处置依据）：PASS', details)
         self.assertIn('fixture:report/run-1', details)
@@ -2730,7 +2816,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.checkpoint("q3-draft")
         body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
         self.assertIn("范围 feature.py:value", body)
-        self.assertIn("用例/失败/错误/跳过计数 1/0/0/0", body)
+        self.assertIn("用例/失败/错误/跳过 1/0/0/0", body)
         self.cli("task.py", "advance", "--note", "首轮验证完成")
         self.cli("task.py", "advance", "--note", "缺少人工验收", expected=3)
         self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
@@ -2795,8 +2881,66 @@ class FeatureFlowTests(unittest.TestCase):
         self.publish_summary()
         self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
+        if self.task_class == "feature_change":
+            from workflow import jira_status, station
+            doc = json.loads(snapshot.read_text())
+            ready_path = task_store.interaction_path(self.ws, "TAP-123", run, "pr-ready-input.json")
+            packet = json.loads(ready_path.read_text())
+            self.assertFalse(jira_status.delivery_ready(self.ws, self.read(), "pr_submitted", doc)[0])
+            packet["pull_requests"][0]["isDraft"] = False
+            ready_path.write_text(json.dumps(packet))
+            self.assertTrue(jira_status.delivery_ready(self.ws, self.read(), "pr_submitted", doc)[0])
+            doc["transitions"] = [{"id": "91", "to": {"name": "Pull Request Submitted"}, "fields": {}}]
+            prepared = jira_status.prepare(self.ws, "TAP-123", "pr_submitted", doc, "op-fixture-submit")
+            self.assertEqual("ready", prepared["outcome"], prepared)
+            # 无关的早期字段不重复确认，当前表单仍完整回读。
+            self.assertEqual([], prepared["blocking_fields"])
+            doc["issue"]["fields"]["status"]["name"] = "Pull Request Submitted"
+            jira_status.complete(self.ws, "TAP-123", "pr_submitted", "unknown", doc, "", "op-fixture-submit")
+            self.assertFalse(jira_status.delivery_ready(self.ws, self.read(), "merged", doc)[0])
+            self.apply("verification", {"kind": "review", "repository": self.repo, "target_revision": head,
+                "source_ref": "fixture:all-review-pages", "complete": True, "items": []})
+            self.checkpoint("q5-review"); self.checkpoint("q6-delivery")
+            # 实际本地 Git 合并，外部 PR 快照仅模拟传输；不模拟通过完成门禁。
+            self.git("-C", str(self.seed), "fetch", str(worktree), head)
+            self.git("-C", str(self.seed), "merge", "--no-ff", "--no-edit", "FETCH_HEAD")
+            merged = self.git("-C", str(self.seed), "rev-parse", "HEAD")
+            delivery = {"repository": self.repo, "pr": "1", "target_branch": "develop",
+                "candidate_head": head, "pr_head": head, "merged_at": self.proof()["at"],
+                "merge_commit": merged, "readback_ref": "fixture:merged-pr"}
+            delivery_path = Path(self.cli("task.py", "interaction-path", "--name", "delivery.json").strip())
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            ready, problems = jira_status.delivery_ready(self.ws, self.read(), "merged", doc)
+            self.assertTrue(ready, problems)
+            next_result = json.loads(self.cli("task.py", "next", mutation=False))
+            self.assertTrue(next_result['advance_ready'], next_result['blockers'])
+            self.assertEqual("sync_jira_then_complete", next_result['delivery_handoff']['action'])
+            doc["transitions"] = [{"id": "111", "to": {"name": "Merged"}, "fields": {
+                "customfield_10414": {"name": "Customer Requirement Acceptance", "required": False,
+                                      "schema": {"type": "option"}}}}]
+            missing_decision = jira_status.prepare(self.ws, "TAP-123", "merged", doc, "op-fixture-merged")
+            self.assertEqual("decision_inputs_pending", missing_decision["reason"])
+            self.assertIn("customfield_10414", missing_decision["blocking_fields"])
+            # Jira 已到目标也不能替代当前候选合并核验。
+            doc["issue"]["fields"]["status"]["name"] = "Merged"
+            delivery['pr_head'] = 'c' * 40
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            bad = jira_status.prepare(self.ws, "TAP-123", "merged", doc, "op-fixture-newhead")
+            self.assertEqual("delivery_not_verified", bad['reason'])
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
+        if self.task_class == "feature_change":
+            self.git("-C", str(worktree), "checkout", "--", "feature.py")
+            delivery['pr_head'] = head
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            self.cli("task.py", "advance", "--note", "fixture:合并核验完成，Jira 审批缺项保留交接")
+            final = json.loads(self.cli("task.py", "next", mutation=False))
+            self.assertEqual("completed", final['stage'])
+            self.assertEqual("cleanup_preflight", final['delivery_handoff']['action'])
+            self.assertNotIn("等待合并", final['guidance'])
 
 
 
@@ -3431,6 +3575,38 @@ class SyncRecoveryTests(unittest.TestCase):
             "site": record["site"], "issue_key": "TAP-123", "comment_id": "123",
             "body": record["body"], "source_ref": "fixture:jira/comment/123"})
 
+    def test_completed_sync_display_preserves_receipt_without_new_sync_guidance(self):
+        from workflow import external_sync
+        record = self.publication()
+        self.task['facts']['fix_plan'] = '已有方案'
+        self.terminal()
+        before = task_state_snapshot(self.base)
+        view = external_sync.actions(self.base, self.task)
+        self.assertIsNone(view['takeover']['next_step'])
+        self.assertEqual('historical', view['takeover']['status'])
+        action = next(row for row in view['sync_actions'] if row['id'] == 'summary')
+        self.assertEqual('readback', action['next_action'])
+        self.assertEqual(record['operation_id'], action['record']['operation_id'])
+        self.assertEqual(record['body'], action['record']['body'])
+        fields = [row for row in view['sync_actions'] if row['kind'] == 'jira_field']
+        self.assertTrue(fields)
+        self.assertTrue(all(row['next_action'] == 'manual_handoff' for row in fields))
+        text = json.dumps(view, ensure_ascii=False)
+        for misleading in ('接管待收尾', '合并人工内容后同步', '按已有授权补写', '下次阶段同步'):
+            self.assertNotIn(misleading, text)
+        self.assertEqual(before, task_state_snapshot(self.base))
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+
+    def test_completed_sync_failure_does_not_restart_takeover(self):
+        from workflow import external_sync
+        self.terminal()
+        with mock.patch.object(external_sync, 'actions', side_effect=ValueError('损坏')):
+            view = external_sync.safe_actions(self.base, self.task)
+        self.assertEqual('historical', view['takeover']['status'])
+        self.assertNotIn('接管待收尾', view['takeover']['label'])
+        self.assertEqual([], view['sync_actions'])
+        self.assertTrue(view['sync_diagnostics'])
+
     def test_completed_receipt_only_preserves_task_and_authorization(self):
         record = self.publication()
         self.terminal()
@@ -3629,10 +3805,9 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual(marker_id, progress['markers']['operation_id'])
         self.assertEqual(row['body'], row['draft_command']['payload']['body'])
         self.assertEqual('not_attempted', row['status'])
-        for text in ('版本：v1.fixture', '操作人：当前登录研发', '工位：',
-                     self.task['run_id'], '本次确认的源码来源：', 'tapdata/tapdata：develop'):
+        for text in ('操作人：当前登录研发', '本次确认的源码来源：', 'tapdata/tapdata：develop'):
             self.assertIn(text, row['body'])
-        for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', str(self.base)):
+        for text in ('测试研发', '任务级资源监控', 'test-fixture', '记录：', '工位：', self.task['run_id'], str(self.base)):
             self.assertNotIn(text, row['body'])
         self.assertEqual(report, self.view())
         self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])

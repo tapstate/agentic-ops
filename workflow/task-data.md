@@ -37,3 +37,8 @@ Agent 先从原合同、Jira 决定、Git 和项目材料核实差异。当前�
 所属模块为 `workflow.jira_ownership`，复用四项标记记录的可选 `ownership` 对象保存 Jira site、issue_id 和本地 session_id；仅同一会话的最新成功回读允许继续依赖归属的写入，历史 verified_ref 不能代替当前归属。标记缺失、残缺、异主或身份变化时保留原写入意图并撤销当前证明，原生回读及人工交接通过标记模块接续，不经 task data apply 修改。
 
 旧信封的 jira_coordination 保留原 entries/proof 格式；retire 只在核实旧执行者停写及未知写入结果后追加 retired 依据并清除旧 proof。旧 entries 不再赋予执行权，不生成新协调评论；未知意图未核实前不能清理。归属、评论、状态同步分别使用原模块回执，不增加统一持久状态机。
+
+
+## Jira 协作回写依赖
+
+字段发送意图由 jira_collect/jira_status 拥有，复用原 jira-status 文件的可选 field_writes，保存原全文、写前值、确认摘要及回读；无此键表示未登记，不能推断远端为空或已同步。评论评估通过原质量事件中的 publication_decision 保存，绑定有效确认快照与理由；publication_id 可关联原已核验评论，不存在时表示无需新增评论，不是发布成功。旧事件按事件内规则重放，原在途正文不改写；不理解新动作的旧版不能重放新日志，回退前先核实兼容性和在途材料，不手改 epoch 或状态。材料属于执行恢复证据，沿原同步、归档和清理保全；未知字段写入纳入已有未知操作检查，不建新台账。

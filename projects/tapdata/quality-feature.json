@@ -12,8 +12,8 @@
     "scope_boundary"
   ],
   "structured_fix_plan": false,
-  "publication_mode": "checkpoint",
-  "comment_format": "human-text-v2",
+  "publication_mode": "collaboration",
+  "comment_format": "human-text-v3",
   "task_classes": [
     "feature_change"
   ],

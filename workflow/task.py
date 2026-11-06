@@ -97,7 +97,7 @@ def takeover_overrides(values):
 
 
 def cmd_takeover(args):
-    from workflow import station
+    from workflow import station, jira_watermark
     overrides = takeover_overrides(args.explicit_branch)
     request = {"issue_key": args.issue_key, "task_class": args.task_class, "version": args.version,
                "profile": args.profile, "optional_repositories": args.optional_repository,
@@ -106,7 +106,11 @@ def cmd_takeover(args):
         request["jira_snapshot"] = json.loads(Path(args.jira_input).read_text(encoding="utf-8"))
     if args.continuation_input:
         request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
-    result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
+    try:
+        result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
+    except jira_watermark.FieldReadError as error:
+        print(json.dumps(error.diagnostic(args.issue_key), ensure_ascii=False, indent=2))
+        return 2
     from workflow import external_sync
     current = task_store.read_task(args.dir)
     print(json.dumps(dict(operation_summary(result), **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
@@ -604,8 +608,8 @@ NEXT_GUIDE = {
     "design_review": "基于 source 完整工程形成方案 -> 新任务 source-readiness 核验仓库及目标分支 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
     "implementation": "在授权范围内实现和验证，按项目规则核对实际证据；继续已授权的提交、推送和 Draft PR，汇总外部同步警告",
     "pr_review": "按项目规则完成用例验收与代码审查，核对 next 返回的阻塞项后 advance",
-    "ci_validation": "回读当前 PR Head 的 CI、审查和验收事实；满足项目交付条件后等待另行授权合并，回读合并事实再 completed",
-    "completed": "生成脱敏任务总结并核实持久成果；按 cleanup-plan 确认后清理任务；归档和 Jira 同步独立回读",
+    "ci_validation": "回读当前 PR Head 的 CI、审查和验收事实；按完成预检接续合并回读、Jira 同步与本地收尾",
+    "completed": "核实持久成果并预检任务清理；原方案已明确覆盖且范围一致时复用决定，未知数据或范围扩大再确认",
 }
 
 
@@ -638,6 +642,19 @@ def _print_next(task, base):
     for warning in warnings:
         print("提示：" + warning)
     print("项目启用 recorded_decision 时，使用 quality.py status/apply 核对用例和用户处置；文本 verification 不代表通过。")
+
+
+def delivery_handoff(task, blockers):
+    """根据现有完成预检给接续动作；不推断远端事实或签发清理授权。"""
+    if task["stage"] == "completed":
+        return {"action": "cleanup_preflight", "guidance": "本地已完成；核实持久成果并执行 task 范围清理预检。原方案已明确授权且实际范围一致时复用决定；保留 config 和可复用源码，未知数据或范围扩大先集中确认。"}
+    if task["stage"] != "ci_validation":
+        return None
+    if any("awaiting_merge" in str(problem) for problem in blockers):
+        return {"action": "verify_merge", "guidance": "先回读全部目标 PR，沿 ci.py watch / pr_ready.py 核对当前候选；仍待合并且已 Ready 时告知研发审查、合并后回来继续。收到合并消息后核验当前 Head、目标分支和合并提交，记录 delivery，再补齐 Jira 与本地完成；不自动合并。"}
+    if blockers:
+        return {"action": "resolve_delivery_blockers", "guidance": "按全部完成缺项复用或补齐当前候选证据；Agent 可处理的继续执行，只集中交接缺失的真实事实、权限或人工决定。"}
+    return {"action": "sync_jira_then_complete", "guidance": "完成预检通过；先按实时 Jira 状态顺序补齐字段和已配置转换并回读，处理同步待办，再 advance completed 并执行 task 清理预检。未知写入先恢复原操作；本地完成与 Jira 结果分别报告。"}
 
 
 def cmd_next(args):
@@ -676,6 +693,10 @@ def cmd_next(args):
                       **external_sync.safe_actions(args.dir, task, current),
                       "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"}
     strategy = _strategy_payload(args.dir, task)
+    handoff = delivery_handoff(task, blockers)
+    if handoff:
+        payload["delivery_handoff"] = handoff
+        payload["guidance"] = handoff["guidance"]
     if task.get("task_class") == repair_strategy.TASK_CLASS:
         payload["repair_strategy"] = strategy
     print(json.dumps(payload, ensure_ascii=False, indent=2))
