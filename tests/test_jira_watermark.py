@@ -509,6 +509,17 @@ class FourMarkerTests(unittest.TestCase):
         view = external_sync.actions(self.base, self.task)
         self.assertEqual('prepare', view['takeover']['markers']['command']['action'])
 
+    def test_completed_missing_markers_do_not_offer_prepare(self):
+        from workflow import external_sync
+        self.task.update(stage='completed', outcome='completed')
+        save_station_task(self.base, self.task, ownership=False)
+        view = external_sync.actions(self.base, self.task)
+        self.assertIsNone(view['takeover']['next_step'])
+        self.assertNotIn('command', view['takeover']['markers'])
+        action = next(row for row in view['sync_actions'] if row['id'] == 'agenticops_version')
+        self.assertEqual('manual_handoff', action['next_action'])
+        self.assertNotIn('command', action)
+
     def test_terminal_readback_confirms_only_original_four_fields(self):
         record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
         self.task.update(stage='completed', outcome='completed')

@@ -3575,6 +3575,38 @@ class SyncRecoveryTests(unittest.TestCase):
             "site": record["site"], "issue_key": "TAP-123", "comment_id": "123",
             "body": record["body"], "source_ref": "fixture:jira/comment/123"})
 
+    def test_completed_sync_display_preserves_receipt_without_new_sync_guidance(self):
+        from workflow import external_sync
+        record = self.publication()
+        self.task['facts']['fix_plan'] = '已有方案'
+        self.terminal()
+        before = task_state_snapshot(self.base)
+        view = external_sync.actions(self.base, self.task)
+        self.assertIsNone(view['takeover']['next_step'])
+        self.assertEqual('historical', view['takeover']['status'])
+        action = next(row for row in view['sync_actions'] if row['id'] == 'summary')
+        self.assertEqual('readback', action['next_action'])
+        self.assertEqual(record['operation_id'], action['record']['operation_id'])
+        self.assertEqual(record['body'], action['record']['body'])
+        fields = [row for row in view['sync_actions'] if row['kind'] == 'jira_field']
+        self.assertTrue(fields)
+        self.assertTrue(all(row['next_action'] == 'manual_handoff' for row in fields))
+        text = json.dumps(view, ensure_ascii=False)
+        for misleading in ('接管待收尾', '合并人工内容后同步', '按已有授权补写', '下次阶段同步'):
+            self.assertNotIn(misleading, text)
+        self.assertEqual(before, task_state_snapshot(self.base))
+        self.assertEqual('verified', self.readback(record)['publications']['summary']['status'])
+
+    def test_completed_sync_failure_does_not_restart_takeover(self):
+        from workflow import external_sync
+        self.terminal()
+        with mock.patch.object(external_sync, 'actions', side_effect=ValueError('损坏')):
+            view = external_sync.safe_actions(self.base, self.task)
+        self.assertEqual('historical', view['takeover']['status'])
+        self.assertNotIn('接管待收尾', view['takeover']['label'])
+        self.assertEqual([], view['sync_actions'])
+        self.assertTrue(view['sync_diagnostics'])
+
     def test_completed_receipt_only_preserves_task_and_authorization(self):
         record = self.publication()
         self.terminal()

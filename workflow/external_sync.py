@@ -77,7 +77,8 @@ def existing_warnings(base, task):
     def add(kind, status, reason, reference="", run_id=None):
         result.append({"kind": kind, "status": status, "reason": reason,
                        "source_ref": reference, "run_id": run_id or task["run_id"],
-                       "recovery": "先回读定位原操作，禁止盲目重发" if status == "unknown"
+                       "recovery": "任务已完成；仅核对原操作回执，无法关联原操作的缺项交研发处理，不新增发送" if task.get("stage") == "completed"
+                       else "先回读定位原操作，禁止盲目重发" if status == "unknown"
                        else "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
 
     from workflow import jira_worklog
@@ -127,6 +128,8 @@ def existing_warnings(base, task):
 
 def warnings(base, task, report=None):
     result = existing_warnings(base, task)
+    if task.get("stage") == "completed":
+        return result  # 终态只审计既有操作，不派生新的阶段同步义务。
 
     def add(kind, status, reason, reference=""):
         result.append({"kind": kind, "status": status, "reason": reason,
@@ -269,7 +272,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                             marker.get("readback_ref") and marker.get("readback_value") == marker.get("version")))
     marker_action = "prepare" if marker.get("outcome") == "missing" or legacy_resolved else "complete"
     next_step = missing[0] if missing else None
-    return {"status": "complete" if not missing else "pending",
+    progress = {"status": "complete" if not missing else "pending",
             "label": "接管完成（基于已有回读）" if not missing else "接管待收尾",
             "issue_key": task["issue_key"], "run_id": task["run_id"],
             "steps": steps, "remaining": missing, "next_step": next_step,
@@ -290,6 +293,15 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                 "write_started": "unknown" if publication.get("status") in ("intent", "unknown") else publication.get("status", "not_attempted"),
                 "readback_requirements": ["comment_id", "body", "author_account_id", "source_ref"],
                 "recovery": "沿原 publication_id/operation_id 回读；未知结果不生成新评论"}}
+
+    if task.get("stage") == "completed":
+        progress.update(status="historical", label="任务已完成；接管记录仅供核对",
+                        next_step=None, reason="缺失历史回执不重新发起接管；仅核对原操作，无法关联的缺项交研发处理",
+                        ownership_note="本任务已完成；历史接管标记不授予新的外部写入权限")
+        progress["markers"]["recovery"] = "仅核对原标记操作回执；不补齐或重发标记"
+        if marker_action == "prepare":
+            progress["markers"].pop("command", None)
+    return progress
 
 
 def actions(base, task, report=None):
@@ -418,7 +430,7 @@ def actions(base, task, report=None):
     for row in result:
         if row["kind"] == "agenticops_version" and jira_watermark.config(base).get("schema_version") == 2:
             row.update(progress["markers"])
-            if row["command"]["action"] == "prepare":
+            if "command" not in row or row["command"]["action"] == "prepare":
                 row["next_action"] = "read_fields_then_prepare" if can_prepare_markers else "manual_handoff"
             else:
                 row["next_action"] = "readback" if recovery else "manual_handoff"
@@ -440,9 +452,16 @@ def actions(base, task, report=None):
                     row["quality_command"] = {"action": action, "payload": {"id": intake_id, "digest": record["digest"]}}
                     row["required_input"] = (["proof（复用已有有效授权来源）"] if action == "confirm" else
                                              ["takeover_snapshot（同一连接最新原生标记及登录用户回读）"])
+    if task.get("stage") == "completed":
+        for row in result:
+            row["authorization"] = "仅核对原操作回执；本任务不新增外部发送"
+            if row["next_action"] not in ("readback", "readback_fields", "maintenance_handoff"):
+                row["next_action"] = "manual_handoff"
+                row["reason"] = "缺少可恢复的原操作回执；交研发核对历史缺项，本任务不补写同步"
+                row.pop("guidance", None)
     # 评论来源及正文仍在 prepare_write 检查；查询不把本地绝对路径加入对外正文。
     return {"takeover": progress, "sync_actions": result, "warnings": pending, "sync_diagnostics": [],
-            "sync_boundary": "只读待办不是写入成功；按授权原生执行并回读，未知结果不重发"}
+            "sync_boundary": "任务已完成；仅核对原操作回执，不新增发送" if task.get("stage") == "completed" else "只读待办不是写入成功；按授权原生执行并回读，未知结果不重发"}
 
 
 def safe_actions(base, task, report=None):
@@ -450,7 +469,7 @@ def safe_actions(base, task, report=None):
     try:
         return actions(base, task, report)
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
-        return {"takeover": {"status": "pending", "label": "接管待收尾", "reason": "证据未能完整读取", "independent_read_only_allowed": True}, "sync_actions": [], "sync_diagnostics": ["同步待办生成失败（%s），请运行 external_sync.py status 核查；不得重试已成功的本地变更" % type(error).__name__]}
+        return {"takeover": {"status": "historical" if task.get("stage") == "completed" else "pending", "label": "任务已完成；历史回执待核对" if task.get("stage") == "completed" else "接管待收尾", "reason": "证据未能完整读取", "independent_read_only_allowed": True}, "sync_actions": [], "sync_diagnostics": ["同步待办生成失败（%s），请运行 external_sync.py status 核查；不得重试已成功的本地变更" % type(error).__name__]}
 
 
 def main():
