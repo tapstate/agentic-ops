@@ -1,5 +1,7 @@
 # 质量检查与证据
 
+quality.py 的 status/apply 默认省略完整 context、方法定义和历史发布正文／快照，保留检查项、确认交接、阻塞及精确下一动作；使用 `status --full` 查看完整报告。内部判定、事件和写入载荷不变。程序消费完整报告时显式使用 `--full`，不得重试已成功 apply 只为获取详情。
+
 ## 接管摘要发布与回读
 
 接管准备成功后，先按下述四项标记流程写入并回读，再从 `external_sync.py status` 获取 `takeover_comment`。摘要只包含当前 Jira 登录用户显示名和已确认的源码来源列表，并明确源码准备状态；版本、工位和 run 保留在四项接管字段，不重复进入正文。操作人保存 accountId 供核对，不使用 Jira Assignee、系统登录名或 Agent 应用用户名；Jira Cloud 返回的 displayName 用于显示。Tag/SHA 基线明确显示“无分支（Tag／SHA：…）”，不把临时检出分支或后续工作分支当作来源分支。内部发布编号不进入评论正文。
@@ -21,7 +23,7 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 字段读取接受原生 `issue.fields[field_id]`，或连接器 `issue.fields.customFields` 中以 `id` 定位且显式包含 `value` 的条目。`value` 为字符串表示有值，显式 null 表示已确认空；条目只有 id、字段省略均为 `unreturned`，明确 401/403 为 `forbidden`。不能从可编辑 metadata、allowedValues 或字段名存在推断空值。读失败返回 `field_observations` 和恢复要求，不创建可发送载荷；已有 verified 标记再次回读不可读时恢复为 unknown，禁止沿旧结论发送摘要。
 
-先按输出 `takeover.markers.read_request.fields` 用同一连接显式补查。连接器仍省略值时，可经已授权原生 REST 或其它能保留实际字段值的原生读取取得原响应，保留初始响应并在输入增加 `field_readbacks`，而非把人工猜测写进原生快照。每条补查绑定 issue_key、field_id、source_ref、http_status；200 携带实际 issue.key/fields，401/403 只记录不可读。程序核对身份和显式字段值，不认证来源；Agent 必须实际读取证据。没有可用原生补查能力时保留待办，继续独立分析。
+新接管尚无 run 时也返回 field_observations、read_request 和可继续范围，不为诊断创建任务占用。先按输出 `read_request.fields` 或 `takeover.markers.read_request.fields` 用同一 MCP 连接显式补查；多个字段可一次读取。相同方式、参数和缺失结果不重复查询，不以切换输出视图、metadata 或 changelog 猜空值。401/403 先处理认证／权限，浏览器不作为自动兜底。连接器仍省略值时，可经已授权原生 REST 或其它能保留实际字段值的原生读取取得原响应，保留初始响应并在输入增加 `field_readbacks`，而非把人工猜测写进原生快照。每条补查绑定 issue_key、field_id、source_ref、http_status；200 携带实际 issue.key/fields，401/403 只记录不可读。程序核对身份和显式字段值，不认证来源；Agent 必须实际读取证据。没有可用原生补查能力时保留待办，继续独立分析。
 
 ```json
 {

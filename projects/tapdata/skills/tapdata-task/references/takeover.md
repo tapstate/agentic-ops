@@ -1,5 +1,7 @@
 ## 接管与恢复
 
+首次需要 Jira 时按工位入口检查 Atlassian MCP，未安装／未启用／未登录就提示对应入口，仅暂停依赖步骤。优先 MCP；字段省略按[四项接管标记](../../../../../docs/usage/quality-checkpoints.md#四项接管标记)有限补查，不自动转浏览器、不反复安装不同名称的插件。正常流程只读取当前动作章节及返回的 next_step/required_input；已有输出可接续就不重复 status，不默认 context --full 或阅读 Workflow 实现。
+
 新接管预检通过后，TapData 项目入口会尝试更新已安装的 DBForge CLI；首次实际使用由共享 [ao-dbforge](../../../../../skills/shared/ao-dbforge/SKILL.md) 安装和配置。未安装、更新失败或 token 尚未填写不阻塞无依赖的接管工作；读取本次返回结果，不重复更新。原 run、同一在途操作恢复和分支更正不触发这项工具更新。
 
 接管前、恢复及每个新工作段先按[归属合同](../../../../../docs/architecture/single-task-station.md#jira-任务级接管协调与授权)原生读取 Jira 站点、任务 ID、当前用户与四项标记。完整分支预检和 run/op 持久化后，重新读取归属并写四项标记、回读接管评论，紧接着处理项目状态同步，再恢复源码准备；不再发协调评论或报活。异主先核实人工交接、旧执行者停写和在途操作。旧协调记录用 coordination status/retire 核验退出；清理不清空远端标记。旧安装按实际合同，不手改状态迁移。

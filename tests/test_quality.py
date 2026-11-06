@@ -70,6 +70,22 @@ def concurrent_apply(base, run, revision, command, queue):
 from station_fixture import task_state_snapshot
 
 class QualityTests(unittest.TestCase):
+    def test_cli_summary_preserves_decisions_and_payloads_without_context(self):
+        report = quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task),
+                                quality.context(self.base, self.task), base=self.base, task=self.task)
+        report['sync_actions'] = [{'native_request': {'fields': {'customfield_1': 'exact'}},
+                                   'required_input': ['takeover_snapshot']}]
+        before = copy.deepcopy(report)
+        summary = quality.cli_report(report)
+        self.assertNotIn('context', summary)
+        self.assertEqual(report['sync_actions'], summary['sync_actions'])
+        for key, checkpoint in report['checkpoints'].items():
+            self.assertEqual(checkpoint['handoff'], summary['checkpoints'][key]['handoff'])
+            self.assertEqual(checkpoint['problems'], summary['checkpoints'][key]['problems'])
+        self.assertEqual(before, report)
+        self.assertIs(report, quality.cli_report(report, full=True))
+        self.assertLess(len(json.dumps(summary)), len(json.dumps(report)))
+
     def test_ci_confirmation_ignores_observation_history_but_binds_actual_run(self):
         latest = {"head": "a" * 40, "verdict": "success", "source": "fixture",
                   "ts": "first", "failing": [],

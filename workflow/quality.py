@@ -981,6 +981,22 @@ def advance_problems(base, task, target):
     return problems
 
 
+def cli_report(result, *, full=False):
+    """只压缩展示，不修改判定、证据或待执行载荷。"""
+    if full or "context" not in result:
+        return result
+    view = {key: value for key, value in result.items() if key not in ("context", "methods")}
+    view["checkpoints"] = {key: {name: value for name, value in row.items()
+        if name not in ("publication_body", "publication_snapshot")}
+        for key, row in result.get("checkpoints", {}).items()}
+    view["publications"] = {key: {name: value for name, value in row.items()
+        if name not in ("body", "snapshot")}
+        for key, row in result.get("publications", {}).items()}
+    view["details"] = {"command": "quality.py status --full", "issue_key": result["issue_key"],
+                       "run_id": result["run_id"], "omitted": ["context", "methods", "publication bodies/snapshots"]}
+    return view
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("status", "review", "apply", "validate"))
@@ -989,6 +1005,7 @@ def main():
     parser.add_argument("--input")
     parser.add_argument("--expected-run-id")
     parser.add_argument("--expected-revision", type=int)
+    parser.add_argument("--full", action="store_true", help="展开完整上下文及历史发布正文；默认保留检查点、阻塞和下一动作")
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -1016,7 +1033,7 @@ def main():
                 result = report(load(args.dir, task), rules, context(args.dir, task), base=args.dir, task=task)
             from workflow import external_sync
             result.update(external_sync.safe_actions(args.dir, task, result if args.command == "status" else None))
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(cli_report(result, full=args.full), ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
         print("质量记录失败：%s" % error, file=sys.stderr)

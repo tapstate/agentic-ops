@@ -97,7 +97,7 @@ def takeover_overrides(values):
 
 
 def cmd_takeover(args):
-    from workflow import station
+    from workflow import station, jira_watermark
     overrides = takeover_overrides(args.explicit_branch)
     request = {"issue_key": args.issue_key, "task_class": args.task_class, "version": args.version,
                "profile": args.profile, "optional_repositories": args.optional_repository,
@@ -106,7 +106,11 @@ def cmd_takeover(args):
         request["jira_snapshot"] = json.loads(Path(args.jira_input).read_text(encoding="utf-8"))
     if args.continuation_input:
         request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
-    result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
+    try:
+        result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
+    except jira_watermark.FieldReadError as error:
+        print(json.dumps(error.diagnostic(args.issue_key), ensure_ascii=False, indent=2))
+        return 2
     from workflow import external_sync
     current = task_store.read_task(args.dir)
     print(json.dumps(dict(operation_summary(result), **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))

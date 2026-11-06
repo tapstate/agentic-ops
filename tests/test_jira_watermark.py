@@ -367,6 +367,28 @@ class FourMarkerTests(unittest.TestCase):
         self.assertEqual(legacy['at'], upgraded['expected_fields']['customfield_10366'])
         self.assertIn('legacy_watermark', jira_watermark.load_state(self.base, self.task))
 
+    def test_takeover_cli_reports_missing_fields_without_requiring_a_run(self):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from workflow import task as task_cli, station
+        snapshot = self.snapshot()
+        del snapshot['issue']['fields']['customfield_10365']
+        rules = jira_watermark.config(self.base)
+        observations = jira_watermark.field_observations(snapshot, rules)
+        error = jira_watermark.FieldReadError(observations)
+        args = SimpleNamespace(explicit_branch=[], issue_key='TAP-123', task_class='defect_fix',
+            version='develop', profile='full-application', optional_repository=[], jira_input=None,
+            continuation_input=None, dir=str(self.base), operation_id='op-fixture-takeover', expected_revision=0)
+        output = io.StringIO()
+        with mock.patch.object(station, 'takeover', side_effect=error), redirect_stdout(output):
+            self.assertEqual(2, task_cli.cmd_takeover(args))
+        result = json.loads(output.getvalue())
+        self.assertEqual(['customfield_10365'], result['read_request']['fields'])
+        self.assertTrue(result['independent_read_only_allowed'])
+        self.assertNotIn('native_request', result)
+        self.assertIn('不自动打开浏览器', result['recovery'])
+
     def test_connector_explicit_null_omission_and_native_supplement(self):
         snapshot = self.snapshot()
         ids = list(snapshot['issue']['fields'])[:-1]

@@ -112,6 +112,14 @@ class FieldReadError(ValueError):
         self.observations = observations
         super().__init__("Jira 四项接管字段回读不完整；缺字段或无权限不能视为空值")
 
+    def diagnostic(self, issue_key):
+        return {"error": str(self), "issue_key": issue_key,
+                "field_observations": self.observations,
+                "read_request": {"issue_key": issue_key, "fields": [key for key, row in self.observations.items()
+                    if row["state"] == "unreturned"]},
+                "independent_read_only_allowed": True,
+                "recovery": "同一 MCP 连接显式补查缺失字段；相同结果不重复查询。401/403 处理权限。仍省略时仅使用已授权且保留原值的原生补查 field_readbacks；无能力则暂停依赖写入，不猜 null、不自动打开浏览器。"}
+
 
 def marker_values(fields, rules, snapshot=None):
     snapshot = snapshot or {"issue": {"key": "observation", "fields": dict(fields, issuetype={"id": "observation"})}}
@@ -563,8 +571,7 @@ def main():
     except FieldReadError as error:
         from workflow import external_sync
         result = external_sync.safe_actions(args.dir, task_store.read_task(args.dir, issue_key))
-        result.update(field_observations=error.observations, error=str(error),
-                      recovery="用同一连接显式读取所列字段；连接器仍省略时提供 field_readbacks 原生补查，禁止猜 null")
+        result.update(error.diagnostic(issue_key))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 2
     except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError) as error:
