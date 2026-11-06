@@ -1914,6 +1914,42 @@ class QualityTests(unittest.TestCase):
         path.unlink()
         self.assertEqual([], evidence.load_events(path))
 
+    def test_ci_budget_resumes_same_identity_and_keeps_original_result(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="84",
+            interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        checks = [{"name": "unit", "status": "IN_PROGRESS", "detailsUrl": "fixture:run/42/attempt/1"}, None, 17]
+        out = io.StringIO()
+        with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "a" * 40)), \
+             mock.patch.object(ci.time, "monotonic", side_effect=[0, 1, 2, 3]), contextlib.redirect_stdout(out):
+            self.assertEqual(5, ci.cmd_watch(args))
+        pending = json.loads(out.getvalue().splitlines()[-1])
+        self.assertEqual("pending", pending["outcome"])
+        self.assertEqual(self.task["run_id"], pending["resume"]["expected_run_id"])
+        self.assertEqual(checks[0]["detailsUrl"], pending["checks"][0]["detailsUrl"])
+        self.assertEqual(["unknown", "unknown"], [row["state"] for row in pending["checks"][1:]])
+        success = dict(checks[0], status="COMPLETED", conclusion="SUCCESS")
+        with mock.patch.object(ci, "fetch_rollup", return_value=([success], "a" * 40)):
+            self.assertEqual(0, ci.cmd_watch(args))
+        state = ci.load_state(self.base, "TAP-123", "84", args.repo)
+        self.assertEqual(["finish_timeout", "success"], [row["verdict"] for row in state["history"]])
+        self.assertEqual(checks, state["history"][0]["checks"])
+
+    def test_ci_head_change_resets_pending_age_and_unchanged_poll_is_quiet(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="85",
+            interval=1, start_timeout=300, finish_timeout=10, expected_run_id=self.task["run_id"])
+        pending = [{"name": "unit", "status": "IN_PROGRESS"}]
+        success = [{"name": "unit", "conclusion": "SUCCESS"}]
+        for rows, ticks, count in (
+            ([(pending, "a" * 40), (pending, "b" * 40), (success, "b" * 40)], [0, 1, 2, 3, 20, 21, 22, 23], 3),
+            ([(pending, "b" * 40), (pending, "b" * 40), (success, "b" * 40)], [0, 1, 2, 3, 4, 5, 6], 2)):
+            out = io.StringIO()
+            with mock.patch.object(ci, "fetch_rollup", side_effect=rows), \
+                 mock.patch.object(ci.time, "monotonic", side_effect=ticks), \
+                 mock.patch.object(ci.time, "sleep"), contextlib.redirect_stdout(out):
+                self.assertEqual(0, ci.cmd_watch(args))
+            self.assertEqual(count, sum(line.startswith("[") for line in out.getvalue().splitlines()))
+        self.assertEqual("b" * 40, ci.load_state(self.base, "TAP-123", "85", args.repo)["history"][-1]["head"])
+
     def test_ci_timeouts_use_monotonic_clock_and_keep_audit_timestamp(self):
         for pr, checks, ticks, verdict in (
                 ("81", [], [100, 401], "start_timeout"),
@@ -1925,7 +1961,7 @@ class QualityTests(unittest.TestCase):
                 sleep=mock.Mock(), strftime=mock.Mock(return_value="2026-09-21T00:00:00+0800"))
             with self.subTest(verdict=verdict), mock.patch.object(ci, "time", clock), mock.patch.object(
                     ci, "fetch_rollup", return_value=(checks, "a" * 40)):
-                self.assertEqual(3, ci.cmd_watch(args))
+                self.assertEqual(5, ci.cmd_watch(args))
             record = ci.load_state(self.base, "TAP-123", pr, args.repo)["history"][-1]
             self.assertEqual(verdict, record["verdict"])
             self.assertEqual("2026-09-21T00:00:00+0800", record["ts"])
@@ -1962,7 +1998,7 @@ class QualityTests(unittest.TestCase):
             interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         with mock.patch.object(ci, "fetch_rollup", return_value=([], "a" * 40)), mock.patch.object(
                 ci.time, "monotonic", side_effect=[10, 11]), mock.patch.object(ci.time, "sleep") as sleep:
-            self.assertEqual(3, ci.cmd_watch(args))
+            self.assertEqual(5, ci.cmd_watch(args))
             sleep.assert_not_called()
         self.assertEqual("start_timeout", ci.load_state(self.base, "TAP-123", "8", args.repo)["history"][-1]["verdict"])
 
@@ -2845,8 +2881,66 @@ class FeatureFlowTests(unittest.TestCase):
         self.publish_summary()
         self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
+        if self.task_class == "feature_change":
+            from workflow import jira_status, station
+            doc = json.loads(snapshot.read_text())
+            ready_path = task_store.interaction_path(self.ws, "TAP-123", run, "pr-ready-input.json")
+            packet = json.loads(ready_path.read_text())
+            self.assertFalse(jira_status.delivery_ready(self.ws, self.read(), "pr_submitted", doc)[0])
+            packet["pull_requests"][0]["isDraft"] = False
+            ready_path.write_text(json.dumps(packet))
+            self.assertTrue(jira_status.delivery_ready(self.ws, self.read(), "pr_submitted", doc)[0])
+            doc["transitions"] = [{"id": "91", "to": {"name": "Pull Request Submitted"}, "fields": {}}]
+            prepared = jira_status.prepare(self.ws, "TAP-123", "pr_submitted", doc, "op-fixture-submit")
+            self.assertEqual("ready", prepared["outcome"], prepared)
+            # 无关的早期字段不重复确认，当前表单仍完整回读。
+            self.assertEqual([], prepared["blocking_fields"])
+            doc["issue"]["fields"]["status"]["name"] = "Pull Request Submitted"
+            jira_status.complete(self.ws, "TAP-123", "pr_submitted", "unknown", doc, "", "op-fixture-submit")
+            self.assertFalse(jira_status.delivery_ready(self.ws, self.read(), "merged", doc)[0])
+            self.apply("verification", {"kind": "review", "repository": self.repo, "target_revision": head,
+                "source_ref": "fixture:all-review-pages", "complete": True, "items": []})
+            self.checkpoint("q5-review"); self.checkpoint("q6-delivery")
+            # 实际本地 Git 合并，外部 PR 快照仅模拟传输；不模拟通过完成门禁。
+            self.git("-C", str(self.seed), "fetch", str(worktree), head)
+            self.git("-C", str(self.seed), "merge", "--no-ff", "--no-edit", "FETCH_HEAD")
+            merged = self.git("-C", str(self.seed), "rev-parse", "HEAD")
+            delivery = {"repository": self.repo, "pr": "1", "target_branch": "develop",
+                "candidate_head": head, "pr_head": head, "merged_at": self.proof()["at"],
+                "merge_commit": merged, "readback_ref": "fixture:merged-pr"}
+            delivery_path = Path(self.cli("task.py", "interaction-path", "--name", "delivery.json").strip())
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            ready, problems = jira_status.delivery_ready(self.ws, self.read(), "merged", doc)
+            self.assertTrue(ready, problems)
+            next_result = json.loads(self.cli("task.py", "next", mutation=False))
+            self.assertTrue(next_result['advance_ready'], next_result['blockers'])
+            self.assertEqual("sync_jira_then_complete", next_result['delivery_handoff']['action'])
+            doc["transitions"] = [{"id": "111", "to": {"name": "Merged"}, "fields": {
+                "customfield_10414": {"name": "Customer Requirement Acceptance", "required": False,
+                                      "schema": {"type": "option"}}}}]
+            missing_decision = jira_status.prepare(self.ws, "TAP-123", "merged", doc, "op-fixture-merged")
+            self.assertEqual("decision_inputs_pending", missing_decision["reason"])
+            self.assertIn("customfield_10414", missing_decision["blocking_fields"])
+            # Jira 已到目标也不能替代当前候选合并核验。
+            doc["issue"]["fields"]["status"]["name"] = "Merged"
+            delivery['pr_head'] = 'c' * 40
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            bad = jira_status.prepare(self.ws, "TAP-123", "merged", doc, "op-fixture-newhead")
+            self.assertEqual("delivery_not_verified", bad['reason'])
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
+        if self.task_class == "feature_change":
+            self.git("-C", str(worktree), "checkout", "--", "feature.py")
+            delivery['pr_head'] = head
+            delivery_path.write_text(json.dumps(delivery))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            self.cli("task.py", "advance", "--note", "fixture:合并核验完成，Jira 审批缺项保留交接")
+            final = json.loads(self.cli("task.py", "next", mutation=False))
+            self.assertEqual("completed", final['stage'])
+            self.assertEqual("cleanup_preflight", final['delivery_handoff']['action'])
+            self.assertNotIn("等待合并", final['guidance'])
 
 
 

@@ -5,7 +5,9 @@
       "Jira TAP-12935 transitions.fields 2026-09-20",
       "Jira TAP-12289 transitions.fields 2026-09-20",
       "Jira TAP statuses 2026-09-20",
-      "profile.json 已核验映射"
+      "profile.json 已核验映射",
+      "Jira TAP-12962、TAP-13188 Bug transitions.fields 2026-11-06",
+      "Jira TAP-13152、TAP-11099 Story transitions.fields 2026-11-06"
     ],
     "complete_workflow_export": false,
     "unknown_transition_policy": "native-form-collection-manual-only",
@@ -186,13 +188,15 @@
           "metadata": "topology-and-form-unverified"
         },
         {
-          "key": "to-status:10039",
-          "from": null,
+          "key": "pr_submitted",
+          "from": [
+            "Tests Passed"
+          ],
           "to": "Pull Request Submitted",
-          "transition_id": null,
-          "actor": "human",
+          "transition_id": "91",
+          "actor": "agent",
           "fields": [],
-          "metadata": "topology-and-form-unverified"
+          "metadata": "observed-live-form-recheck-required"
         },
         {
           "key": "to-status:10058",
@@ -240,13 +244,18 @@
           "metadata": "topology-and-form-unverified"
         },
         {
-          "key": "to-status:10040",
-          "from": null,
+          "key": "merged",
+          "from": [
+            "Pull Request Submitted"
+          ],
           "to": "Merged",
-          "transition_id": null,
-          "actor": "human",
-          "fields": [],
-          "metadata": "topology-and-form-unverified"
+          "transition_id": "111",
+          "actor": "agent",
+          "fields": [
+            "customer_acceptance",
+            "fix_versions"
+          ],
+          "metadata": "observed-live-form-recheck-required"
         },
         {
           "key": "to-status:10046",
@@ -511,6 +520,21 @@
           "auto_extract": false,
           "confirm_when": "value-options-dependencies-owner-change",
           "depends_on": []
+        },
+        "original_pr_url": {
+          "jira_id": "customfield_10372",
+          "aliases": [
+            "customfield_10372",
+            "Original PR URL"
+          ],
+          "value_type": "string",
+          "source": [],
+          "required_when": true,
+          "collect_at": "pr_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
         }
       },
       "transitions": [
@@ -639,13 +663,18 @@
           "metadata": "topology-and-form-unverified"
         },
         {
-          "key": "to-status:10039",
-          "from": null,
+          "key": "pr_submitted",
+          "from": [
+            "Tests Passed"
+          ],
           "to": "Pull Request Submitted",
-          "transition_id": null,
-          "actor": "human",
-          "fields": [],
-          "metadata": "topology-and-form-unverified"
+          "transition_id": "131",
+          "actor": "agent",
+          "fields": [
+            "original_pr_url",
+            "fix_versions"
+          ],
+          "metadata": "observed-live-form-recheck-required"
         },
         {
           "key": "to-status:10058",
@@ -684,13 +713,15 @@
           "metadata": "topology-and-form-unverified"
         },
         {
-          "key": "to-status:10040",
-          "from": null,
+          "key": "merged",
+          "from": [
+            "Pull Request Submitted"
+          ],
           "to": "Merged",
-          "transition_id": null,
-          "actor": "human",
+          "transition_id": "291",
+          "actor": "agent",
           "fields": [],
-          "metadata": "topology-and-form-unverified"
+          "metadata": "observed-live-form-recheck-required"
         },
         {
           "key": "to-status:10046",

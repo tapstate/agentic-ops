@@ -212,6 +212,23 @@ def transition_for(snapshot, rule):
     return None
 
 
+def delivery_ready(base, task, trigger, snapshot):
+    """交付状态沿用真实 PR/完成检查，不以 Jira 状态或检查点名称代替合并。"""
+    from workflow import station, pr_ready
+    try:
+        completion = station.evaluate_completion(base, task)
+        if completion["ready"] and completion["proof"]["deliveries"]:
+            return True, []
+        if trigger == "merged":
+            return False, completion["problems"] or ["当前任务没有已核验合并的代码交付"]
+        result = pr_ready.check_snapshot(base, task["issue_key"], snapshot)
+        problems = [p for check in result["checks"].values() for p in check["problems"]]
+        problems += [p for row in result["remaining"] for p in row["problems"]]
+        return bool(result["ready"] and result["pr_required"]), problems or (["当前任务无需 PR，不自动流转代码交付状态"] if not result["pr_required"] else [])
+    except (ValueError, OSError, KeyError) as error:
+        return False, ["交付事实尚不能核验：%s" % error]
+
+
 def status_matches(rule, status, direction):
     configured = rule.get(direction, [])
     names = set(configured if isinstance(configured, list) else [configured])
@@ -348,7 +365,7 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
         retryable = (previous.get("outcome") == "skipped" and
                      previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready",
                                                 "required_fields_missing", "transition_unavailable",
-                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch", "decision_inputs_pending"))
+                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch", "decision_inputs_pending", "delivery_not_verified"))
         if not retryable:
             return dict(previous, repeated=True)
         retry_history = list(previous.get("preflight_history", [])) + [{
@@ -369,6 +386,18 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
         record.update(outcome="skipped", reason="local_stage_mismatch",
                       guidance=[{"guidance": "当前本地阶段为 %s，本节点只允许在 %s 尝试。" %
                                              (task["stage"], "、".join(rule.get("local_stages", [])))}])
+    elif rule.get("require_delivery"):
+        ready, problems = delivery_ready(base, task, trigger, snapshot)
+        if not ready:
+            record.update(outcome="skipped", reason="delivery_not_verified",
+                          guidance=[{"guidance": problem} for problem in problems])
+        elif status_matches(rule, status["name"], "to"):
+            record.update(outcome="satisfied", reason="target_already_reached", guidance=[])
+        elif not status_matches(rule, status["name"], "from"):
+            record.update(outcome="skipped", reason="jira_status_mismatch",
+                          guidance=[{"guidance": "按实时 Jira 状态顺序补齐前置节点，不跳过验收、审批或使用无代码转换。"}])
+        else:
+            record = prepare_transition(record, snapshot, fields, rule, rules, task)
     elif trigger == "tests_passed":
         ready, reason, problems, ignored = tests_passed_ready(base, task, snapshot)
         ignored_view = [{"key": test["key"], "test_type": test["test_type"],
@@ -411,11 +440,21 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
         record = prepare_transition(record, snapshot, fields, rule, rules, task)
     if operation_id is not None:
         from workflow import jira_collect
-        checkpoint = "intake" if trigger == "takeover" else "acceptance"
+        checkpoint = "intake" if trigger == "takeover" else "pr_review" if rule.get("require_delivery") else "acceptance"
         packet = jira_collect.collect(base, task, checkpoint, snapshot)
         record["decision_packet"] = packet
+        pending = packet["pending"]
+        unknown = [row for row in packet["unknown"] if row.get("due")]
+        if rule.get("require_delivery"):
+            # 已完成的早期节点不因后续表单变化重复审批；本次表单和显式要求仍须核验。
+            blocking_fields = set((transition_for(snapshot, rule) or {}).get("fields") or {})
+            for logical in rule.get("field_requirements", []):
+                blocking_fields.update(rules.get("field_mappings", {}).get(logical, {}).get("aliases", [logical]))
+            record["blocking_fields"] = sorted(blocking_fields)
+            pending = set(pending) & blocking_fields
+            unknown = [row for row in unknown if not row.get("field") or row["field"] in blocking_fields]
         # 只阻塞本次外部转换，不阻塞本地研发。
-        if record["outcome"] == "ready" and (packet["pending"] or any(x.get("due") for x in packet["unknown"])):
+        if record["outcome"] == "ready" and (pending or unknown):
             record.update(outcome="skipped", reason="decision_inputs_pending")
         state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
     state["attempts"][trigger] = record

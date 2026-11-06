@@ -20,6 +20,23 @@ from station_fixture import save_task as save_station_task
 from station_fixture import task_state_snapshot
 
 class JiraStatusTests(unittest.TestCase):
+    def test_delivery_mappings_are_type_specific_and_require_real_evidence(self):
+        for task_class, issue_type, ids in (("defect_fix", "10011", ("131", "291")),
+                                            ("feature_change", "10010", ("91", "111"))):
+            self.task.update(task_class=task_class, stage="ci_validation")
+            save_station_task(self.base, self.task)
+            rules = jira_status.config(self.base, self.task)
+            for trigger, tid in zip(("pr_submitted", "merged"), ids):
+                with self.subTest(task_class=task_class, trigger=trigger):
+                    rule = rules["attempts"][trigger]
+                    self.assertEqual(tid, rule["transition_id"])
+                    self.assertTrue(rule["require_delivery"])
+                    snapshot = self.snapshot(rule["to"])
+                    snapshot["issue"]["fields"]["issuetype"] = {"id": issue_type}
+                    prepared = jira_status.prepare(self.base, "TAP-123", trigger, snapshot)
+                    self.assertEqual("delivery_not_verified", prepared["reason"])
+            self.assertNotIn("451", [r.get("transition_id") for r in rules["attempts"].values()])
+
     def seed_two_repository_collection(self, task_class):
         self.task['task_class'] = task_class
         self.task['repositories'] = [

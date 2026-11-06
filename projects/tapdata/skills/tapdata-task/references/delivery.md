@@ -10,7 +10,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 4. Q4 确认并进入 ci_validation 后，重新读取当前状态、字段和 transitions，执行 `prepare --trigger tests_passed --operation-id <op-id>`。依据 `field_plan` 提前采集，依据实际缺项补充并原生回填、回读，再重新 prepare。只有 `ready` 才执行返回的转换；混合验收中的人工决定不能由测试结果代替，仅 TapTest 的 Q4 按状态自动汇总。
 5. 每次写入后回读核对字段或目标状态，使用 `interaction-path` 保存当前 issue/run、读取时间、来源和材料，并在 note 引用。已知未发起转换的预检缺项允许补齐后重检；已发起而 failed/unknown 的转换先回读，不能重新 prepare 盲目重放。隐藏 Validator 按服务端实际错误处理，元数据 required=false 不代表没有服务端校验。
 
-方案评审时通过现有采集包确认 Story Test Design Review Result，Tests Passed 前复用有效决定并核对变化（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，审批选项由实际审批人决定，不根据测试 PASS 猜填。Tests Passed 到 PR 提交的转换在实际到达时读取并依现有人工提审规则交接；合并和发布仍需独立授权。
+方案评审时通过现有采集包确认 Story Test Design Review Result，Tests Passed 前复用有效决定并核对变化（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，审批选项由实际审批人决定，不根据测试 PASS 猜填。Tests Passed → Pull Request Submitted → Merged 只使用项目已核验的类型映射并实时读取 transitions.fields；PR 提审复用实际 Ready 事实，Merged 复用全部候选的合并及完成预检。审批由责任人决定，已有真实决定可复用；合并和发布仍需独立授权。
 
 这些材料证明外部状态，不能替代 Q1-Q4 和代码验证。同步失败只暂停对应写入，继续无依赖工作并在交接时列全 `jira_status_todos`；不手写账本消除提示。
 
@@ -39,8 +39,8 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - 有意义变更且完成第一轮针对性验证后建议 Draft PR；如验证受阻，按项目标准披露现状。Q3 是自动首轮事实检查点，使用 `execute` 导入真实报告、`jira_status` 导入 TapTest 状态，在所有已选修复后项符合合同后执行 `auto_checkpoint`；Q4 才展示验收检查项（含实际关联 Test）、当前 SHA 的执行证据与风险，使用 `decide/checkpoint` 记录用户最终验收。用户可接受风险，不得把未执行、跳过、未知或失败改成通过。
 - 仅对启用 `status_sync` 的任务：Q4 完成并进入 `ci_validation` 后，立即读取 Jira issue、已链接 Test、每个 Test 的 Test Details 和可用 transitions，执行 `jira_status.py prepare --trigger tests_passed --operation-id <op-id>`。Manual/Unit 在 Q4 以同一 `case_ref`、当前用例版本和对应方式记录当前完整 SHA 的 PASS 证据及逐项 `accept`；TapTest 导入 `quality.py` 的 `jira_status` 动作，按[状态依据](../../../../../docs/usage/quality-checkpoints.md#taptest-的-jira-状态依据)接纳，不要求本地 PASS 或逐项确认；Q4 总体须满足对应合同。Jira 已是 `Tests Passed` 也先核对这些事实；当前为 `In Progress` 且返回 `ready` 时同步尝试一次并写后回读。缺少 Jira 事实、关联、类型、版本或确认时，工具提示用户补充/调整后可以重新做预检；已发起的 Jira 转换不在同一节点盲目重试。
 - 每个 PR 创建或更新时读取实际安装版本并显示 `AgenticOps 版本 XXX`，提审前按[PR 内容模板](../../../../../docs/usage/quality-checkpoints.md#pr-内容模板与兼容发布)纳入 `required_pr_summaries` 返回的当前覆盖区块和尾部元信息，普通关联与版本置尾一次，不重复正常 CI 流水，并回读 PR 正文及手动路径所需 Jira 关联。每个 PR 都要核对目标集成测试是否实际运行；其他 Checks 绿色、未触发、跳过、零用例或缺报告均主动展示具体缺口并请求研发明确处置，不能直接进入下一步或以建票代替确认。使用现有 verification 的原始结果和 decision 记录，确认不等于 PASS，也不解除用例验收、失败、PR Checks 和服务端条件。
-- PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再以同一 Jira 快照运行 `pr_ready.py` 复核。Test 工作项本身无需 Done。Checks 全部明确成功或具有绑定当前 Head 及具体缺口的有效提审例外，并满足 Q1-Q4 与检查项时，只表示预检通过。按有效授权使用原生 GitHub 工具推进剩余 PR，结果未知先回读；所有目标 PR 身份、当前 Head、OPEN 及 isDraft=false 回读确认后才可称为 PR Ready。证据与具体例外使用[PR Ready 核对](../../../../../docs/usage/quality-checkpoints.md#pr-ready-核对)，不重复索取已覆盖提审的决定。状态同步遗留统一提示 Engineering DRI 人工处理；`Pull Request Submitted` 不由 Agent 自动执行。
-- 使用原生工具取得每个 PR 当前 Head 对应的 CI 运行和实际报告，交 tapdata-ci-test 分析。首次失败先用稳定 check_id、归因及证据 observe，复发复用原 problem_id，再按原授权与累计轮次 start 修复。定向调试后提交候选，在完整提交 SHA 上完成最终本地重验并记录结果，再推送、等待新 CI，将新报告交回技能分析；非当前变更、归因不明或轮数用尽按质量合同交研发处置。返回结果写入现有质量材料，测试总结写 Jira 讨论并回读，不改写任务描述代替报告。Q5、Q6 核对审查及交付事实。接管和 Q4 节点只尝试 Project 明确配置的单次 Jira 状态同步；线上 Validator 与附件冲突需报告确认，禁止用本地质量处置绕过。
+- PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再以同一 Jira 快照运行 `pr_ready.py` 复核。Test 工作项本身无需 Done。Checks 全部明确成功或具有绑定当前 Head 及具体缺口的有效提审例外，并满足 Q1-Q4 与检查项时，只表示预检通过。按有效授权使用原生 GitHub 工具推进剩余 PR，结果未知先回读；所有目标 PR 身份、当前 Head、OPEN 及 isDraft=false 回读确认后才可称为 PR Ready。证据与具体例外使用[PR Ready 核对](../../../../../docs/usage/quality-checkpoints.md#pr-ready-核对)，不重复索取已覆盖提审的决定。确认 Ready 后执行 `jira_status.py prepare --trigger pr_submitted --operation-id <op-id>`，只有 ready 才原生转换并回读。随后明确告知研发：请审查并合并，合并后回来继续收尾；不自行合并。同步缺项先复用事实补齐，仅无法处理的决定交研发。
+- CI 观察预算耗尽（exit 5）时沿同一任务、PR、Head 继续等待和回读，不重跑流水线，也不把等待结束当作任务完成；处理规则见[CI 与集成测试](../../../../../docs/usage/quality-checkpoints.md)。使用原生工具取得每个 PR 当前 Head 对应的 CI 运行和实际报告，交 tapdata-ci-test 分析。首次失败先用稳定 check_id、归因及证据 observe，复发复用原 problem_id，再按原授权与累计轮次 start 修复。定向调试后提交候选，在完整提交 SHA 上完成最终本地重验并记录结果，再推送、等待新 CI，将新报告交回技能分析；非当前变更、归因不明或轮数用尽按质量合同交研发处置。返回结果写入现有质量材料，测试总结写 Jira 讨论并回读，不改写任务描述代替报告。Q5、Q6 核对审查及交付事实。Jira 仅执行 Project 已映射且通过实时预检的转换；线上 Validator 与附件冲突按真实原因处理，禁止用本地质量处置绕过。Q5/Q6 汇总已回读审查与交付事实，复用已有责任人决定，不新增形式确认；发现新风险或验收变化仍需决定。
 - PR 审查按[审查返工](../../../../../docs/usage/quality-checkpoints.md#pr-审查返工)完整回读普通评论及行内线程，逐项修复或说明依据；改变验收预期交研发决定。相同失败沿用原 problem_id，使用失败工具的 review 来源累计轮次，修改后重验当前代码并回读当前 PR CI；不以线程过时或已关闭替代问题核对。
 - PR 合入、发布、Tag、rebase、强推和保护分支写入不被任务授权覆盖。检出来源分支合并到任务工作分支也须明确纳入方案授权，不因需要保持最新而绕过授权。
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-station>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
@@ -48,3 +48,11 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - 未迁移能力优先使用 Agent 原生能力；没有安全路径时只暂停当前副作用步骤。
 
 归档写入失败时，按[任务授权指引](../../../../../docs/usage/task-authorization.md#清理与退出)展示指定快照、失败原因和实际清理结果，引导研发明确授权修复后重试或放弃。复用原操作和失败摘要，不自动丢弃，不以新 clean 操作绕过；回读结果不明时先核实。
+
+### 合并后的连续收尾
+
+研发告知已合并后，先回读全部目标 PR 的仓库、Head、目标分支、merged_at 和 merge_commit，按现有 repository delivery 入口记录并核对当前最终候选；多仓缺少任一交付时只暂停依赖该仓的完成动作，继续核实其余成果。用户口述或 PR Ready 不能代替合并回读。
+
+执行 task next，按当前 Jira 状态依次补齐 tests_passed、pr_submitted、merged；每次转换前读取实时表单，prepare 返回 ready 才原生执行，写后 complete 回读。已达目标不重复转换；旧 ready/unknown/failed 先回读原 operation。字段使用现有 collect/confirm/prepare_fields/readback_fields；实际 PR URL、修复总结由 Agent 据实整理，客户验收、审批、版本选择复用有效决定，缺失时集中交接。不得借用 Complete - No Code Change、取消或发布转换跳过正常代码交付路径；未映射状态说明事实和剩余责任，不猜转换 ID。
+
+Jira 补齐和协作材料处理应先于本地 completed；外部结果未知时先恢复原操作并暂停依赖收尾，不能清理恢复材料。确有无法执行的非依赖同步项时，保留真实待办及持久恢复来源，本地和远端结果分别报告。完成预检通过后 advance completed，随即按[清理与退出](../../../../../docs/usage/task-authorization.md#清理与退出)核实持久成果并执行 task 范围预检。原方案已明确授权常规任务清理、实际范围一致且材料保全时复用该确认；无有效授权、未知数据、放弃成果、删除配置或扩大范围时集中请研发决定。清理失败沿原 operation 恢复，不重建操作或删除状态。

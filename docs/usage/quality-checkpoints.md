@@ -541,6 +541,8 @@ AO 不新增测试执行器或测试平台客户端。Agent 用现有工具读�
 
 本地 Maven 与 CI 是同一集成测试方式的不同执行来源。`ci.py watch` 只观察 PR 返回的检查，绿色不证明目标集成用例运行；必须核对路径过滤、矩阵、跳过条件及测试报告。未知、空检查、跳过均不会被当作成功。CI 记录按任务、run、仓库和 PR 隔离，旧版无身份记录不作为当前证据。
 
+`ci.py watch` 的启动/完成预算仅限制一轮观察：默认 300/600 秒耗尽返回 exit 5 和 outcome=pending，保留 issue/run、仓库、PR、完整 Head、原检查结果与 resume 参数；状态文件继续保留兼容的 start_timeout/finish_timeout，不记为成功或失败。Agent 沿同一运行用平台等待或原 watch 继续查询，不因观察时限到达结束任务、重新触发 CI 或要求研发确认等待。Head 改变后核对新候选及检查运行，旧报告不能冒充新结果；无变化的轮询不重复打印完整进度。无 Checks 时有限核查触发配置、路径过滤和真实运行，不能无限重查同一缺口；缺少适用 CI、权限、明确跳过/未知结果或需接受风险时集中交接具体问题。exit 3 继续表示需要处置的未知/跳过事实；它与仍运行的 pending 分开。
+
 公司 wiki 索引在项目 `quality.json`；目标分支的代码、POM 和 CI 是实现事实源。Failsafe 项目在核对配置后可使用 Project Runbook 指定的 Maven 命令运行 `test-compile failsafe:integration-test failsafe:verify -DskipITs=false`，指定用例用 `-Dit.test=Class#method`；Runbook 指定任务本地仓库时不得退回裸 `mvn` 或共享缓存。`mvn test` 或仅编译成功不能证明该集成用例已执行，先核对实际模块及报告。
 
 ## 操作接口

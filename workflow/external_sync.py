@@ -143,6 +143,11 @@ def warnings(base, task, report=None):
         due = ["takeover"]
         if task.get("stage") in ("ci_validation", "completed"):
             due.append("tests_passed")
+            if attempts.get("tests_passed", {}).get("outcome") in ("satisfied", "succeeded"):
+                due.append("pr_submitted")
+            if (attempts.get("pr_submitted", {}).get("outcome") in ("satisfied", "succeeded")
+                    and any(row.get("deliveries") for row in task.get("task_repositories", {}).values())):
+                due.append("merged")
         for node in due:
             if node in status_rules["attempts"] and node not in attempts:
                 add("jira_status:" + node, "deferred", "本节点尚无同步记录")
