@@ -103,6 +103,55 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _require_pre_takeover(state):
+    if state['run_id'] is not None:
+        raise ValueError('工时不是本任务合法接管前记录，保留原件核实')
+    for row in state['segments'].values():
+        # prepare 在没有 run 时拒绝发送；未知意图不能伪装成接管前记录。
+        if (row['category'] != 'takeover' or row['status'] not in
+                ('active', 'pending', 'deferred', 'unmeasured', 'empty')
+                or any(key in row for key in ('request', 'worklog_id', 'property_id'))
+                or not isinstance(row.get('session_id'), str) or not row['session_id']):
+            raise ValueError('工时不是本任务合法接管前记录，保留原件核实')
+        if row['status'] == 'active':
+            if not isinstance(row.get('active_started'), str):
+                raise ValueError('工时活动段缺少合法开始时间')
+            instant(row['active_started'])
+        elif state['active'] == row['id']:
+            raise ValueError('工时活动段与状态不一致')
+
+
+def check_takeover_evidence(base, issue):
+    """空闲工位仅接纳本任务合法接管前工时；调用者持工位锁，不修改材料。"""
+    path = state_path(base, issue)
+    directory = path.parent
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise ValueError('接管前证据目录不可信，保留原件核实')
+    if not directory.exists():
+        return
+    for entry in directory.iterdir():
+        if entry != path or entry.is_symlink() or not entry.is_file():
+            raise ValueError('空闲工位仍有未知或其它任务证据，拒绝接管')
+    if path.exists():
+        state = load(base, issue)
+        _require_pre_takeover(state)
+
+
+def attach_takeover(base, task):
+    """原接管建立 current 后幂等绑定；保留已暂停段、计时和冻结发送回执。"""
+    path = state_path(base, task['issue_key'])
+    if path.parent.is_symlink() or path.is_symlink():
+        raise ValueError('工时材料不能是符号链接')
+    if not path.exists():
+        return
+    state = load(base, task['issue_key'])
+    if state['run_id'] == task['run_id']:
+        return
+    _require_pre_takeover(state)
+    state['run_id'] = task['run_id']
+    save(base, state)
+
+
 def save(base, state):
     path = state_path(base, state['issue_key'])
     rules = project_rules.load_admission(station=base)
