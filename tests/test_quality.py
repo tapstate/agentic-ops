@@ -2945,6 +2945,76 @@ class FeatureFlowTests(unittest.TestCase):
 
 
 
+class MixedRepositoryDeliveryTests(unittest.TestCase):
+    def setUp(self):
+        self.rules = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())
+        self.rules.pop('verification_plan')
+        self.rules['pr_ready']['required_verification'] = []
+        self.task = dict(issue_key='TAP-123', run_id='run', stage='ci_validation', repositories=[
+            dict(repository='tapdata/connectors', pull_request='1', worktree={'final_revision': 'b' * 40}),
+            dict(repository='tapdata/main', worktree={'final_revision': 'a' * 40})])
+        self.ctx = {'repositories': {
+            'tapdata/connectors': {'base_sha': 'a' * 40, 'live_revision': 'b' * 40},
+            'tapdata/main': {'base_sha': 'a' * 40, 'live_revision': 'a' * 40}}}
+        self.packet = {'checks_exceptions': [], 'pull_requests': [dict(repository='tapdata/connectors',
+            number=1, url='https://github.com/tapdata/connectors/pull/1', headRefOid='b' * 40,
+            state='OPEN', isDraft=False, source_ref='fixture:github', observed_at=proof()['at'])]}
+        self.stack = contextlib.ExitStack()
+        self.addCleanup(self.stack.close)
+        for owner, name, value in [
+            (task_store, 'read_task', self.task), (quality, 'config', self.rules),
+            (quality, 'context', self.ctx), (quality, 'load', {}), (quality, 'replay', {}),
+            (pr_ready, 'submission_input', self.packet), (pr_ready, 'quality_problems', []),
+            (pr_ready, 'linked_test_confirmation_problems', []),
+            (pr_ready.jira_tests, 'acceptance_tests', ([], [], [])),
+            (pr_ready.jira_status, 'load_state', {'attempts': {}}),
+            (pr_ready.jira_status, 'config', {'attempts': {}}),
+            (ci, 'current_states', [dict(repository='tapdata/connectors', pr='1',
+                history=[dict(head='b' * 40, verdict='success')])])]:
+            self.stack.enter_context(mock.patch.object(owner, name, return_value=value))
+        from workflow import external_sync
+        self.stack.enter_context(mock.patch.object(external_sync, 'warnings', return_value=[]))
+
+    def check(self):
+        return pr_ready.check_snapshot('unused', 'TAP-123', {'source_ref': 'fixture:jira'})
+
+    def test_mixed_feature_requires_only_changed_repository_delivery(self):
+        result = self.check()
+        self.assertTrue(result['ready'], result)
+        self.assertEqual(['tapdata/connectors'], [r['repository'] for r in result['pull_requests']])
+        self.packet['pull_requests'][0]['isDraft'] = True
+        self.assertFalse(self.check()['ready'])
+
+    def test_dirty_unknown_new_commit_or_missing_baseline_requires_delivery(self):
+        state = self.ctx['repositories']['tapdata/main']
+        for revision in ('b' * 40, 'a' * 40 + ':worktree:dirty', 'unavailable', None):
+            with self.subTest(revision=revision):
+                state['live_revision'] = revision
+                result = self.check()
+                self.assertFalse(result['ready'])
+                self.assertTrue(any('tapdata/main' in p for p in result['checks']['pr_checks']['problems']))
+        state['live_revision'] = 'a' * 40
+        del state['base_sha']
+        self.assertFalse(self.check()['ready'])
+
+    def test_entirely_unchanged_feature_is_not_general_task(self):
+        self.ctx['repositories']['tapdata/connectors']['live_revision'] = 'a' * 40
+        self.assertFalse(self.check()['preflight_ready'])
+        self.assertTrue(self.check()['pr_required'])
+        self.rules['allow_no_source_change_plan'] = True
+        self.assertTrue(self.check()['ready'])
+        self.assertFalse(self.check()['pr_required'])
+
+    def test_local_review_source_sync_and_unresolved_failures_remain(self):
+        from workflow import verification
+        ctx = {'repositories': {'tapdata/main': self.ctx['repositories']['tapdata/main']}}
+        result = verification.problems({}, ctx, ['local', 'review', 'source_sync', 'ci'], self.rules)
+        self.assertEqual(['tapdata/main 缺少 local 验证材料', 'tapdata/main 缺少 review 验证材料',
+                          'tapdata/main 缺少 source_sync 验证材料'], result)
+        ctx['failures'] = {'failure': {'status': 'unresolved', 'attempts': 1}}
+        self.assertTrue(any('失败 failure' in p for p in verification.problems({}, ctx, ['ci'], self.rules)))
+
+
 class NoSourceChangePlanTests(unittest.TestCase):
     def setUp(self):
         self.rules = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())

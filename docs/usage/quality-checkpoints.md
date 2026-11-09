@@ -469,7 +469,9 @@ PR Ready 的定义以[术语表](../glossary.md)为准：所有目标 PR 已原�
 
 用户明确接受本次具体 Checks 缺口并要求提审时，将决定放入 `checks_exceptions`：repository、pr、完整 head、checks_digest、decision=accept_checks_and_submit、reason 和原有 proof（决定者、真实决定来源、带时区时间）。checks_digest 使用 `pr_ready.checks_digest` 对当前 CI history 最新项的 head/verdict/checks/failing 生成；每次重新观察后核对实际集合，时间戳变化不单独使同一决定失效。仅接纳 none/start_timeout、skipped、failure；pending/finish_timeout、未知事实及缺少当前 Head 的观察不支持例外。未取得真实来源、权限不足或外部写结果不明时停止受影响操作。原始 Checks 不改成 success，例外不豁免关联用例、必要质量验证、服务端保护或合并授权。Head 或实际缺口变化需要新决定；已有精确决定覆盖提审时不重复询问。
 
-正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks` 与每个关联 Test 的 Test Details：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
+TapData 功能任务按实际变更仓库核验 PR 和 CI：完整基线 SHA 与实时洁净源码版本完全相同时，该仓库不要求空 PR 或对应 CI；本地验证、审查、来源同步和既有失败处置仍保留。缺少基线、源码未知、未提交修改或新提交均恢复完整交付要求。所有仓库都无变更不能完成普通功能交付；仅已配置允许无源码修改方案的通用事项可以不需要 PR。
+
+正式提审前，先为每个需要交付的任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks` 与每个关联 Test 的 Test Details：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
 
 ```json
 {
