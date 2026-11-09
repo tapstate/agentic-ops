@@ -314,32 +314,58 @@ def prepare_fields(base, task, checkpoint, document):
     return dict(record, native_request={"issue_key": task["issue_key"], "fields": proposals})
 
 
+def plain_adf_paragraph(node):
+    """返回无标记段落正文；未知结构不能通过丢弃内容变成等价。"""
+    if (not isinstance(node, dict) or set(node) - {"type", "content"}
+            or node.get("type") != "paragraph" or not isinstance(node.get("content", []), list)):
+        return None
+    parts = []
+    for part in node.get("content", []):
+        if isinstance(part, dict) and set(part) == {"type", "text"} and part.get("type") == "text" and isinstance(part["text"], str):
+            parts.append(part["text"])
+        elif part == {"type": "hardBreak"}:
+            parts.append("\n")
+        else:
+            return None
+    return "".join(parts)
+
+
+def plain_adf_matches(expected, observed):
+    """支持纯段落及单层无序列表；仅列表前的可选空行属于排版差异。"""
+    if (set(observed) != {"type", "version", "content"} or observed.get("type") != "doc"
+            or observed.get("version") != 1 or not isinstance(observed["content"], list)):
+        return False
+    patterns = []
+    for block in observed["content"]:
+        paragraph = plain_adf_paragraph(block)
+        if paragraph is not None:
+            patterns.append(("\n\n" if patterns else "") + re.escape(paragraph))
+            continue
+        if (not isinstance(block, dict) or set(block) != {"type", "content"}
+                or block.get("type") != "bulletList" or not isinstance(block["content"], list)
+                or not block["content"]):
+            return False
+        items = []
+        for item in block["content"]:
+            if (not isinstance(item, dict) or set(item) != {"type", "content"}
+                    or item.get("type") != "listItem" or not isinstance(item["content"], list)
+                    or len(item["content"]) != 1):
+                return False
+            text = plain_adf_paragraph(item["content"][0])
+            if text is None or not text or "\n" in text:
+                return False
+            items.append(r"[-*+] " + re.escape(text))
+        patterns.append((r"\n{1,2}" if patterns else "") + "\n".join(items))
+    return re.fullmatch("".join(patterns), expected) is not None
+
+
 def field_matches(expected, observed, schema, field):
     """只接纳已知 Jira 字段的原生表示；不剥离任意富文本结构。"""
     if expected == observed:
         return True
     kind = schema.get("type")
     if kind == "string" and isinstance(expected, str) and isinstance(observed, dict):
-        if set(observed) != {"type", "version", "content"} or observed.get("type") != "doc" or observed.get("version") != 1:
-            return False
-        if not isinstance(observed["content"], list):
-            return False
-        paragraphs = []
-        for paragraph in observed.get("content", []):
-            if not isinstance(paragraph, dict) or set(paragraph) - {"type", "content"} or paragraph.get("type") != "paragraph" or not isinstance(paragraph.get("content", []), list):
-                return False
-            parts = []
-            for node in paragraph.get("content", []):
-                if not isinstance(node, dict):
-                    return False
-                if node.get("type") == "text" and set(node) == {"type", "text"} and isinstance(node["text"], str):
-                    parts.append(node["text"])
-                elif node == {"type": "hardBreak"}:
-                    parts.append("\n")
-                else:
-                    return False
-            paragraphs.append("".join(parts))
-        return expected == "\n\n".join(paragraphs)
+        return plain_adf_matches(expected, observed)
     if kind == "array" and isinstance(expected, list) and isinstance(observed, list):
         item = schema.get("items")
         if field in ("fixVersions", "versions"):

@@ -20,6 +20,57 @@ from station_fixture import save_task as save_station_task
 from station_fixture import task_state_snapshot
 
 class JiraStatusTests(unittest.TestCase):
+    def test_native_bullet_list_intent_recovers_without_resend_or_content_loss(self):
+        from workflow import jira_collect
+        paragraph = lambda text: {'type': 'paragraph', 'content': [{'type': 'text', 'text': text}]}
+        adf = {'type': 'doc', 'version': 1, 'content': [paragraph('实现方式：'),
+            {'type': 'bulletList', 'content': [
+                {'type': 'listItem', 'content': [paragraph('默认关闭')]},
+                {'type': 'listItem', 'content': [paragraph('仅原生开启')]}]}, paragraph('回滚：保留原制品')]}
+        expected = '实现方式：\n- 默认关闭\n- 仅原生开启\n\n回滚：保留原制品'
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': expected}
+        self.confirm_packet('design_review', snapshot, proposals)
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'bullet-field-op'}
+        original = jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        snapshot['issue']['fields']['customfield_b'] = copy.deepcopy(adf)
+        # 远端少项或结构未知时不消除原意图；正确回读可沿同一操作恢复。
+        snapshot['issue']['fields']['customfield_b']['content'][1]['content'].pop()
+        with self.assertRaisesRegex(ValueError, '正文不匹配'):
+            jira_collect.readback_fields(self.base, self.task, doc)
+        self.assertEqual('intent', jira_status.load_state(self.base, self.task)['field_writes']['bullet-field-op']['status'])
+        snapshot['issue']['fields']['customfield_b'] = adf
+        recovered = jira_collect.readback_fields(self.base, self.task, doc)
+        self.assertEqual('verified', recovered['status'])
+        self.assertEqual(original['fields'], recovered['fields'])
+        self.assertIsNone(jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)['native_request'])
+        matches = lambda text, value: jira_collect.field_matches(text, value, {'type': 'string'}, 'customfield_b')
+        self.assertTrue(matches(expected.replace('：\n-', '：\n\n-'), adf))
+        self.assertTrue(matches(expected.replace('\n- ', '\n* '), adf))
+        for changed in (expected.replace('默认关闭', '默认开启'), expected.replace('- 默认关闭\n', ''),
+                        expected.replace('默认关闭\n- 仅原生开启', '仅原生开启\n- 默认关闭'),
+                        expected.replace('- ', ''), expected.replace('回滚：', '回滚:')):
+            self.assertFalse(matches(changed, adf))
+        for variant in ('marks', 'nested', 'extra_paragraph', 'ordered', 'attrs', 'unknown', 'malformed'):
+            bad = copy.deepcopy(adf)
+            listing = bad['content'][1]
+            if variant == 'marks':
+                listing['content'][0]['content'][0]['content'][0]['marks'] = [{'type': 'strong'}]
+            elif variant == 'nested':
+                listing['content'][0]['content'].append(copy.deepcopy(listing))
+            elif variant == 'extra_paragraph':
+                listing['content'][0]['content'].append(paragraph('额外内容'))
+            elif variant == 'ordered':
+                listing['type'] = 'orderedList'
+            elif variant == 'attrs':
+                listing['attrs'] = {'unknown': True}
+            elif variant == 'unknown':
+                bad['content'].append({'type': 'mediaSingle', 'content': []})
+            else:
+                listing['content'] = None
+            with self.subTest(variant=variant):
+                self.assertFalse(matches(expected, bad))
+
     def test_native_field_identity_and_plain_adf_readback(self):
         from workflow.jira_collect import field_matches
         self.assertTrue(field_matches({'id': '1'}, {'id': '1', 'value': 'Yes'}, {'type': 'option'}, 'x'))
