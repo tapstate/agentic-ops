@@ -192,12 +192,15 @@ def main(argv=None):
     parser.add_argument('--expected-plan-digest')
     parser.add_argument('--decision-ref')
     parser.add_argument('--materials', choices=('preserved', 'discard'))
+    parser.add_argument('--source-backup', help='工位外独立源码副本目录；预检及执行核验实际字节，不代表远端发布')
     parser.add_argument('--progress-correction-file', help='研发确认的有效进度更正；不提供则不撤回远端成果')
     parser.add_argument('--handoff-input')
     parser.add_argument('--jira-readback')
     parser.add_argument('--details', action='store_true')
     parser.add_argument('--output', help='完整结果输出到工位外的新文件')
     args = parser.parse_args(argv)
+    if args.source_backup and (args.resume or args.cancel or args.action != 'clean' or args.materials == 'discard'):
+        raise ValueError('源码副本仅用于新清理的保全预检/执行；恢复沿原已确认副本')
     from workflow.station_clean_view import emit
     from workflow import station_cleanup, project_rules
     from bootstrap.station_compatibility import require_station_can_adopt
@@ -217,7 +220,7 @@ def main(argv=None):
                     raise ValueError('归档预检需要当前任务和 --handoff-input')
                 preview = {'status': 'preview', 'handoff': task_handoff.prepare(args.dir, task, json.loads(Path(args.handoff_input).read_text()))}
             else:
-                preview = {'status': 'preview', 'cleanup_plan': station_cleanup.plan(args.dir, args.scope)}
+                preview = {'status': 'preview', 'cleanup_plan': station_cleanup.plan(args.dir, args.scope, args.source_backup)}
         emit(preview, args.details, args.output, args.dir)
         return 0
     if args.resume:
@@ -229,6 +232,8 @@ def main(argv=None):
         kind = args.action
         request = {'scope': args.scope, 'expected_plan_digest': args.expected_plan_digest,
                    'decision_ref': args.decision_ref, 'materials': args.materials}
+        if args.source_backup:
+            request['source_backup'] = args.source_backup
         if args.progress_correction_file:
             request['progress_correction'] = Path(args.progress_correction_file).read_text(encoding='utf-8')
         if kind == 'archive':

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """目标清理主流程：任务与工位两个范围的真实文件及状态验证。"""
 import os
+import shutil
 import json
 import subprocess
 from pathlib import Path
@@ -26,6 +27,122 @@ class CleanupTests(unittest.TestCase):
 
     def run_clean(self, task, request, operation='op-task-cleanup-test'):
         return cleanup.execute(self.ws, task['issue_key'], task['run_id'], task['_revision'], operation, request)
+
+    def source_backup_request(self):
+        backup = self.root.resolve() / 'preserved-source'
+        shutil.copytree(self.ws / 'source', backup, symlinks=True)
+        plan = cleanup.plan(self.ws, source_backup=str(backup))
+        return backup, {'scope': 'task', 'materials': 'preserved', 'source_backup': str(backup),
+                        'expected_plan_digest': plan['digest'], 'decision_ref': '保全后清理'}
+
+    def test_verified_source_copy_preserves_unpublished_commit_stash_and_unique_file(self):
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        self.git(repo, 'checkout', '-b', 'local-work')
+        (repo / 'file.txt').write_text('unpublished')
+        self.git(repo, 'add', '.')
+        self.git(repo, 'commit', '-m', 'local result')
+        head = self.git(repo, 'rev-parse', 'HEAD')
+        (repo / 'file.txt').write_text('stash material')
+        self.git(repo, 'stash')
+        (repo / 'unique.txt').write_text('unique evidence')
+        self.assertTrue(cleanup.plan(self.ws)['source']['requires_decision'])
+        backup, request = self.source_backup_request()
+        result = self.run_clean(task, request)
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual(str(backup), result['cleanup_result']['source_backup']['path'])
+        copy = backup / 'tapdata/tapdata'
+        self.assertEqual(head, self.git(copy, 'rev-parse', 'local-work'))
+        self.assertEqual('stash material', self.git(copy, 'show', 'stash:file.txt'))
+        self.assertEqual('unique evidence', (copy / 'unique.txt').read_text())
+        self.assertIsNone(task_store.read_task(self.ws))
+
+    def test_source_copy_rejects_missing_file_hardlink_and_internal_or_linked_path(self):
+        self.takeover()
+        backup, _ = self.source_backup_request()
+        from workflow import station_source_preservation as preservation
+        original = self.ws / 'source/tapdata/tapdata/file.txt'
+        copied = backup / 'tapdata/tapdata/file.txt'
+        copied.unlink()
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            preservation.verified_backup(self.ws, str(backup))
+        os.link(original, copied)
+        with self.assertRaisesRegex(ValueError, '硬链接'):
+            preservation.verified_backup(self.ws, str(backup))
+        for bad in (self.ws / 'source', self.ws):
+            with self.assertRaisesRegex(ValueError, '独立'):
+                preservation.verified_backup(self.ws, str(bad.resolve()))
+        linked = self.root / 'linked-backup'
+        linked.symlink_to(backup, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '无链接'):
+            preservation.verified_backup(self.ws, str(linked))
+
+    def test_source_copy_changes_after_preview_and_during_resume_fail_closed(self):
+        task = self.takeover()
+        backup, request = self.source_backup_request()
+        copied = backup / 'tapdata/tapdata/file.txt'
+        original = copied.read_bytes()
+        copied.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            self.run_clean(task, request)
+        copied.write_bytes(original)
+        with mock.patch.object(station_resources, 'cleanup_declared', return_value=[{'reason': 'offline'}]):
+            pending = self.run_clean(task, request)
+        self.assertEqual('awaiting_resources', pending['phase'])
+        copied.write_bytes(b'changed after resources')
+        pending = self.run_clean(task, request)
+        self.assertFalse(pending['cleanup_result']['complete'])
+        self.assertIn('副本已变化', pending['cleanup_result']['residuals'][0]['reason'])
+        self.assertIsNotNone(task_store.read_task(self.ws))
+        copied.write_bytes(original)
+        shared = self.root / 'shared-copy'
+        shutil.copy2(copied, shared)
+        copied.unlink()
+        os.link(shared, copied)
+        pending = self.run_clean(task, request)
+        self.assertFalse(pending['cleanup_result']['complete'])
+        self.assertIn('硬链接', pending['cleanup_result']['residuals'][0]['reason'])
+        copied.unlink()
+        shutil.copy2(self.ws / 'source/tapdata/tapdata/file.txt', copied)
+        self.assertTrue(self.run_clean(task, request)['cleanup_result']['complete'])
+
+    def test_source_copy_special_files_and_external_object_dependencies_are_rejected(self):
+        self.takeover()
+        backup, _ = self.source_backup_request()
+        from workflow import station_source_preservation as preservation
+        fifo = backup / 'pipe'
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, '特殊文件'):
+            preservation.backup_inventory(backup)
+        fifo.unlink()
+        alt = backup / 'tapdata/tapdata/.git/objects/info/alternates'
+        alt.write_text('/external/objects\n')
+        with self.assertRaisesRegex(ValueError, '外部 Git'):
+            preservation.backup_inventory(backup)
+
+    def test_source_copy_resume_after_source_reset_keeps_original_backup(self):
+        from workflow import station_source_reset
+        task = self.takeover()
+        repo = self.ws / 'source/tapdata/tapdata'
+        (repo / 'unique.txt').write_text('keep original evidence')
+        backup, request = self.source_backup_request()
+        reset = station_source_reset.execute
+        def interrupted(*args):
+            reset(*args)
+            raise OSError('interrupted after source reset')
+        with mock.patch.object(station_source_reset, 'execute', side_effect=interrupted):
+            result = self.run_clean(task, request)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertFalse((repo / 'unique.txt').exists())
+        copied = backup / 'tapdata/tapdata/unique.txt'
+        copied.write_text('changed backup')
+        result = self.run_clean(task, request)
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertIn('副本已变化', result['cleanup_result']['residuals'][0]['reason'])
+        copied.write_text('keep original evidence')
+        result = self.run_clean(task, request)
+        self.assertTrue(result['cleanup_result']['complete'], result)
+        self.assertEqual('keep original evidence', copied.read_text())
 
     def test_task_cleanup_retains_configuration_and_releases_execution(self):
         task = self.takeover()

@@ -187,6 +187,8 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --check --scope
 python3 <product-root>/workflow/station-clean.py --dir <station> --execute --scope task --expected-plan-digest <预检digest> --decision-ref <有效用户决定来源> --materials preserved
 ```
 
+必要源码另存到工位外时，先停止写入并建立整个 source 的独立副本（包含隐藏文件和完整 `.git`），在上述预检和执行两次调用中均增加 `--source-backup <副本绝对目录>`。程序不创建副本、不信任清单声明，而是读取原件和副本的实际内容、文件模式及链接目标，拒绝缺项、硬链接共享、外部 Git 对象依赖和工位内路径。副本核验通过可满足本地源码的保全要求，不代表代码已推送或建立了 Jira 持久接续点；runtime、配置和其它必要材料仍须单独保全。执行及中断恢复在源码处置前重新核验原副本，变化时保留操作并拒绝继续；恢复沿原操作，不再传新的副本路径。副本保留供恢复使用，清理不会删除它。仅在绑定安装已支持此参数时使用。
+
 清理工位将两次调用的 scope 都改为 station。`preserved` 表示 Agent 已核实必要材料有可靠副本；源码还有未保全或未核实内容时程序拒绝。Agent 先按用户已有决定推送并回读，或把唯一文件归置到可靠保全位置后重检；已保全内容不重复索要确认。用户明确接受本地材料丢失时使用 `--materials discard`，它不删除远端成果。实施方案确认可明确涵盖完成后的常规任务清理：保全成果、保留 config 和可复用源码，实际预检范围须与原决定一致；满足条件时 decision-ref 复用原方案确认，不再次索取同一批准。未涵盖清理、存在未知数据、需 discard、删除配置或扩大范围时集中请研发决定。预检本身不授权删除，范围变化须重新核实。源码核验自动包含在清理预检中，不再需要独立开关。
 
 归档独立使用 `--action archive --handoff-input <材料文件>`，具体流程见[持久接续点操作](task-archive-and-resume.md#持久接续点操作)。不再提供 release 或 work-clean 生命周期入口；任务进行中的缓存清理、环境重建由对应功能处理。
