@@ -2,6 +2,14 @@
 
 quality.py 的 status/apply 默认省略完整 context、方法定义和历史发布正文／快照，保留检查项、确认交接、阻塞及精确下一动作；使用 `status --full` 查看完整报告。内部判定、事件和写入载荷不变。程序消费完整报告时显式使用 `--full`，不得重试已成功 apply 只为获取详情。
 
+## Jira 原生工具选择与认证
+
+Jira 操作优先使用 MCP。已核实连接器不支持某项操作、必填参数或原始字段表示时，直接使用 Jira REST API 完成该项，不要求每次先调用失败，也不重复索取已覆盖操作的授权；其它受支持操作继续使用 MCP。认证失败、权限不足和结果未知不等于能力缺失：401/403 先处理认证或权限，未知写入先回读原请求，不能换工具重发。工具替换不改变任务归属、审批、写入范围及成果核验要求，不新增产品 Jira 客户端。
+
+REST 优先复用用户已授权的认证配置或代理。需要配置时，在当前工位 `config/jira/rest-auth.json` 创建不覆盖已有内容的模板，权限设为 `0600`，由用户本地填写 `site_url`、`cloud_id`、`email`、`api_token` 和 `token_type`；不在聊天索取 token。`token_type=classic` 使用该站点 `/rest/api/3`，`token_type=scoped` 使用 `https://api.atlassian.com/ex/jira/<cloud_id>/rest/api/3`，以实际令牌类型及授权范围核验。只向明确绑定的 Jira 站点或 Atlassian API 端点发送认证，不把凭据输出到日志、Jira、源码或普通证据；任务清理保留 config，工位清理沿配置处置合同。切换连接后核对当前用户、站点及目标任务，不假定与 MCP 身份相同。
+
+用户不愿配置或授权 REST，或没有可用 REST 路径时，再提示浏览器作为可选方式；浏览器须由用户选择，拒绝后只暂停依赖步骤并保留待办。不把每次 MCP 报错都变成工具选择或授权问答。
+
 ## 接管摘要发布与回读
 
 接管准备成功后，先按下述四项标记流程写入并回读，再从 `external_sync.py status` 获取 `takeover_comment`。摘要只包含当前 Jira 登录用户显示名和已确认的源码来源列表，并明确源码准备状态；版本、工位和 run 保留在四项接管字段，不重复进入正文。操作人保存 accountId 供核对，不使用 Jira Assignee、系统登录名或 Agent 应用用户名；Jira Cloud 返回的 displayName 用于显示。Tag/SHA 基线明确显示“无分支（Tag／SHA：…）”，不把临时检出分支或后续工作分支当作来源分支。内部发布编号不进入评论正文。
@@ -82,6 +90,8 @@ python3 <agenticops-root>/workflow/jira_worklog.py status --dir <工位> --issue
 创建响应丢失时，bind 仅从创建前不存在且原作者、目标、开始时间、秒数和正文全部匹配的记录中定位；没有或不唯一就保留未知，不能再次创建。已绑定 ID 后的属性失败只恢复同一 ID 的属性，不新建 Worklog；补写相同属性值可幂等收敛。两步写入不是跨服务事务，不承诺全局强互斥或跨工位严格恰好一次。verified 不再发送；已产生意图后再次 prepare 不输出创建载荷。“没有查到”不等于未写入。只有原创建明确返回 400/401/403/404/413/422 且能证明未生效时，才用 retry 导入原 `rejected_request_digest/http_status/rejection_ref` 和完整列表恢复同一意图；已发现新工时或已绑定 ID 禁止重建。
 
 已有 REST 原子属性意图仍沿原载荷回读；拥有直接 API 能力时可声明 `capabilities.worklog_properties=true`、`capabilities.adjust_estimate_leave=true` 使用秒数和 `agenticops.worklog` 属性，不将旧意图改为 MCP 模式或改变原预估策略。没有适用原生能力时 defer 保存已知未发送原因，继续无依赖工作。输入来源和能力由 Agent 实际核验，程序不认证外部事实；普通评论不能冒充 Worklog。
+
+REST 开始时间使用 Jira 接受的毫秒及无冒号时区格式。若真实请求和回读证明服务端按分钟向下取整，在快照声明 `capabilities.worklog_precision_seconds=60` 并提供 `worklog_precision_ref`；新请求只发送完整分钟，不足一分钟保留累计。旧意图也只沿原属性唯一定位、核对作者/任务/时间/正文，并仅接纳该精度下的精确向下取整值，记录 `logged_seconds` 与 `unlogged_seconds`；不改原载荷、不重发差额。没有精度证据、其它时长差异或归属变化仍拒绝。真实已登记时间与未登记余量分别披露并保全。
 
 ### 恢复与保全
 
@@ -643,6 +653,8 @@ TapData 评论面向研发、测试和审查人。首次接管、方案确定或
 方案确认后、实施前同步 Issue Analysis；修改形成且首轮验证后同步阶段性 Fix Details，明确待验收，最终验收或 CI 结论变化后更新。字段采集不是同步成功：先读取完整原值，保留人工内容并形成 proposals，复用有效决定 confirm，再执行 `jira_status prepare_fields --checkpoint <节点> --input <文件>`。输入复用 snapshot/proposals，增加稳定 operation_id；返回 native_request 后由 Agent 原生写入，保存原操作并执行 `readback_fields`，输入带原 operation_id 和原生 snapshot。所有入口均带 issue-key、expected-run-id、dir。明确未写入时可向 readback_fields 提交 result=not_written，snapshot.operation_result 须包含原 operation_id、effect=not_written 和 source_ref，并核验原写前值；只有明确拒绝才能解除未知，不能从未查到推断。回读仅验证原全文，不将旧操作成功解释为当前方案已同步；待办按当前材料判断新鲜度。字段缺值、仅 ID 或无法表示完整富文本时先补查，不当空值覆盖。普通文本保持真实原生值；含媒体或格式结构的字段须使用可保留结构的原生表示，不自行扁平化。
 
 字段或评论失败只暂停依赖的同步，继续无依赖研发；创建响应丢失先按原意图、目标、作者、正文及返回 ID 定位，无法唯一定位时保留未知，不重发。新操作和旧记录沿所属入口恢复，不修改旧事件或旧正文。跨工位需要的当前方案、实际成果、源码与证据引用保存在 Jira 字段和既有持久接续材料，不能仅留本机路径；清理前核验可取回性。评论简化不改变 Q1—Q6、状态转换、PR Ready 或成果保全要求。
+
+字段回读按当前原生表单 schema 核对：选项/版本使用 ID，人员使用 accountId，级联选项同时核对 child；拟写值明确指定的展示属性仍须一致，回读补充的信息不等于写入内容变化。普通文本可与仅含 paragraph、text、hardBreak 的 ADF 严格核对换行及完整文字；含标记、链接、媒体、未知节点或属性的结构不降为纯文本。旧意图沿原编号恢复，不手工裁剪原生回读来制造等值；无法匹配的表示继续保留待核验。
 
 方案确认时一并告知用户将同步确认方案、实际修复及新增协作结论。用户可在同一真实回复确认方案、验收方式、任务授权及合格 Q3 的自动回写/推送/Draft PR；该回复可被引用完成多项选择和评论确认，不要求逐条回复。Q4 的 Manual/Unit 仍须基于当前 SHA 的证据请求最终验收；全部为 TapTest 时按状态自动汇总。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
 

@@ -83,6 +83,11 @@ def load(base, issue):
                 raise ValueError('工时起止时间与结算秒数不一致')
         if 'request' in row and row.get('request_digest') != digest(row['request']):
             raise ValueError('工时发送载荷摘要不符')
+        if row.get('transport') != 'atlassian_mcp' and 'logged_seconds' in row:
+            if (type(row['logged_seconds']) is not int or not 0 < row['logged_seconds'] <= row['seconds']
+                    or row.get('unlogged_seconds') != row['seconds'] - row['logged_seconds']
+                    or not 0 <= row['unlogged_seconds'] < 60):
+                raise ValueError('REST 工时实登与余量不一致')
         if row.get('transport') == 'atlassian_mcp':
             arguments = row['request']['arguments']
             wanted = row['expected_worklog']
@@ -289,11 +294,18 @@ def prepare(base, state, segment_id, snapshot, task):
         raise ValueError('原生能力需支持 MCP 创建及属性补写，或 REST 原子属性与预估参数；否则 defer 保留待登记')
     identifier = digest([site, issue_id, state['station_id'], state['run_id'], segment_id])
     comment = CATEGORIES[row['category']] + '｜' + row['summary']
-    body = {'started': row['started'], 'timeSpentSeconds': row['seconds'],
+    body = {'started': instant(row['started']).strftime('%Y-%m-%dT%H:%M:%S.000%z'), 'timeSpentSeconds': row['seconds'],
             'comment': {'type': 'doc', 'version': 1, 'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': comment}]}]},
             'properties': [{'key': PROPERTY, 'value': {'id': identifier}}]}
     request = {'method': 'POST', 'site': site, 'path': '/rest/api/3/issue/' + issue_id + '/worklog',
                'query': {'adjustEstimate': 'leave'}, 'body': body}
+    if not mcp and minute_precision(snapshot):
+        seconds = row['seconds'] // 60 * 60
+        if not seconds:
+            row.update(status='deferred', reason='已核验 Jira 服务端按整分钟登记；不足一分钟保留原段继续累计')
+            return None
+        body['timeSpentSeconds'] = seconds
+        row.update(logged_seconds=seconds, unlogged_seconds=row['seconds'] - seconds)
     if mcp:
         if snapshot.get('worklogs_complete') is not True or not isinstance(snapshot.get('worklogs'), list):
             raise ValueError('MCP 创建前须完整回读 Worklog 列表，保留既有 ID 防重')
@@ -368,6 +380,13 @@ def bind(base, state, segment_id, snapshot):
         'propertyKey': MCP_PROPERTY, 'value': {'id': row['property_id']}}}
 
 
+def minute_precision(snapshot):
+    """精度来自实际服务核验，不因出现任意时长差异自动推断。"""
+    return (snapshot.get('capabilities', {}).get('worklog_precision_seconds') == 60
+            and isinstance(snapshot.get('worklog_precision_ref'), str)
+            and bool(snapshot['worklog_precision_ref'].strip()))
+
+
 def complete(base, state, segment_id, snapshot):
     row = state['segments'][segment_id]
     if row['status'] not in ('intent', 'verified'):
@@ -387,10 +406,18 @@ def complete(base, state, segment_id, snapshot):
         row['readback_ref'] = snapshot['source_ref']
         return
     worklog = matches[0]
-    if not str(worklog.get('id', '')).isdigit() or not body_matches(worklog, wanted, row):
+    compared = wanted
+    if row.get('transport') != 'atlassian_mcp' and minute_precision(snapshot):
+        rounded = wanted['timeSpentSeconds'] // 60 * 60
+        if rounded > 0:
+            compared = dict(wanted, timeSpentSeconds=rounded)
+    if not str(worklog.get('id', '')).isdigit() or not body_matches(worklog, compared, row):
         raise ValueError('原工时作者、目标、开始时间、耗时或正文不一致；不覆盖或重发')
     if row.get('worklog_id') and row['worklog_id'] != str(worklog['id']):
         raise ValueError('原工时 ID 已变化；保留原回执核实')
+    if row.get('transport') != 'atlassian_mcp':
+        seconds = worklog['timeSpentSeconds']
+        row.update(logged_seconds=seconds, unlogged_seconds=row['seconds'] - seconds)
     row.update(status='verified', worklog_id=str(worklog['id']), readback_ref=snapshot['source_ref'])
     row.pop('reason', None)
 

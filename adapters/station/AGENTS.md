@@ -25,7 +25,7 @@ Codex 的 `.agents/skills/`、Claude Code 的 `.claude/skills/` 链接到同一�
 
 ## 必需插件的按需配置
 
-必需插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`。首次需要 Jira 事实时检查 `atlassian` 是否可用；缺失、未启用或未登录时，只暂停依赖 Jira 的步骤，说明用途与当前客户端安装/登录入口。不得伪造结果、自行配置全局插件或改用未受控 token/PAT。GitHub MCP、gh 或其它工具由 Agent 按已有授权选择，不作为启动前置条件。
+必需插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`。首次需要 Jira 事实时检查 `atlassian` 是否可用；缺失、未启用或未登录时说明用途与当前客户端安装/登录入口。按[Jira 原生工具选择与认证](__AGENTIC_OPS_HOME__/docs/usage/quality-checkpoints.md#jira-原生工具选择与认证)优先 MCP，已核实的能力缺口直接使用 REST，认证配置由用户在工位 config 本地填写，浏览器由用户选择。不得伪造结果、自行配置全局插件或使用未经授权的凭据；无可用路径时只暂停依赖步骤。GitHub MCP、gh 或其它工具由 Agent 按已有授权选择，不作为启动前置条件。
 
 ## 当前任务操作
 
