@@ -58,8 +58,11 @@ def takeover(base, request, operation_id, expected_revision):
                 if path.exists():
                     source.identity(path, catalog[name]["origin"])
                     source.require_clean(path)
-            if any((task_store.state_path(base) / name).exists() for name in ("authorization.json", "evidence")):
+            authorization_path = task_store.state_path(base) / 'authorization.json'
+            if authorization_path.exists() or authorization_path.is_symlink():
                 raise ValueError("空闲工位仍有活动授权或证据，拒绝接管")
+            from workflow import jira_worklog
+            jira_worklog.check_takeover_evidence(base, issue)
         if not previous or previous["operation_id"] != operation_id:
             runtime = Path(base) / station_layout.station_name(base, "task-runtime")
             if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
@@ -95,6 +98,8 @@ def takeover(base, request, operation_id, expected_revision):
             task_store.write_task(base, task)
         if task["run_id"] != operation["run_id"]:
             raise ValueError("接管恢复 run 不一致")
+        from workflow import jira_worklog
+        jira_worklog.attach_takeover(base, task)
         if not operation.get('takeover_baseline'):
             # 旧接管采用新顺序，先核验原请求；不重建 run 或冒充原历史已有预检。
             operation['takeover_baseline'] = station_takeover.preflight(base, request)

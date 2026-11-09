@@ -261,6 +261,56 @@ class WorklogTests(unittest.TestCase):
         self.assertEqual('unmeasured', result['segments'][0]['status'])
         self.assertNotIn('seconds', result['segments'][0])
 
+    def test_pre_takeover_validation_rejects_foreign_damaged_and_sent_records(self):
+        current = task_store.read_current(self.base)
+        task_store.compare_and_set(self.base, current['revision'], None)
+        self.call('start', category='takeover', expected_run_id=None)
+        path = log.state_path(self.base, 'TAP-123')
+        # save_task 夹具产生的其它证据不属于本次预接管记录。
+        for entry in path.parent.iterdir():
+            if entry != path:
+                entry.unlink()
+        original = log.load(self.base, 'TAP-123')
+        log.check_takeover_evidence(self.base, 'TAP-123')
+        cases = [dict(original, run_id='old-run'), dict(original, station_id='b' * 32),
+                 dict(original, issue_key='TAP-456'), dict(original, schema_version=99)]
+        for field, value in [('category', 'plan'), ('session_id', None), ('status', 'verified'),
+                             ('request', {}), ('active_started', None)]:
+            damaged = copy.deepcopy(original)
+            damaged['segments']['segment-0001'][field] = value
+            cases.append(damaged)
+        for damaged in cases:
+            with self.subTest(damaged=damaged):
+                path.write_text(json.dumps(damaged))
+                before = path.read_bytes()
+                with self.assertRaises((ValueError, KeyError, TypeError, AttributeError)):
+                    log.check_takeover_evidence(self.base, 'TAP-123')
+                self.assertEqual(before, path.read_bytes())
+        path.write_text(json.dumps(original))
+        other = path.with_name('jira-worklog-TAP-456.json')
+        other.write_text(json.dumps(original))
+        with self.assertRaisesRegex(ValueError, '未知或其它任务'):
+            log.check_takeover_evidence(self.base, 'TAP-123')
+        other.unlink()
+        path.unlink()
+        path.symlink_to(self.base / 'absent')
+        with self.assertRaisesRegex(ValueError, '未知或其它任务'):
+            log.check_takeover_evidence(self.base, 'TAP-123')
+        path.unlink()
+        path.parent.rmdir()
+        path.parent.symlink_to(self.base / 'absent-directory')
+        with self.assertRaisesRegex(ValueError, '目录不可信'):
+            log.check_takeover_evidence(self.base, 'TAP-123')
+
+    def test_takeover_attachment_preserves_existing_unknown_send(self):
+        self.prepared()
+        before = log.state_path(self.base, 'TAP-123').read_bytes()
+        log.attach_takeover(self.base, self.task)
+        self.assertEqual(before, log.state_path(self.base, 'TAP-123').read_bytes())
+        with self.assertRaises(ValueError):
+            log.attach_takeover(self.base, dict(self.task, run_id='another-run'))
+        self.assertEqual(before, log.state_path(self.base, 'TAP-123').read_bytes())
+
     def test_write_response_loss_converges_by_property_without_second_send(self):
         request = self.prepared()
         snapshot = self.readback(request)

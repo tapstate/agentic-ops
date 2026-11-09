@@ -113,6 +113,81 @@ class StationTests(unittest.TestCase):
             station.takeover(self.ws, self.request, 'op-takeover-one', 0)
             self.assertEqual(update.call_count, 1)
 
+    def pre_takeover_timer(self, paused=False):
+        from workflow import jira_worklog as log
+        from types import SimpleNamespace
+        import contextlib
+        import io
+        args = SimpleNamespace(action='start', dir=str(self.ws), issue_key='TAP-123',
+            expected_run_id=None, segment_id='takeover-0001', category='takeover',
+            summary='准备接管', snapshot=None, reason=None)
+        with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(log, 'now', return_value='2026-11-07T10:00:00+00:00'):
+            log.command(args)
+        if paused:
+            args.action = 'pause'
+            with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(log, 'now', return_value='2026-11-07T10:00:15+00:00'):
+                log.command(args)
+        return log.load(self.ws, 'TAP-123')
+
+    def test_takeover_keeps_active_timer_and_binds_original_record(self):
+        from workflow import jira_worklog as log
+        self.prepare_engineering()
+        before = self.pre_takeover_timer()
+        task = self.takeover()
+        expected = dict(before, run_id=task['run_id'])
+        self.assertEqual(expected, log.load(self.ws, 'TAP-123'))
+        station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+        self.assertEqual(expected, log.load(self.ws, 'TAP-123'))
+        self.assertTrue(task['source_prepared'])
+
+    def test_paused_timer_recovers_after_current_written_before_attachment(self):
+        from workflow import jira_worklog as log
+        self.prepare_engineering()
+        before = self.pre_takeover_timer(paused=True)
+        with mock.patch.object(log, 'attach_takeover', side_effect=OSError('interrupted')):
+            with self.assertRaisesRegex(OSError, 'interrupted'):
+                self.takeover()
+        original = task_store.read_task(self.ws)
+        self.assertEqual(before, log.load(self.ws, 'TAP-123'))
+        station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+        self.assertEqual(original['run_id'], task_store.read_task(self.ws)['run_id'])
+        self.assertEqual(dict(before, run_id=original['run_id']), log.load(self.ws, 'TAP-123'))
+        self.assertEqual(15, log.load(self.ws, 'TAP-123')['segments']['takeover-0001']['seconds'])
+
+    def test_timer_attachment_replay_after_save_does_not_reset_or_rebind(self):
+        from workflow import jira_worklog as log
+        self.prepare_engineering()
+        before = self.pre_takeover_timer(paused=True)
+        attach = log.attach_takeover
+        def interrupted(base, task):
+            attach(base, task)
+            raise OSError('after attachment')
+        with mock.patch.object(log, 'attach_takeover', side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, 'after attachment'):
+                self.takeover()
+        original = task_store.read_task(self.ws)
+        station.takeover(self.ws, self.request, 'op-takeover-one', 0)
+        self.assertEqual(dict(before, run_id=original['run_id']), log.load(self.ws, 'TAP-123'))
+
+    def test_takeover_rejects_unknown_evidence_without_creating_operation(self):
+        from workflow import jira_worklog as log
+        self.prepare_engineering()
+        self.pre_takeover_timer(paused=True)
+        timer = log.state_path(self.ws, 'TAP-123')
+        before = timer.read_bytes()
+        unknown = timer.parent / 'unknown.json'
+        unknown.write_text('unique evidence')
+        with self.assertRaisesRegex(ValueError, '未知或其它任务证据'):
+            self.takeover()
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertIsNone(station_operation.read(self.ws))
+        self.assertEqual(before, timer.read_bytes())
+        self.assertEqual('unique evidence', unknown.read_text())
+
+    def test_takeover_accepts_empty_real_evidence_directory(self):
+        (self.ws / '.agenticops/evidence').mkdir()
+        self.assertTrue(self.takeover()['source_prepared'])
+
     def test_reference_refresh_skips_invalid_revision_and_resumed_failure(self):
         self.prepare_engineering()
         with mock.patch.object(station.source, 'refresh_shared_references') as update:
