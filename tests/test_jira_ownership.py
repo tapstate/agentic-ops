@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """四项归属与预检后通知：使用真实本地 Git 和现役确定性入口。"""
 import copy
+import contextlib
+import io
+import os
+from pathlib import Path
+from types import SimpleNamespace
 from datetime import datetime, timezone
 import unittest
 from unittest import mock
@@ -184,6 +189,63 @@ class OwnershipTests(unittest.TestCase):
         args.expected_run_id = 'wrong-run'
         with self.assertRaises(ValueError):
             cli.cmd_interaction_path(args)
+
+    def test_resumed_session_can_prepare_markers_but_not_develop_before_readback(self):
+        from workflow import execution, task as cli
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: 'a' * 32}):
+            operation = self.begin(); self.markers(); self.notice()
+            observed = copy.deepcopy(self.snapshot)
+            observed['issue']['fields']['status'] = {'id': '3', 'name': 'In Progress'}
+            jira_status.prepare(self.ws, 'TAP-123', 'takeover', observed)
+            station.takeover(self.ws, self.request, operation['operation_id'], 0)
+            original = task_store.read_task(self.ws)
+            self.assertFalse(station_takeover.preparing(self.ws, original))
+            digest = execution.status(self.ws)['control_digest']
+        args = SimpleNamespace(dir=self.ws, issue_key='TAP-123', expected_run_id=original['run_id'],
+                               name='resume-markers.json', purpose='takeover')
+        with mock.patch.dict(os.environ, {execution.SESSION_ENV: 'b' * 32}):
+            with self.assertRaisesRegex(ValueError, '已有执行接管者'):
+                cli.cmd_interaction_path(args)
+            execution.claim(self.ws, '恢复会话', digest, 'fixture:stopped', 'fixture:user-resume')
+            with self.assertRaisesRegex(ValueError, '归属'):
+                jira_ownership.require(self.ws, 'TAP-123')
+            args.purpose = 'development'
+            with self.assertRaisesRegex(ValueError, '归属'):
+                cli.cmd_interaction_path(args)
+            args.purpose = 'takeover'
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                cli.cmd_interaction_path(args)
+            path = Path(output.getvalue().strip())
+            self.assertEqual(original, task_store.read_task(self.ws))
+            completed_operation = station_operation.read(self.ws)
+            pending_cleanup = copy.deepcopy(completed_operation)
+            pending_cleanup.update(kind='clean', status='running', phase='cleanup_archive')
+            pending_cleanup.pop('takeover_baseline', None)
+            self.write(station_operation.path(self.ws), pending_cleanup)
+            with self.assertRaisesRegex(ValueError, '未完成操作'):
+                cli.cmd_interaction_path(args)
+            self.write(station_operation.path(self.ws), completed_operation)
+            for name in ('../escape.json', 'Invalid.json'):
+                args.name = name
+                with self.assertRaisesRegex(ValueError, '文件名'):
+                    cli.cmd_interaction_path(args)
+            args.name = 'resume-markers.json'
+            args.expected_run_id = 'wrong-run'
+            with self.assertRaises(ValueError):
+                cli.cmd_interaction_path(args)
+            args.expected_run_id = original['run_id']
+            import json
+            path.write_text(json.dumps(observed))
+            prepared = jira_watermark.prepare(self.ws, 'TAP-123', jira_watermark.read_input(path))
+            self.assertEqual('verified', prepared['outcome'])
+            jira_ownership.require(self.ws, 'TAP-123')
+            self.assertEqual(original['run_id'], task_store.read_task(self.ws)['run_id'])
+            ended = task_store.read_task(self.ws)
+            ended['outcome'] = 'completed'
+            task_store.write_task(self.ws, ended)
+            with self.assertRaisesRegex(ValueError, '已结束'):
+                cli.cmd_interaction_path(args)
 
     def test_first_marker_prepare_must_match_intake_issue_id(self):
         self.begin()

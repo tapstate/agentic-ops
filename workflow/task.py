@@ -562,10 +562,17 @@ def cmd_block(args):
 
 def cmd_interaction_path(args):
     from workflow import station_takeover
-    # 标记核验本身需要输入文件；仅开放已预检接管的本地材料路径，不开放开发动作。
+    # 首次接管和原 run 恢复都需要先保存标记回读；材料入口不授予开发权限。
     with task_store.task_state_lock(args.dir, ownership=False):
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+        if getattr(args, 'purpose', 'development') == 'takeover':
+            if task.get('archive_ref') or task.get('outcome') in ('completed', 'interrupted'):
+                raise ValueError('当前 run 已结束或归档，不能准备接管恢复输入')
+            station_takeover.require_external(args.dir, task)
+            path = task_store.interaction_path(args.dir, issue, task['run_id'], args.name, create=True)
+            print(path)
+            return 0
         if not station_takeover.preparing(args.dir, task):
             from workflow import jira_ownership
             jira_ownership.require(args.dir, issue)
@@ -1064,7 +1071,8 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--name", required=True)
     p.add_argument("--dir", default=".")
-    p.add_argument('--purpose', choices=('development',), default='development')
+    p.add_argument('--purpose', choices=('development', 'takeover'), default='development',
+                   help='takeover 仅准备归属回读/旧协调退役输入，仍核验本地执行占用和当前 run')
     p.add_argument('--operation-id')
     p.add_argument('--expected-revision', type=int)
     p.add_argument('--expected-plan-digest')

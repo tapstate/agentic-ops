@@ -339,6 +339,8 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
 
 文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档尽力记录已有结果，不停止开发；release/clean 收尾移除活动副本，记录缺项不阻塞退出。不用根目录文件名前缀模拟任务归属。
 
+原 run 在新会话恢复时，先核实停写并完成本地执行接管，再在上述命令追加 `--purpose takeover`，为四项标记原生回读或旧协调退役准备输入。该用途只分配本地材料路径，核验当前 run、未结束状态、本地会话占用和路径边界，不要求先有本会话的远端归属证明；随后仍由 coordination retire、jira_watermark prepare/complete 核验实际输入。它不授予开发或外部写入权限，普通 development 用途及业务动作仍要求有效归属。首次预检接管的既有输入路径保持兼容。
+
 旧状态不在线迁移或猜测归属；退出当前任务后，明确 station purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
 
 ## 任务类型与质量配置
