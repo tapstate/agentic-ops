@@ -1,6 +1,6 @@
 ## 接管与恢复
 
-首次需要 Jira 时按工位入口检查 Atlassian MCP，未安装／未启用／未登录就提示对应入口，仅暂停依赖步骤。优先 MCP；字段省略按[四项接管标记](../../../../../docs/usage/quality-checkpoints.md#四项接管标记)有限补查，不自动转浏览器、不反复安装不同名称的插件。正常流程只读取当前动作章节及返回的 next_step/required_input；已有输出可接续就不重复 status，不默认 context --full 或阅读 Workflow 实现。
+首次需要 Jira 时按工位入口检查 Atlassian MCP，未安装／未启用／未登录就提示对应入口；按[Jira 原生工具选择与认证](../../../../../docs/usage/quality-checkpoints.md#jira-原生工具选择与认证)优先 MCP，已确认的能力缺口直接使用 REST，不反复触发已知失败或安装不同名称的插件。字段省略按[四项接管标记](../../../../../docs/usage/quality-checkpoints.md#四项接管标记)有限补查，浏览器由用户选择。正常流程只读取当前动作章节及返回的 next_step/required_input；已有输出可接续就不重复 status，不默认 context --full 或阅读 Workflow 实现。
 
 新接管预检通过后，TapData 项目入口会尝试更新已安装的 DBForge CLI；首次实际使用由共享 [ao-dbforge](../../../../../skills/shared/ao-dbforge/SKILL.md) 安装和配置。未安装、更新失败或 token 尚未填写不阻塞无依赖的接管工作；读取本次返回结果，不重复更新。原 run、同一在途操作恢复和分支更正不触发这项工具更新。
 

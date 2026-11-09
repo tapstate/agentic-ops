@@ -20,6 +20,36 @@ from station_fixture import save_task as save_station_task
 from station_fixture import task_state_snapshot
 
 class JiraStatusTests(unittest.TestCase):
+    def test_native_field_identity_and_plain_adf_readback(self):
+        from workflow.jira_collect import field_matches
+        self.assertTrue(field_matches({'id': '1'}, {'id': '1', 'value': 'Yes'}, {'type': 'option'}, 'x'))
+        self.assertFalse(field_matches({'id': '1'}, {'id': '2', 'value': 'Yes'}, {'type': 'option'}, 'x'))
+        self.assertFalse(field_matches({'id': '1'}, {'id': '1', 'child': {'id': '2'}}, {'type': 'option-with-child'}, 'x'))
+        self.assertTrue(field_matches([{'accountId': 'a'}], [{'accountId': 'a', 'displayName': 'Person'}], {'type': 'array', 'items': 'user'}, 'x'))
+        self.assertTrue(field_matches([{'id': '1', 'name': 'develop'}], [{'id': '1', 'name': 'develop', 'released': False}], {'type': 'array'}, 'fixVersions'))
+        self.assertFalse(field_matches({'id': '1'}, {'id': '1', 'value': 'Yes'}, {'type': 'object'}, 'x'))
+        adf = {'type': 'doc', 'version': 1, 'content': [{'type': 'paragraph', 'content': [
+            {'type': 'text', 'text': '人工内容'}, {'type': 'hardBreak'}, {'type': 'text', 'text': '新结论'}]}]}
+        self.assertTrue(field_matches('人工内容\n新结论', adf, {'type': 'string'}, 'x'))
+        self.assertFalse(field_matches('新结论', adf, {'type': 'string'}, 'x'))
+        adf['content'][0]['content'][0]['marks'] = [{'type': 'link', 'attrs': {'href': 'https://example.com'}}]
+        self.assertFalse(field_matches('人工内容\n新结论', adf, {'type': 'string'}, 'x'))
+
+    def test_existing_field_intent_recovers_from_native_adf_without_resend(self):
+        from workflow import jira_collect
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '人工备注：保留\n修复结论'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        doc = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'native-field-op'}
+        original = jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)
+        snapshot['issue']['fields']['customfield_b'] = {'type': 'doc', 'version': 1, 'content': [
+            {'type': 'paragraph', 'content': [{'type': 'text', 'text': '人工备注：保留'},
+             {'type': 'hardBreak'}, {'type': 'text', 'text': '修复结论'}]}]}
+        recovered = jira_collect.readback_fields(self.base, self.task, doc)
+        self.assertEqual('verified', recovered['status'])
+        self.assertEqual(original['fields'], recovered['fields'])
+        self.assertIsNone(jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)['native_request'])
+
     def test_delivery_mappings_are_type_specific_and_require_real_evidence(self):
         for task_class, issue_type, ids in (("defect_fix", "10011", ("131", "291")),
                                             ("feature_change", "10010", ("91", "111"))):

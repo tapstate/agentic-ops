@@ -314,6 +314,59 @@ def prepare_fields(base, task, checkpoint, document):
     return dict(record, native_request={"issue_key": task["issue_key"], "fields": proposals})
 
 
+def field_matches(expected, observed, schema, field):
+    """只接纳已知 Jira 字段的原生表示；不剥离任意富文本结构。"""
+    if expected == observed:
+        return True
+    kind = schema.get("type")
+    if kind == "string" and isinstance(expected, str) and isinstance(observed, dict):
+        if set(observed) != {"type", "version", "content"} or observed.get("type") != "doc" or observed.get("version") != 1:
+            return False
+        if not isinstance(observed["content"], list):
+            return False
+        paragraphs = []
+        for paragraph in observed.get("content", []):
+            if not isinstance(paragraph, dict) or set(paragraph) - {"type", "content"} or paragraph.get("type") != "paragraph" or not isinstance(paragraph.get("content", []), list):
+                return False
+            parts = []
+            for node in paragraph.get("content", []):
+                if not isinstance(node, dict):
+                    return False
+                if node.get("type") == "text" and set(node) == {"type", "text"} and isinstance(node["text"], str):
+                    parts.append(node["text"])
+                elif node == {"type": "hardBreak"}:
+                    parts.append("\n")
+                else:
+                    return False
+            paragraphs.append("".join(parts))
+        return expected == "\n\n".join(paragraphs)
+    if kind == "array" and isinstance(expected, list) and isinstance(observed, list):
+        item = schema.get("items")
+        if field in ("fixVersions", "versions"):
+            item = "version"
+        if item not in ("user", "version", "option") or len(expected) != len(observed):
+            return False
+        return all(field_matches(a, b, {"type": item}, field) for a, b in zip(expected, observed))
+    if kind not in ("user", "version", "option", "option-with-child"):
+        return False
+    identity = "accountId" if kind == "user" else "id"
+    if not isinstance(expected, dict) or not isinstance(observed, dict) or not expected.get(identity):
+        return False
+    if expected.get(identity) != observed.get(identity):
+        return False
+    # 仅忽略回读补充的展示信息；拟写内容中任何非展示约束仍须一致。
+    display = {"self", "name", "value", "displayName", "emailAddress", "active", "avatarUrls", "timeZone", "accountType", "archived", "released"}
+    if any(key not in display | {identity, "child"} for key in expected):
+        return False
+    if any(key in expected and expected[key] != observed.get(key) for key in display):
+        return False
+    if kind == "option-with-child":
+        if expected.get("child") is None or observed.get("child") is None:
+            return expected.get("child") == observed.get("child")
+        return field_matches(expected["child"], observed["child"], {"type": "option"}, field)
+    return "child" not in expected and "child" not in observed
+
+
 def readback_fields(base, task, document):
     from workflow import jira_status
     state = jira_status.load_state(base, task)
@@ -335,7 +388,9 @@ def readback_fields(base, task, document):
             raise ValueError("未写入必须有原操作明确拒绝依据及未变化的写前值，不能由未查到推断")
         record.update(status="not_written", readback_ref=snapshot["source_ref"])
     else:
-        if any(not field_value(fields, key)[0] or field_value(fields, key)[1] != value
+        packet = collect(base, task, record["checkpoint"], snapshot, record["fields"])
+        if any(not field_value(fields, key)[0] or not field_matches(value, field_value(fields, key)[1],
+                   packet["fields"][key]["schema"], key)
                for key, value in record["fields"].items()):
             raise ValueError("字段回读不完整或正文不匹配；保留原意图，禁止盲目重发")
         record.update(status="verified", readback_ref=snapshot["source_ref"])

@@ -19,6 +19,37 @@ from station_fixture import save_task, ownership_snapshot
 
 
 class WorklogTests(unittest.TestCase):
+    def test_rest_dates_and_explicit_minute_precision_preserve_remainder(self):
+        self.call('start')
+        self.call('pause', at='2026-11-03T10:07:18+00:00')
+        snapshot = self.snapshot(worklog_precision_ref='fixture:actual-server-minute-readback')
+        snapshot['capabilities']['worklog_precision_seconds'] = 60
+        request = self.call('prepare', snapshot=self.snapshot_file(snapshot))['native_request']
+        self.assertEqual('2026-11-03T10:00:00.000+0000', request['body']['started'])
+        self.assertEqual(420, request['body']['timeSpentSeconds'])
+        result = self.call('complete', snapshot=self.snapshot_file(self.readback(request)))
+        self.assertEqual('verified', result['segments'][0]['status'])
+        self.assertEqual(18, result['segments'][0]['unlogged_seconds'])
+        self.assertNotIn('native_request', self.call('prepare', snapshot=self.snapshot_file(snapshot)))
+
+    def test_old_rest_intent_rounding_requires_evidence_and_keeps_payload(self):
+        self.call('start')
+        self.call('pause', at='2026-11-03T10:07:18+00:00')
+        request = self.call('prepare', snapshot=self.snapshot_file(self.snapshot()))['native_request']
+        snapshot = self.readback(request)
+        snapshot['worklogs'][0]['timeSpentSeconds'] = 420
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            self.call('complete', snapshot=self.snapshot_file(snapshot))
+        snapshot['capabilities']['worklog_precision_seconds'] = 60
+        snapshot['worklog_precision_ref'] = 'fixture:verified-server-minute-precision'
+        changed = copy.deepcopy(snapshot)
+        changed['worklogs'][0]['timeSpentSeconds'] = 360
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            self.call('complete', snapshot=self.snapshot_file(changed))
+        result = self.call('complete', snapshot=self.snapshot_file(snapshot))
+        self.assertEqual(18, result['segments'][0]['unlogged_seconds'])
+        self.assertEqual(request, log.load(self.base, 'TAP-123')['segments']['segment-0001']['request'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='ao-jira-worklog-')
         self.addCleanup(self.temp.cleanup)

@@ -14,6 +14,8 @@
 
 两个清理范围、归档异常的用户决策与工位注销统一见[任务授权指引](task-authorization.md#清理与退出)。先由脚本预检，Agent 说明范围并核实材料处置后执行；配置是否保留取决于清理范围。唯一职责合同见[工位合同](../architecture/single-task-station.md)。
 
+[Jira 原生工具选择与认证](quality-checkpoints.md#jira-原生工具选择与认证)统一说明 MCP 优先、已知能力缺口直接使用 REST、工位认证配置及用户选择浏览器的边界；字段、评论和工时分别沿同页既有写入与回读合同，不另建客户端或同步流程。
+
 
 同 epoch 退出修复与跨 epoch 升级的入口由[更新与回退](update-and-rollback.md#同-epoch-恢复与跨-epoch-切换的目标入口)导航到[工位合同](../architecture/single-task-station.md)。该主题区分普通定点更新和明确的原版本维护恢复，覆盖首次旧客户端及失败续接；以绑定安装实际能力为准，源码实现不代表旧安装已应用。
 
