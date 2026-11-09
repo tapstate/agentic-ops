@@ -27,7 +27,7 @@ def initial_paths(base, config):
     return protected
 
 
-def plan(base, scope='task'):
+def plan(base, scope='task', source_backup=None):
     if scope not in ('task', 'station'):
         raise ValueError('清理范围必须为 task 或 station')
     base = Path(base).resolve()
@@ -60,6 +60,9 @@ def plan(base, scope='task'):
             other_repositories.extend(repo.relative_to(base).as_posix() for repo in preservation.assert_isolated(path))
     source_report = preservation.source_preservation(base, config,
         {item['repository']: item['target_sha'] for item in source_reuse['repositories'] if item['action'] == 'restore'})
+    if source_backup is not None:
+        source_report['verified_backup'] = preservation.verified_backup(base, source_backup)
+        source_report['requires_decision'] = False
     if other_repositories:
         source_report['other_repositories'] = other_repositories
         source_report['requires_decision'] = True
@@ -181,7 +184,7 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
             task = operation.get('exit_task')
             cleanup_plan = operation['cleanup_plan']
         else:
-            cleanup_plan = plan(base, request.get('scope', 'task'))
+            cleanup_plan = plan(base, request.get('scope', 'task'), request.get('source_backup'))
             if cleanup_plan['digest'] != request.get('expected_plan_digest'):
                 raise ValueError('预检范围已变化，重新展示并确认清理范围')
             if not isinstance(request.get('decision_ref'), str) or not request['decision_ref'].strip():
@@ -216,6 +219,10 @@ def execute(base, issue, run_id, revision, operation_id, request, allow_product_
                 operation['phase'] = 'awaiting_resources'
                 operations.save(base, operation)
                 return operation
+            # 资源停止后及中断恢复时重新读取副本；旧计划没有副本时保留原合同。
+            preservation.check_backup(base, cleanup_plan['source'].get('verified_backup'))
+            if cleanup_plan['source'].get('verified_backup'):
+                result['source_backup'] = cleanup_plan['source']['verified_backup']
             if cleanup_plan['schema_version'] == 9:
                 source_reset.execute(base, operation, cleanup_plan['source_reuse'])
                 result['source'] = [{'repository': item['repository'], 'action': item['action'],

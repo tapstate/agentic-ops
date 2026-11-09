@@ -2,10 +2,86 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+import stat
 from pathlib import Path
 
 from workflow import project_rules, station_clean_rules as rules
 from workflow import station_layout, station_source as source, task_store
+
+
+def backup_inventory(root, independent=False):
+    """读取独立副本的实际字节；不跟随链接，不接受特殊文件或外部 Git 对象库。"""
+    rows, identities = {}, set()
+    for current, names, files in walk(root):
+        folder = Path(current)
+        for name in sorted(names + files):
+            path = folder / name
+            relative = path.relative_to(root).as_posix()
+            before = path.lstat()
+            if stat.S_ISLNK(before.st_mode):
+                rows[relative] = ['link', os.readlink(path)]
+            elif stat.S_ISDIR(before.st_mode):
+                if path.is_mount():
+                    raise ValueError('源码副本含挂载，不能证明独立保全')
+                rows[relative] = ['directory']
+            elif stat.S_ISREG(before.st_mode):
+                if independent and before.st_nlink != 1:
+                    raise ValueError('源码副本含共享硬链接，不能证明独立保全')
+                if relative.endswith('/objects/info/alternates') and path.read_bytes().strip():
+                    raise ValueError('源码副本依赖外部 Git 对象库，先形成独立副本')
+                digest = hashlib.sha256()
+                with path.open('rb') as stream:
+                    opened = os.fstat(stream.fileno())
+                    if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                        raise ValueError('源码副本读取期间文件已变化')
+                    for block in iter(lambda: stream.read(1024 * 1024), b''):
+                        digest.update(block)
+                rows[relative] = ['file', stat.S_IMODE(before.st_mode), before.st_size, digest.hexdigest()]
+                identities.add((before.st_dev, before.st_ino))
+            else:
+                raise ValueError('源码副本含特殊文件，不能证明已保全：' + relative)
+            after = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise ValueError('源码副本读取期间文件已变化')
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
+    return digest, identities
+
+
+def backup_path(base, value):
+    path = Path(value)
+    if not path.is_absolute() or path.resolve() != path or not path.is_dir():
+        raise ValueError('源码副本必须为无链接的绝对目录')
+    station = Path(base).resolve()
+    if path == station or station in path.parents or path in station.parents:
+        raise ValueError('源码副本必须独立于工位及其清理范围')
+    return path
+
+
+def verified_backup(base, value):
+    path = backup_path(base, value)
+    root = Path(base).resolve() / station_layout.station_name(base, 'repositories')
+    identity = path.stat()
+    before, original_files = backup_inventory(root)
+    copied, copied_files = backup_inventory(path, independent=True)
+    after, _ = backup_inventory(root)
+    if before != copied or before != after:
+        raise ValueError('源码副本与当前源码不一致，先补齐保全再预检')
+    if original_files & copied_files:
+        raise ValueError('源码副本与工位共享硬链接，不能证明独立保全')
+    return {'path': str(path), 'identity': [identity.st_dev, identity.st_ino], 'digest': copied}
+
+
+def check_backup(base, record):
+    if not record:
+        return
+    path = backup_path(base, record['path'])
+    identity = path.stat()
+    if ([identity.st_dev, identity.st_ino] != record['identity']
+            or backup_inventory(path, independent=True)[0] != record['digest']):
+        raise ValueError('已确认源码副本已变化，保留原清理操作并恢复副本后重试')
 
 
 def git(path, *args):
