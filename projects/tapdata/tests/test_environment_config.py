@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from workflow.environment_config import Store, write, read, inventory, check_clear
 from projects.tapdata.scripts.test_environment import Environment, RUNTIME_FIELDS
-from projects.tapdata.scripts.environment_inputs import prepare
+from projects.tapdata.scripts.environment_inputs import prepare, LEGACY_PATHS
 from workflow import task_store
 
 
@@ -44,7 +44,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_backup_preserves_bytes_and_conversion_occurs_only_on_prepare(self):
         self.legacy()
         before = inventory(self.store.root / 'tapdata-test-env')
-        destination = Path(self.store.backup_legacy())
+        destination = Path(self.store.backup_legacy(LEGACY_PATHS))
         self.assertEqual(before, inventory(destination / 'tapdata-test-env'))
         self.assertFalse(self.store.environments.exists())
         result = self.env.prepare_inputs('dev')
@@ -56,6 +56,55 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn('user:private', json.dumps(result))
         self.assertNotIn('private-license', json.dumps(result))
         self.assertEqual(inventory(destination / 'tapdata-test-env'), before)
+
+    def test_prepare_preserves_unrelated_configuration_and_secrets(self):
+        self.legacy()
+        unrelated = ('jira/rest-auth.json', 'secrets/other/token', 'unknown/input.json')
+        for relative in unrelated:
+            write(self.store.root / relative, {'private': relative})
+        before = {relative: inventory(self.store.root / relative) for relative in unrelated}
+        result = self.env.prepare_inputs('dev')
+        self.assertEqual(result['missing'], [])
+        self.assertFalse((self.store.root / 'tapdata-test-env').exists())
+        self.assertFalse((self.store.root / 'secrets/tapdata-test-env').exists())
+        for relative in unrelated:
+            self.assertEqual(before[relative], inventory(self.store.root / relative))
+            self.assertFalse(any((batch / relative).exists() for batch in (self.store.root / 'backups').iterdir()))
+
+    def test_unrelated_configuration_does_not_block_active_environment(self):
+        write(self.store.root / 'jira/rest-auth.json', {'private': 'test'})
+        write(self.env.root / 'active.json', {'environment': 'other'})
+        original = inventory(self.store.root / 'jira')
+        result = self.env.prepare_inputs('dev')
+        self.assertTrue(result['missing'])
+        self.assertEqual(original, inventory(self.store.root / 'jira'))
+        self.assertFalse((self.store.root / 'backups').exists())
+
+    def test_active_environment_still_protects_legacy_inputs(self):
+        self.legacy()
+        write(self.env.root / 'active.json', {'environment': 'dev'})
+        before = inventory(self.store.root)
+        with self.assertRaisesRegex(ValueError, '存在活动现场'):
+            self.env.prepare_inputs('other')
+        self.assertEqual(before, inventory(self.store.root))
+
+    def test_backup_rejects_overlapping_or_managed_paths_without_changes(self):
+        self.legacy()
+        before = inventory(self.store.root)
+        for paths in [('secrets', 'secrets/tapdata-test-env'), ('../outside',), ('environments/dev',), ('backups',)]:
+            with self.subTest(paths=paths), self.assertRaises(ValueError):
+                self.store.backup_legacy(paths)
+            self.assertEqual(before, inventory(self.store.root))
+
+    def test_old_broad_pending_backup_is_preserved_without_removing_unrelated_files(self):
+        self.legacy()
+        write(self.store.root / 'jira/rest-auth.json', {'private': 'test'})
+        write(self.store.root / '.backup-pending.json', {
+            'id': 'old', 'entries': {'jira': inventory(self.store.root / 'jira')}})
+        before = inventory(self.store.root)
+        with self.assertRaisesRegex(ValueError, '超出当前功能范围'):
+            self.store.backup_legacy(LEGACY_PATHS)
+        self.assertEqual(before, inventory(self.store.root))
 
     def test_invalid_saved_contract_can_prepare_draft_without_overwriting_original(self):
         self.legacy()
@@ -102,7 +151,7 @@ class ConfigurationTests(unittest.TestCase):
         before = inventory(self.store.root)
         with mock.patch('workflow.environment_config.shutil.copytree', side_effect=OSError('disk')):
             with self.assertRaises(OSError):
-                self.store.backup_legacy()
+                self.store.backup_legacy(LEGACY_PATHS)
         self.assertEqual(inventory(self.store.root / 'tapdata-test-env'), {k[len('tapdata-test-env/'):]: v for k,v in before.items() if k.startswith('tapdata-test-env/') } | {'.': None})
         self.assertTrue((self.store.root / 'tapdata-test-env/dev.json').exists())
 
@@ -117,10 +166,10 @@ class ConfigurationTests(unittest.TestCase):
             return original(file, *args, **kwargs)
         with mock.patch.object(Path, 'unlink', fail_once):
             with self.assertRaises(OSError):
-                self.store.backup_legacy()
-        batch = self.store.backup_legacy()
+                self.store.backup_legacy(LEGACY_PATHS)
+        batch = self.store.backup_legacy(LEGACY_PATHS)
         self.assertTrue((Path(batch) / '.complete.json').exists())
-        self.assertIsNone(self.store.backup_legacy())
+        self.assertIsNone(self.store.backup_legacy(LEGACY_PATHS))
 
     def test_save_combination_rolls_back_on_failure_and_recovers_interruption(self):
         self.legacy()

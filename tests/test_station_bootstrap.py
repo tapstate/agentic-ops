@@ -266,16 +266,17 @@ class StationBootstrapTests(unittest.TestCase):
         (self.station / 'archive').mkdir()
         for name in ('config', 'source', 'archive'):
             (self.station / name / 'sentinel').write_text(name)
+        jira = self.station / 'config/jira/rest-auth.json'
+        jira.parent.mkdir()
+        jira.write_text('private-fixture')
         registry.detach(ROOT, self.station, purge=True)
         self.init(success=False)
         self.init('--reuse-materials')
         for name in ('source', 'archive'):
             self.assertEqual((self.station / name / 'sentinel').read_text(), name)
-        backups = list((self.station / 'config/backups').glob('*/sentinel'))
-        self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].read_text(), 'config')
-        self.assertTrue((backups[0].parent / '.complete.json').is_file())
-        self.assertFalse((self.station / 'config/sentinel').exists())
+        self.assertEqual((self.station / 'config/sentinel').read_text(), 'config')
+        self.assertEqual(jira.read_text(), 'private-fixture')
+        self.assertFalse((self.station / 'config/backups').exists())
         self.assertFalse((self.station / 'config/environments').exists())
 
     def make_cached_repository(self):
