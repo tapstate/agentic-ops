@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from workflow import engineering_baseline as baseline, project_rules, station_source as source
 
-FORMAT = 'agenticops-handoff-v2'
+FORMAT = 'agenticops-handoff-v3'
 
 
 def prepare(base, task, supplied):
@@ -22,9 +23,11 @@ def prepare(base, task, supplied):
     frozen = task.get('engineering_baseline', {})
     baseline.validate(frozen)
     repositories = {}
-    for name, binding in sorted(bindings.items()):
-        entry = frozen['repositories'][name]
-        row = {'baseline_sha': entry['commit_sha'], 'target_branch': binding['target_branch']}
+    for name, entry in sorted(frozen['repositories'].items()):
+        binding = bindings.get(name)
+        row = {'baseline_sha': entry['commit_sha']}
+        if binding:
+            row['target_branch'] = binding['target_branch']
         if name in discard:
             repositories[name] = dict(row, disposition='discarded', decision_ref=discard[name],
                                       guidance='本次代码不作为可恢复成果，按已确认方案重新实施')
@@ -34,8 +37,19 @@ def prepare(base, task, supplied):
         source.require_clean(path)
         branch = source.git(path, 'branch', '--show-current').stdout.strip()
         head = source.git(path, 'rev-parse', 'HEAD').stdout.strip()
-        if branch != binding['work_branch']:
+        if binding and branch != binding['work_branch']:
             raise ValueError('归档源码不在登记工作分支：' + name)
+        if head == entry['commit_sha']:
+            # 临时空对象库证明固定对象确实可从远端取回，不能用已有本地对象冒充。
+            with tempfile.TemporaryDirectory(prefix='ao-handoff-baseline-') as directory:
+                source.git(directory, 'init', '--bare')
+                source.git(directory, 'fetch', '--depth=1', '--no-tags', '--', entry['origin'], head)
+                if source.git(directory, 'rev-parse', 'FETCH_HEAD').stdout.strip() != head:
+                    raise ValueError('归档固定基线远端回读不一致：' + name)
+            repositories[name] = dict(row, disposition='baseline')
+            continue
+        if not binding:
+            raise ValueError('未登记仓库偏离冻结基线：' + name)
         observed = source.git(path, 'ls-remote', '--refs', 'origin', 'refs/heads/' + branch).stdout.splitlines()
         if observed != [head + '\trefs/heads/' + branch]:
             raise ValueError('需保留代码尚未在对应远端分支核实，请按授权推送并回读：' + name)
@@ -91,7 +105,7 @@ def verify_readback(candidate, receipt):
 
 def continuation_input(packet):
     """只提取既有接管入口需要的代码引用，不导入阶段、授权或 PASS。"""
-    if not isinstance(packet, dict) or packet.get('format') not in (FORMAT, 'agenticops-handoff-v1') or not isinstance(packet.get('repositories'), dict):
+    if not isinstance(packet, dict) or packet.get('format') not in (FORMAT, 'agenticops-handoff-v2', 'agenticops-handoff-v1') or not isinstance(packet.get('repositories'), dict):
         raise ValueError('接续材料格式不符，先依据当前合同核实并补齐')
     from workflow import task_store
     task_store.validate_issue_key(packet.get('issue_key'))
@@ -106,6 +120,10 @@ def continuation_input(packet):
                     raise ValueError('接续提交必须为完整 SHA：' + name)
             baseline.ref_name(row.get('work_branch'))
             result[name] = {key: row[key] for key in ('work_branch', 'baseline_sha', 'expected_head')}
+        elif row.get('disposition') == 'baseline':
+            if not isinstance(row.get('baseline_sha'), str) or not baseline.SHA.fullmatch(row['baseline_sha']):
+                raise ValueError('接续固定基线必须为完整 SHA：' + name)
+            result[name] = {'baseline_sha': row['baseline_sha']}
         elif row.get('disposition') != 'discarded':
             raise ValueError('接续源码处置不明确：' + name)
     return result
@@ -175,6 +193,15 @@ def restore(base, packet, expected_digest, expected_run_id, expected_revision, s
         for name, row in continuations.items():
             binding = task['task_repositories'].get(name)
             entry = task['engineering_baseline']['repositories'].get(name)
+            if set(row) == {'baseline_sha'}:
+                if not entry or entry['commit_sha'] != row['baseline_sha']:
+                    raise ValueError('先通过正常接管入口恢复固定基线：' + name)
+                path = source.repository_path(base, name)
+                source.identity(path, entry['origin'])
+                source.require_clean(path)
+                if source.git(path, 'rev-parse', 'HEAD').stdout.strip() != row['baseline_sha']:
+                    raise ValueError('恢复代码偏离归档固定基线：' + name)
+                continue
             if (not binding or not entry or binding['work_branch'] != row['work_branch']
                     or entry['commit_sha'] != row['baseline_sha']):
                 raise ValueError('先通过正常仓库入口接回归档分支及历史基线：' + name)

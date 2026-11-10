@@ -1,6 +1,8 @@
 # 归档恢复依赖描述
 
-所属模块为 `workflow.task_handoff`。格式版本由模块 `FORMAT` 维护，当前 `agenticops-handoff-v2`；版本随接续材料要求变化，不随应用 epoch 变化。任务状态读取与保存使用 task_store 接口，Git 源码核验复用 station_source，不建立第二份任务库或 Jira 客户端。
+所属模块为 `workflow.task_handoff`。格式版本由模块 `FORMAT` 维护，当前 `agenticops-handoff-v3`；版本随接续材料要求变化，不随应用 epoch 变化。任务状态读取与保存使用 task_store 接口，Git 源码核验复用 station_source，不建立第二份任务库或 Jira 客户端。
+
+v3 保存完整工程的仓库引用。工作区干净且 Head 等于冻结 SHA 的仓库为 `disposition=baseline`，无需推送空工作分支；生成时用临时空对象库从远端精确取回该 SHA，失败不开始归档。对应 continuation 只含 `baseline_sha`，接管时重新从远端取回并冻结该提交，不追随源分支的新 Head，不建立开发绑定。其余已登记改动继续使用 `retained` 的工作分支、历史基线和预期 Head，必须精确回读远端工作分支；合并后分支已删除的改动不自动改用目标分支，须按可信 Git/Jira 事实整理有效成果引用。未登记仓库偏离基线仍拒绝，明确放弃仍使用 `discarded`。旧 v1/v2 正文继续按原引用接续，不凭空补造未记录仓库的历史版本；新变体须使用支持它的安装，不改变已有持久状态意义或 epoch。
 
 `prepare` 从 Agent 核实的方案、进度、剩余事项、环境要求和必要材料回读生成正文；任务身份与代码基线、远端分支和 Head 来自现役任务及 Git。`verify_readback` 核对原生 Jira 工具回读的对象与正文。`continuation_input` 提供现役接管所需代码引用。`restore` 在当前任务中记录经过核验的成果来源，项目业务字段、授权和阶段继续由原功能检查；跨工位恢复不读取旧工位、旧缓存或本地快照。
 

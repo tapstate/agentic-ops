@@ -375,7 +375,7 @@ def readiness_snapshot(station, task):
             raise ValueError("目标分支与冻结基线分叉或回退：" + name)
         remote_head = remote_heads.get(work_branch)
         continuation = value.get("resolution_input", {}).get("continuations", {}).get(name)
-        expected_remote = continuation["expected_head"] if continuation else None
+        expected_remote = continuation.get("expected_head") if continuation else None
         if task.get("replan") and task.get("stage") == "design_review":
             expected_remote = task["replan"].get("remote_work", {}).get(name)
         replan = task.get("replan") and task.get("stage") == "design_review"

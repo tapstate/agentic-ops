@@ -13,6 +13,59 @@ from workflow import station, station_archive, station_operation, task_store, ta
 
 
 class HandoffTests(unittest.TestCase):
+    def test_unpushed_unchanged_branch_recovers_exact_baseline_after_remote_advances(self):
+        self.task = self.takeover()
+        name = 'tapdata/tapdata'
+        original = self.task['engineering_baseline']['repositories'][name]['commit_sha']
+        branch = task_store.generated_work_branch(self.ws, self.task)
+        station.scope_change(self.ws, self.task['issue_key'], self.task['run_id'], self.task['_revision'],
+                             'op-baseline-scope', name, branch, 'develop', ['file.txt'], 'unit')
+        self.task = task_store.read_task(self.ws)
+        self.request = {'handoff': {'plan': '已确认方案', 'progress': '主仓未修改',
+                                   'remaining': '跨工位验证', 'environment': '无特殊环境'}}
+        (self.seed / 'file.txt').write_text('remote advanced\n')
+        self.git(self.seed, 'commit', '-am', 'advance develop')
+        self.git(self.seed, 'push', str(self.remote), 'develop')
+        pending = self.archive()
+        packet = pending['archive_payload']['snapshot']['handoff']['packet']
+        self.assertEqual('baseline', packet['repositories'][name]['disposition'])
+        continuation = task_handoff.continuation_input(packet)
+        self.assertEqual({name: {'baseline_sha': original}}, continuation)
+        self.archive(receipt=self.readback(pending))
+        old_ws = self.ws
+        self.ws = self.root / 'new-station'
+        for folder in ('source', 'config', 'runtime', '.agenticops'):
+            (self.ws / folder).mkdir(parents=True)
+        for filename in ('station.json', 'init.json'):
+            self.write(self.ws / '.agenticops' / filename, json.loads((old_ws / '.agenticops' / filename).read_text()))
+        task_store.initialize_current(self.ws)
+        coordination_proof(self.ws, packet['issue_key'])
+        request = {'issue_key': packet['issue_key'], 'task_class': packet['task_class'],
+                   'version': 'develop', 'profile': 'full-application',
+                   'explicit_branches': {name: 'develop'}, 'continuations': continuation,
+                   'jira_snapshot': ownership_snapshot(self.ws)}
+        station.takeover(self.ws, request, 'op-fixed-baseline-recovery', 0)
+        current = task_store.read_task(self.ws)
+        self.assertEqual(original, self.git(self.ws / 'source' / name, 'rev-parse', 'HEAD'))
+        self.assertEqual({}, current['task_repositories'])
+        from workflow import engineering_baseline
+        result = task_handoff.restore(self.ws, packet, engineering_baseline.digest(packet),
+                                     current['run_id'], current['_revision'], 'fixture:jira', '确认接续', [])
+        self.assertEqual('restored', result['status'])
+        self.assertFalse(task_store.authorization_path(self.ws, packet['issue_key']).exists())
+
+    def test_mixed_archive_includes_unbound_baselines_and_rejects_remote_loss(self):
+        self.prepare_engineering(count=2)
+        self.prepare_task()
+        packet = self.archive()['archive_payload']['snapshot']['handoff']['packet']
+        self.assertEqual({'retained', 'baseline'}, {row['disposition'] for row in packet['repositories'].values()})
+        self.assertEqual(2, len(task_handoff.continuation_input(packet)))
+        # 未改动对象仅存在本地不能证明远端可恢复；新操作不得复用旧回读。
+        self.archive(receipt=self.readback(self.archive()))
+        shutil.move(self.remote, self.root / 'offline.git')
+        with self.assertRaisesRegex(ValueError, 'Git 操作失败'):
+            self.archive('op-unavailable-remote')
+
     def test_literal_range_readback_preserves_handoff_target_and_payload(self):
         candidate = {'site': 'https://example.test', 'packet': {'issue_key': 'TAP-123'},
                      'body': '剩余 P-01~P-11；路径 a\\b'}
@@ -199,7 +252,7 @@ class HandoffTests(unittest.TestCase):
         self.request['handoff']['evidence'] = evidence
         pending = self.archive()
         packet = pending['archive_payload']['snapshot']['handoff']['packet']
-        self.assertEqual('agenticops-handoff-v2', packet['format'])
+        self.assertEqual('agenticops-handoff-v3', packet['format'])
         self.assertNotIn('local_file', packet['evidence'][0])
         task_handoff.verify_evidence(evidence, packet['evidence'])
         artifact.write_text('changed remote content')
