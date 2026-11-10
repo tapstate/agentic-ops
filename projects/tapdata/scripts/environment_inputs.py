@@ -5,6 +5,7 @@ import shutil
 from workflow.environment_config import read, write, path, inventory
 
 FIELDS = {'schema_version', 'nodes', 'image', 'platform', 'mongo_uri_file', 'ports', 'java', 'external_tm_url'}
+LEGACY_PATHS = ('tapdata-test-env', 'secrets/tapdata-test-env')
 PREPARATION = {'mongo_driver', 'node_binary', 'build', 'assets', 'heartbeat', 'fe_heartbeat'}
 
 
@@ -55,10 +56,12 @@ def prepare(env, name, external_tm_url=None, backup=None):
     # 旧格式先隔离，查找转换只在输入不足时执行。
     if not complete(env, config, name, draft=True):
         if (env.root / 'active.json').exists():
-            legacy = [p for p in store.root.iterdir() if p.name not in ('environments', 'shared', 'backups', '.lock')]
+            legacy = [relative for relative in LEGACY_PATHS if path(store.root, relative).exists()]
+            if (store.root / '.backup-pending.json').exists():
+                legacy.append('.backup-pending.json')
             if legacy:
                 raise ValueError('存在活动现场，保留旧配置；先核验原环境使用关系')
-        store.backup_legacy()
+        store.backup_legacy(LEGACY_PATHS)
         found = candidates(store, name, external_tm_url)
         if backup:
             found = [row for row in found if row[0] == backup]

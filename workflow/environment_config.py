@@ -139,29 +139,40 @@ class Store:
         if old.exists():
             shutil.rmtree(old)
 
-    def backup_legacy(self):
-        """完整副本核验后隔离原件；重入复用未完成批次，不转换。"""
+    def backup_legacy(self, relatives):
+        """只隔离调用功能明确拥有的旧路径；完整核验后删除，重入不扩大范围。"""
+        owned = set(relatives)
+        for relative in owned:
+            candidate = path(self.root, relative)
+            if candidate.parts[len(self.root.parts)] in ('environments', 'shared', 'backups', '.lock', '.backup-pending.json'):
+                raise ValueError('旧配置范围不得包含受管新布局或备份状态')
+            if any(candidate != path(self.root, other) and candidate.is_relative_to(path(self.root, other)) for other in owned):
+                raise ValueError('旧配置范围不得重叠')
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         pending = path(self.root, '.backup-pending.json')
         if pending.exists():
             record = read(pending)
+            if not set(record['entries']).issubset(owned):
+                raise ValueError('未完成备份超出当前功能范围，保留原件与备份并核验归属')
             destination = path(self.root, 'backups/' + record['id'])
         else:
-            entries = [p for p in sorted(self.root.iterdir()) if p.name not in ('environments', 'shared', 'backups', '.lock', '.backup-pending.json')]
+            entries = [path(self.root, relative) for relative in sorted(owned) if path(self.root, relative).exists()]
             if not entries:
                 return None
             if any(p.name == '.complete.json' for p in entries):
                 raise ValueError('旧配置含备份保留名称，保留原件并核验归属')
-            record = {'id': uuid.uuid4().hex, 'entries': {p.name: inventory(p) for p in entries}}
+            record = {'id': uuid.uuid4().hex, 'entries': {p.relative_to(self.root).as_posix(): inventory(p) for p in entries}}
             destination = path(self.root, 'backups/' + record['id'])
             destination.mkdir(parents=True, mode=0o700)
             for entry in entries:
-                dest = destination / entry.name
+                relative = entry.relative_to(self.root).as_posix()
+                dest = path(destination, relative)
+                dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 if entry.is_dir():
                     shutil.copytree(entry, dest)
                 else:
                     shutil.copyfile(entry, dest)
-                if inventory(dest) != record['entries'][entry.name]:
+                if inventory(dest) != record['entries'][relative]:
                     raise ValueError('配置备份核验失败，保留原件')
             private_tree(destination)
             write(pending, record)
