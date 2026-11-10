@@ -153,6 +153,20 @@ def takeover(base, request, operation_id, expected_revision):
                 raise ValueError("续办仓库必须属于完整工程")
             resolutions = {name: dict(entry, verification="verified") for name, entry in value["repositories"].items()}
             for name, continuation in continuations.items():
+                if isinstance(continuation, dict) and set(continuation) == {"baseline_sha"}:
+                    sha = continuation['baseline_sha']
+                    if not isinstance(sha, str) or not baseline.SHA.fullmatch(sha):
+                        raise ValueError('续办固定基线必须为完整 SHA')
+                    path = source.repository_path(base, name)
+                    step = 'continuation-baseline:' + name + ':' + sha
+                    operations.intent(base, operation, step, {}, {'sha': sha})
+                    source.git(path, 'fetch', '--no-tags', 'origin', sha)
+                    if source.git(path, 'cat-file', '-t', sha).stdout.strip() != 'commit':
+                        raise ValueError('续办固定基线无法取回，保留原操作：' + name)
+                    operations.receipt(base, operation, step, {'sha': sha})
+                    resolutions[name].update(ref_kind='commit', ref_name=sha, commit_sha=sha,
+                                             resolution_source='explicit_continuation')
+                    continue
                 if not isinstance(continuation, dict) or set(continuation) != {"work_branch", "baseline_sha", "expected_head"}:
                     raise ValueError("续办必须明确工作分支、历史基线和预期 Head")
                 branch = baseline.ref_name(continuation["work_branch"])
@@ -212,7 +226,7 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
         path = source.repository_path(base, name)
         source.identity(path, value["repositories"][name]["origin"])
         source.require_clean(path)
-        if expected_head is not None and (not continuation or continuation["expected_head"] != expected_head or continuation["work_branch"] != work_branch):
+        if expected_head is not None and (not continuation or continuation.get("expected_head") != expected_head or continuation.get("work_branch") != work_branch):
             raise ValueError("续办 Head 必须已在接管时绑定历史基线")
         if not previous or previous["operation_id"] != operation_id:
             for ref in ("refs/heads/" + work_branch, "refs/remotes/origin/" + work_branch):
@@ -229,7 +243,7 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
         sha = value["repositories"][name]["commit_sha"]
         continuation = value["resolution_input"].get("continuations", {}).get(name)
         if expected_head is not None:
-            if not continuation or continuation["expected_head"] != expected_head or continuation["work_branch"] != work_branch:
+            if not continuation or continuation.get("expected_head") != expected_head or continuation.get("work_branch") != work_branch:
                 raise ValueError("续办 Head 必须已在接管时绑定历史基线")
             sha = expected_head
         from workflow.authorization import revoke_authorization
