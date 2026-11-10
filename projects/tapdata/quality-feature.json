@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "contract_revision": 5,
+  "change_only_verification": ["ci"],
+  "change_only_pr": true,
   "commit_evidence_checkpoint": "q4-acceptance",
   "intake_fact_keys": [
     "acceptance_criteria",

@@ -237,10 +237,13 @@ def check_snapshot(base, issue_key, snapshot):
             if attempt:
                 status_todos.extend(item["guidance"] for item in attempt.get("guidance", [])
                                     if item.get("guidance"))
+    no_pr_required = bool(rules.get("change_only_pr") and rules.get("allow_no_source_change_plan")
+                          and not delivery_task.get("repositories"))
+    if rules.get("change_only_pr") and not delivery_task.get("repositories") and not no_pr_required:
+        groups["pr_checks"].append("当前任务没有可交付的源码变更；不能以无变更仓库或空 PR 完成功能交付")
     problems = [problem for values in groups.values() for problem in values]
     submissions = submission_status(delivery_task, packet)
     preflight_ready = not problems
-    no_pr_required = bool(rules.get("change_only_pr") and not delivery_task.get("repositories"))
     ready = preflight_ready and (no_pr_required or bool(submissions) and all(r["confirmed"] for r in submissions))
     return {"issue_key": issue_key, "run_id": task["run_id"], "source_ref": source_ref,
             "preflight_ready": preflight_ready, "ready": ready,
