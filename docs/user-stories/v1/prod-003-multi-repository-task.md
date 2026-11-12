@@ -21,6 +21,7 @@
 - 工位工时按[工时合同](../../usage/quality-checkpoints.md#工位自动工时登记)由 Agent 自动按实际工作段记录，等待暂停、异常尾段不补算、分类不重叠；Worklog 原生开始时间/耗时与简洁说明分别保存。默认用 MCP 创建并按返回 ID 补属性，接受 Jira 自动扣减剩余预估；核对作者、对象、内容和属性，未知创建不重发，补属性失败不重建工时。分钟精度向下取整，秒级余量保留，不虚增；原生能力不足保全待登记段，不阻断无依赖研发。旧 run 不回算，旧 REST 意图按原模式回读，现有字段和评论不被替代；模拟验证与真实 Jira/Tempo 联调分别报告。
 - 缺陷接管成功后同步尝试一次 `In Progress`，Q4 验收完成后同步尝试一次 `Tests Passed`；已达目标直接记录，其它状态、必填字段不足或外部失败均记录并跳过，不阻断本地主流程，也不自动执行 `Pull Request Submitted`。
 - PR 提审预检核对 Jira 关联 Test 接纳、当前完整 Head 的 Checks 及 Q1-Q4；有效具体 Checks 提审例外保留原始结果，未执行不冒充 PASS。预检通过后原生推进 GitHub Ready for review，全部目标 PR 身份、Head、OPEN 和非 Draft 回读确认后才报告 PR Ready；多仓部分成功与未知写入恢复使用[质量检查与证据](../../usage/quality-checkpoints.md#pr-ready-核对)。
+- 已交付仓可在同一 run 补修。独立工位复现 A1 合并、B 发现问题、A2 补修及组合验收，核对历史合并、待补修缺项、新候选证据和最终完成。再用旧版本实际产生的处理中数据验证升级后直接接续、基于原 PR 回读受控补全及中断保全，参见[工位交付合同](../../architecture/single-task-station.md#6-完成事实与交付核验)。
 
 ### 保护行为
 

@@ -285,6 +285,13 @@ def context(base, task):
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(station=base), task["task_class"], task.get("facts", {}))]}
 
+    dependencies = task.get("replan", {}).get("item_dependencies", {})
+    if dependencies:
+        result["item_dependency_revisions"] = {
+            key: {name: repos.get(name, {}).get("live_revision") for name in names}
+            for key, names in dependencies.items()
+        }
+
     assessment = replay(load(base, task)).get("jira_assessment")
     if assessment is not None:
         result["jira_assessment"] = assessment
@@ -330,7 +337,17 @@ def item_digest(item, rules, ctx):
                     for k in runtime_keys}]
     if rules.get("contract_revision", 1) >= 2:
         value.append(item["plan"]["target_revision"])
+    dependencies = ctx.get("item_dependency_revisions", {}).get(item["plan"]["id"])
+    if dependencies and runtime_keys:
+        value.append(dependencies)
     return digest(value)
+
+
+def applicable_executions(plan, executions, ctx):
+    keys = ("case_ref", "case_version", "method", "repository", "target_revision")
+    dependencies = ctx.get("item_dependency_revisions", {}).get(plan["id"])
+    return [entry for entry in executions if all(entry[k] == plan[k] for k in keys)
+            and (not dependencies or entry.get("dependency_revisions") == dependencies)]
 
 
 def is_valid(record, expected):
@@ -345,7 +362,8 @@ def item_view(item, rules, ctx):
     result = {"plan": item["plan"], "plan_digest": pd, "digest": ed, "selected": selected,
               "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
     assessment = jira_tests.item_assessment(item["plan"], rules, ctx)
-    if assessment is not None:
+    dependencies = ctx.get("item_dependency_revisions", {}).get(item["plan"]["id"])
+    if assessment is not None and not dependencies:
         result["jira_status"] = assessment
         result["evidence_gap"] = "本地历史报告不证明当前代码；Jira 状态接纳不新增或改写执行事实。"
     return result
@@ -386,8 +404,7 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx, *, check_artifa
         if check_artifacts and live and live != plan["target_revision"]:
             problems.append("%s 的首轮执行证据与当前源码版本不一致" % key)
             continue
-        keys = ("case_ref", "case_version", "method", "repository", "target_revision")
-        executions = [e for e in view["executions"] if all(e[k] == plan[k] for k in keys)]
+        executions = applicable_executions(plan, view["executions"], ctx)
         if not executions:
             problems.append("%s 尚无当前提交上的首轮执行证据" % key)
         elif executions[-1]["raw_result"] != plan["expected_result"]:
@@ -712,8 +729,7 @@ def reduce(model, command, rules, ctx, *, historical=False):
                 ids = [c["id"] for c in rules["checkpoints"]]
                 if commit_point and ids.index(plan["checkpoint"]) >= ids.index(commit_point) and not exact_commit(plan["target_revision"]):
                     raise ValueError("最终验收必须绑定完整提交 SHA；工作区测试不能直接充当提交后的验收证据")
-                keys = ("case_ref", "case_version", "method", "repository", "target_revision")
-                applicable = [e for e in item["executions"] if all(e[k] == plan[k] for k in keys)]
+                applicable = applicable_executions(plan, item["executions"], ctx)
                 if not selected or not applicable or selected != applicable[-1]:
                     raise ValueError("通过处置必须关联当前用例、代码和方式的最后一次执行")
                 live = ctx["repositories"][plan["repository"]].get("live_revision")

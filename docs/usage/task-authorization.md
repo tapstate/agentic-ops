@@ -219,6 +219,11 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --cancel --oper
 
 发现 Draft PR 的方向或验收方案需要调整时，先保留当前源码和 PR。准备单个 JSON 输入，包含 `reason`、`facts`、`repositories`、`additions`、`impact`：facts 只更新项目声明的方案字段；repositories 按已登记仓库列出 scope 数组和 verification；additions 另需 ref_name 与 commit_sha，只能选择 Profile 的可选仓。impact 包含受影响 repositories、质量 items 引用和 rationale，必须覆盖受影响仓库的已登记检查项。
 
+
+部分合并后需回到已交付仓补修时，在同一请求增加可选 `follow_up`，按仓库选择 `reuse` 或 `new_branch`，并在影响范围覆盖补修及受影响的消费仓。prepare 核对原合并候选和远端未交付成果。新分支沿原候选创建并受控回读，后续按既有规则同步目标来源。apply 保留旧交付，清除该仓当前 PR/CI 绑定，显式留下待补修状态。发现方案或验收变化时一起提交，复用一次已有返工决定。确需联合验证的修复后检查项通过 `impact.cross_repository_checks` 登记对应仓库集合，执行证据以 `dependency_revisions` 记录实际受测的完整提交 SHA；任一关联仓提交变化后，补验该组合。未合并的补修 PR 被关闭或替换后，按新候选重新记录 PR 和证据。
+
+交付事实通过 `task.py repository record-result --repo <仓库> --delivery-input <回读文件>` 追加。旧记录满足当前合同即可使用。完成预检指出旧记录缺项时，从原 PR 回读取证，使用相同入口追加 `--repair-delivery-digest <原记录摘要> --decision-ref <核实后的研发决定>`。入口只补全可与原事实一致的缺项，保留原记录在历史中，重复回读保持幂等。补齐后重跑提审或完成预检。
+
 ```sh
 python3 <agenticops-root>/workflow/task.py replan prepare --dir <station> --issue-key <key> --expected-run-id <run> --input <request.json>
 python3 <agenticops-root>/workflow/task.py replan apply --dir <station> --issue-key <key> --expected-run-id <run> --expected-revision <prepare-revision> --operation-id <stable-operation-id> --input <saved-prepare-output.json> --decision-ref <confirmed-decision-reference>

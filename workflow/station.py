@@ -5,11 +5,10 @@ import importlib.util
 import hashlib
 import copy
 import re
-from datetime import datetime
 import json
 from pathlib import Path
 
-from workflow import station_context, station_layout
+from workflow import repository_delivery, station_context, station_layout
 from workflow import archive_store, engineering_baseline as baseline, project_rules, station_archive as archives
 from workflow import station_operation as operations, station_source as source, task_store
 
@@ -364,7 +363,8 @@ def evaluate_completion(base, task):
             problems.append("完成前源码必须洁净：" + name)
         entry = task["engineering_baseline"]["repositories"][name]
         binding = task["task_repositories"].get(name)
-        if state["head"] == entry["commit_sha"]:
+        follow_up = ((binding or {}).get("observation") or {}).get("follow_up_after_pr")
+        if state["head"] == entry["commit_sha"] and not follow_up:
             dispositions[name] = "no_change"
             continue
         if binding is None:
@@ -372,27 +372,18 @@ def evaluate_completion(base, task):
             continue
         if state["branch"] != binding["work_branch"]:
             problems.append("最终候选不在登记工作分支：" + name)
-        valid = [item for item in binding.get("deliveries", []) if not item.get("superseded_by")]
-        if len(valid) != 1:
-            problems.append("awaiting_merge：变更仓必须有唯一有效合并 PR：" + name)
+        for row in binding["deliveries"]:
+            if not row.get("superseded_by"):
+                try:
+                    repository_delivery.validate(binding, row)
+                except ValueError as error:
+                    problems.append("%s；回读 PR %s 后用 record-result 修补原记录摘要 %s"
+                                    % (error, row.get("pr"), baseline.digest(row)))
+                else:
+                    deliveries.append(row)
+        if repository_delivery.current(binding, state["head"]) is None:
+            problems.append("awaiting_merge：缺少与最终候选一致的唯一有效合并事实：" + name)
             continue
-        delivery = valid[0]
-        if (delivery.get("repository") != name or delivery.get("candidate_head") != state["head"]
-                or delivery.get("pr_head") != state["head"] or delivery.get("target_branch") != binding["target_branch"]
-                or not all(delivery.get(key) for key in ("pr", "merged_at", "merge_commit", "readback_ref"))):
-            problems.append("awaiting_merge：PR 合并事实与最终候选不一致：" + name)
-            continue
-        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(delivery["merge_commit"])):
-            problems.append("合并提交必须是完整 SHA：" + name)
-            continue
-        try:
-            merged = datetime.fromisoformat(delivery["merged_at"].replace("Z", "+00:00"))
-            if merged.tzinfo is None:
-                raise ValueError("合并时间需要时区")
-        except (ValueError, TypeError, AttributeError):
-            problems.append("合并时间不是可核验时间戳：" + name)
-            continue
-        deliveries.append(delivery)
         dispositions[name] = "merged"
     from workflow import project_rules, task_checks
     problems.extend(task_checks.check_advance(task, "completed", base, project_rules.load_admission(station=base)))

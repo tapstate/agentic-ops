@@ -762,6 +762,144 @@ class StationTests(unittest.TestCase):
                 finally:
                     case.doCleanups()
 
+    def test_multi_repository_follow_up(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from workflow import repository_delivery, station_replan, task as task_cli
+
+        for mode in ("reuse", "new_branch"):
+            with self.subTest(mode=mode):
+                fixture = self if mode == "reuse" else StationTests()
+                if fixture is not self:
+                    fixture.setUp()
+                    self.addCleanup(fixture.doCleanups)
+                fixture.prepare_engineering(2)
+                names = list(fixture.request["explicit_branches"])
+                self.assertEqual(2, len(names))
+                first, second = names
+                seed_b, remote_b = fixture.root / "seed-b", fixture.root / "remote-b.git"
+                fixture.git(fixture.root, "clone", "--branch", "develop", str(fixture.remote), str(seed_b))
+                fixture.git(seed_b, "config", "user.email", "test@example.com")
+                fixture.git(seed_b, "config", "user.name", "Test")
+                fixture.git(fixture.root, "clone", "--bare", str(seed_b), str(remote_b))
+                catalog = fixture.product / "projects/tapdata/repositories.json"
+                config = json.loads(catalog.read_text())
+                config["repositories"][second]["origin"] = str(remote_b)
+                fixture.write(catalog, config)
+                task = fixture.takeover()
+                run = task["run_id"]
+                issue = task["issue_key"]
+                for index, name in enumerate(names):
+                    station.scope_change(fixture.ws, issue, run, task["_revision"], "op-multirepo-%s" % index,
+                                         name, None, "develop", ["file.txt"], "test")
+                    task = task_store.read_task(fixture.ws)
+                # 交付回归从已获准开发的阶段开始，外部 PR 回读来自隔离 Git 的实际合并。
+                task["stage"] = "ci_validation"
+                task_store.write_task(fixture.ws, task)
+
+                def candidate(name, content):
+                    path = fixture.ws / "source" / name
+                    fixture.git(path, "config", "user.email", "test@example.com")
+                    fixture.git(path, "config", "user.name", "Test")
+                    (path / "file.txt").write_text(content)
+                    fixture.git(path, "add", "file.txt")
+                    fixture.git(path, "commit", "-m", content)
+                    return fixture.git(path, "rev-parse", "HEAD")
+
+                def record(name, pr, row=None, repair=None):
+                    path = fixture.root / "delivery.json"
+                    if row:
+                        fixture.write(path, row)
+                    args = SimpleNamespace(dir=str(fixture.ws), issue_key=issue, expected_run_id=run,
+                                           repo=name, pr=str(pr), ci=None, delivery_input=str(path) if row else None,
+                                           repair_delivery_digest=repair,
+                                           decision_ref="fixture:confirmed-repair" if repair else None)
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(0, task_cli.cmd_repository_record(args))
+
+                def merge(name, pr, head, target_checkout, target_remote):
+                    work = fixture.ws / "source" / name
+                    fixture.git(target_checkout, "fetch", str(work), head)
+                    fixture.git(target_checkout, "merge", "--no-ff", "--no-edit", "FETCH_HEAD")
+                    merged = fixture.git(target_checkout, "rev-parse", "HEAD")
+                    fixture.git(target_checkout, "push", str(target_remote), "develop")
+                    return {"repository": name, "pr": str(pr), "target_branch": "develop",
+                            "candidate_head": head, "pr_head": head,
+                            "merged_at": "2026-09-15T01:%02d:00Z" % pr,
+                            "merge_commit": merged, "readback_ref": "fixture:local-merge-%s" % merged}
+
+                first_head = candidate(first, "A1")
+                first_merge = merge(first, 1, first_head, fixture.seed, fixture.remote)
+                record(first, 1, first_merge)
+                stage = task_store.read_task(fixture.ws)
+                before = stage["engineering_baseline"]["digest"]
+                request = {"reason": "B 联调发现 A1 缺少组合行为", "facts": {}, "repositories": {}, "additions": {},
+                           "follow_up": {first: mode}, "impact": {"repositories": names, "items": [],
+                                                                   "rationale": "A 补修并回归 B 调用"}}
+                prepared = station_replan.prepare(fixture.ws, issue, run, request)
+                args = (fixture.ws, issue, run, stage["_revision"], "op-multirepo-replan", prepared, "fixture:decision")
+                if mode == "new_branch":
+                    receipt = station_operation.receipt
+                    def interrupt(base, operation, step, result):
+                        if step.startswith("follow-up-branch:"):
+                            raise OSError("interrupted")
+                        return receipt(base, operation, step, result)
+                    with mock.patch.object(station_operation, "receipt", side_effect=interrupt):
+                        with self.assertRaisesRegex(OSError, "interrupted"):
+                            station_replan.apply(*args)
+                    abandoned = prepared["follow_ups"][first]["branch"]
+                    station_replan.abort(fixture.ws, issue, run, args[4], "fixture:abort")
+                    original_branch = stage["task_repositories"][first]["work_branch"]
+                    path = fixture.ws / "source" / first
+                    self.assertEqual(original_branch, fixture.git(path, "branch", "--show-current"))
+                    self.assertEqual(first_head, fixture.git(path, "rev-parse", "refs/heads/" + abandoned))
+                    prepared = station_replan.prepare(fixture.ws, issue, run, request)
+                    self.assertNotEqual(abandoned, prepared["follow_ups"][first]["branch"])
+                    args = (fixture.ws, issue, run, prepared["revision"], "op-multirepo-retry", prepared, "fixture:retry")
+                    with mock.patch.object(station_operation, "receipt", side_effect=interrupt):
+                        with self.assertRaisesRegex(OSError, "interrupted"):
+                            station_replan.apply(*args)
+                station_replan.apply(*args)
+                resumed = task_store.read_task(fixture.ws)
+                first_binding = resumed["task_repositories"][first]
+                self.assertEqual(run, resumed["run_id"])
+                self.assertEqual(before, resumed["engineering_baseline"]["digest"])
+                self.assertEqual([first_merge], first_binding["deliveries"])
+                self.assertIsNone(repository_delivery.current(first_binding, first_head))
+                self.assertEqual(mode == "reuse",
+                                 first_binding["work_branch"] == stage["task_repositories"][first]["work_branch"])
+                self.assertEqual(first_binding["work_branch"], fixture.git(fixture.ws / "source" / first, "branch", "--show-current"))
+
+                second_head = candidate(second, "B invokes A2")
+                record(second, 3, merge(second, 3, second_head, seed_b, remote_b))
+                next_head = candidate(first, "A2")
+                record(first, 2)
+                candidate_task = task_store.read_task(fixture.ws)
+                candidate_task["stage"] = "ci_validation"
+                task_store.write_task(fixture.ws, candidate_task)
+                # 授权和项目质量另有完整契约回归。这里不 mock Git、交付选择或完成判定。
+                with mock.patch.object(task_checks, "check_advance", return_value=[]):
+                    self.assertFalse(station.evaluate_completion(fixture.ws, candidate_task)["ready"])
+                    follow_up = merge(first, 2, next_head, fixture.seed, fixture.remote)
+                    with self.assertRaisesRegex(ValueError, "目标"):
+                        record(first, 2, dict(follow_up, target_branch="main"))
+                    record(first, 2, follow_up)
+                    revision = task_store.read_task(fixture.ws)["_revision"]
+                    record(first, 2, follow_up)
+                    current = task_store.read_task(fixture.ws)
+                    self.assertEqual(revision, current["_revision"])
+                    self.assertEqual("A2", (fixture.ws / "source" / first / "file.txt").read_text())
+                    self.assertEqual("B invokes A2", (fixture.ws / "source" / second / "file.txt").read_text())
+                    result = station.evaluate_completion(fixture.ws, current)
+                    self.assertTrue(result["ready"], result["problems"])
+                    self.assertEqual({"1", "2", "3"}, {row["pr"] for row in result["proof"]["deliveries"]})
+                    advance = SimpleNamespace(dir=str(fixture.ws), issue_key=issue, expected_run_id=run,
+                                              expected_stage="ci_validation", note="fixture:实测组合")
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        self.assertEqual(0, task_cli.cmd_advance(advance))
+                    self.assertEqual("completed", task_store.read_task(fixture.ws)["stage"])
+
     def test_no_change_disposition_is_frozen_in_completion_proof(self):
         task = self.takeover()
         task["stage"] = "ci_validation"
