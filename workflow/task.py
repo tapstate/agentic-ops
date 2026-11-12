@@ -283,6 +283,8 @@ def cmd_snapshot(args):
 def cmd_record(args):
     if args.key == "station_contract":
         raise ValueError("station_contract 由接管入口管理，不能通过 record 修改")
+    if args.key == "handoff_resume":
+        raise ValueError("handoff_resume 由归档恢复入口管理，不能通过 record 修改")
     task = require(args.dir, args.issue_key)
     if args.key == repair_strategy.OVERRIDE_FACT:
         raise ValueError("修复策略只允许通过 repair-strategy set/clear 修改")
@@ -487,8 +489,11 @@ def cmd_repository_record(args):
 
 def _check_advance(task, target, base, spec):
     if target == "completed":
-        from workflow import station
-        return station.evaluate_completion(base, task)["problems"]
+        from workflow import repair_delivery, station
+        result = station.evaluate_completion(base, task)
+        if result["problems"] or not repair_delivery.enabled(task):
+            return result["problems"]
+        return repair_delivery.close_problems(base, task, result["proof"])
     return task_checks.check_advance(task, target, base, spec)
 
 
@@ -676,7 +681,7 @@ def cmd_next(args):
     """只给确定性门禁和具体接力，不代替 Agent 或自动制造授权。"""
     import contextlib
     import io
-    from workflow import external_sync
+    from workflow import external_sync, repair_delivery
     task = require(args.dir, args.issue_key)
     if task.get("archive_ref"):
         print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"],
@@ -709,6 +714,12 @@ def cmd_next(args):
                       "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"}
     strategy = _strategy_payload(args.dir, task)
     handoff = delivery_handoff(task, blockers)
+    if repair_delivery.enabled(task):
+        payload["draft_pr_blockers"] = repair_delivery.impact_problems(args.dir, task)
+        line = external_sync.load(args.dir, task).get("repair_line")
+        if line and line["next_branch"] and blockers == [repair_delivery.next_line_guidance(line["next_branch"])]:
+            handoff = {"action": "continue_repair_line", "next_branch": line["next_branch"],
+                       "guidance": blockers[0]}
     if handoff:
         payload["delivery_handoff"] = handoff
         payload["guidance"] = handoff["guidance"]

@@ -292,9 +292,11 @@ def stage_summary(model, checkpoint, rules, ctx, view):
     lines = ["%s：%s" % (ctx["issue_key"], view["handoff"]["title"]),
              "处置：%s；%s" % (decision.get("outcome", "observed"),
                                   decision.get("reason", "已核验首轮执行事实"))]
-    if checkpoint == rules["selection_checkpoint"]:
+    from workflow import repair_delivery
+    follow_up = repair_delivery.previous_line(ctx)
+    if checkpoint == rules["selection_checkpoint"] and not follow_up:
         lines.append("实施方案：写入 Issue Analysis 后回读核验；本评论不代替字段同步。")
-    if checkpoint == rules.get("tests_passed", {}).get("checkpoint"):
+    if checkpoint == rules.get("tests_passed", {}).get("checkpoint") and not follow_up:
         lines.append("修复总结：写入 Fix Details 后回读核验；本评论不代替字段同步。")
     for repo, binding in sorted(ctx.get("repositories", {}).items()):
         lines.append("仓库 %s；版本 %s" % (repo, binding.get("live_revision", binding.get("base_sha", "待核验"))))
@@ -349,6 +351,9 @@ def _follow_up(lines, decision):
 
 def jira_field_body(base, task, field):
     """为现有 Jira 采集包提供人读提议；不发送、不自动确认或覆盖字段。"""
+    from workflow import repair_delivery
+    if repair_delivery.previous_line(task):
+        return None
     if field == "issue_analysis":
         facts = task.get("facts", {})
         plan = facts.get("implementation_plan") or facts.get("fix_plan")

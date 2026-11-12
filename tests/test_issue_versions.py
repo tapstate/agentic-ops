@@ -94,6 +94,85 @@ class IssueVersionsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
 
+    def test_sequential_impact_and_line_receipts(self):
+        from workflow import external_sync, jira_status, repair_delivery, station
+        self.payload["develop"]["status"] = "absent"
+        self.payload["effective"]["execution_branch"] = "release-v4.18.0"
+        self.task["facts"][issue_versions.FACT] = self.resolve()
+        save_station_task(self.base, self.task)
+        self.assertTrue(repair_delivery.impact_problems(self.base, self.task))
+        issue = {"key": "TAP-123", "fields": {"versions": [{"id": "1"}, {"id": "8"}], "fixVersions": []}}
+        payload = {"issue": issue, "source_ref": "fixture:jira/readback", "summary_ref": "fixture:jira/comment/1",
+                   "affected_version_ids": ["1"], "fix_version_ids": ["9"], "next_branch": "release-v4.21.0"}
+        with self.assertRaisesRegex(ValueError, "版本 ID"):
+            repair_delivery.impact_receipt(self.task, dict(payload, affected_version_ids=["v4.18.0"]))
+        with self.assertRaisesRegex(ValueError, "未回读"):
+            repair_delivery.impact_receipt(self.task, dict(payload, affected_version_ids=["2"]))
+        impact = repair_delivery.impact_receipt(self.task, payload)
+        external_sync.save_receipt(self.base, self.task, "repair_impact", impact)
+        self.assertEqual([], repair_delivery.impact_problems(self.base, self.task, issue))
+        self.assertTrue(repair_delivery.impact_problems(self.base, self.task, dict(issue, fields={"versions": []})))
+        self.assertTrue(repair_delivery.impact_problems(
+            self.base, self.task, dict(issue, fields={"versions": [{"id": "11"}]})))
+        with mock.patch.object(station, "evaluate_completion", return_value={"ready": False, "problems": ["awaiting_merge"]}):
+            with self.assertRaisesRegex(ValueError, "尚未验收并合并"):
+                repair_delivery.line_receipt(self.base, self.task, payload)
+        proof = {"deliveries": [{"pr": "1"}], "candidate_digest": "fixture"}
+        completed = {"ready": True, "proof": proof, "problems": []}
+        with mock.patch.object(station, "evaluate_completion", return_value=completed):
+            with self.assertRaisesRegex(ValueError, "fixVersions 尚未回读"):
+                repair_delivery.line_receipt(self.base, self.task, payload)
+            issue["fields"]["fixVersions"].append({"id": "9"})
+            with mock.patch.object(jira_status, "pending_field_writes", return_value=[{"fields": {"fixVersions": [{"id": "9"}]}}]):
+                with self.assertRaisesRegex(ValueError, "原版本字段操作"):
+                    repair_delivery.line_receipt(self.base, self.task, payload)
+            line = repair_delivery.line_receipt(self.base, self.task, payload)
+            external_sync.save_receipt(self.base, self.task, "repair_line", line)
+            self.assertFalse(jira_status.delivery_ready(self.base, self.task, "merged", {"issue": issue})[0])
+            self.assertIn("release-v4.21.0", repair_delivery.close_problems(self.base, self.task, proof)[0])
+            line = repair_delivery.line_receipt(self.base, self.task, dict(payload, next_branch=None))
+            external_sync.save_receipt(self.base, self.task, "repair_line", line)
+            self.assertTrue(jira_status.delivery_ready(self.base, self.task, "merged", {"issue": issue})[0])
+            self.assertTrue(repair_delivery.close_problems(self.base, self.task, dict(proof, candidate_digest="drift")))
+            issue["fields"]["fixVersions"].clear()
+            self.assertFalse(jira_status.delivery_ready(self.base, self.task, "merged", {"issue": issue})[0])
+
+    def test_follow_up_plan_requires_the_verified_target(self):
+        self.task["facts"]["handoff_resume"] = {"repair_line": {"next_branch": "release-v4.18.0"}}
+        self.payload["develop"]["status"] = "absent"
+        with self.assertRaisesRegex(ValueError, "下一条修复线"):
+            self.resolve()
+        self.payload["effective"]["execution_branch"] = "release-v4.18.0"
+        self.assertEqual("release-v4.18.0", self.resolve()["primary_branch"])
+
+    def test_follow_up_preserves_first_line_fields_and_defers_fix_versions(self):
+        from workflow import jira_collect, quality_write, station
+        self.task["facts"]["handoff_resume"] = {"repair_line": {"next_branch": "release-v4.18.0"}}
+        self.payload["develop"]["status"] = "absent"
+        self.payload["effective"]["execution_branch"] = "release-v4.18.0"
+        self.task["facts"][issue_versions.FACT] = self.resolve()
+        save_station_task(self.base, self.task)
+        snapshot = {"source_ref": "fixture:jira", "issue": {"key": "TAP-123", "fields": {
+            "status": {"name": "Tests Passed"}, "fixVersions": [{"id": "3"}],
+            "customfield_10092": "首轮方案", "customfield_10093": "首轮结果"}}}
+        view = jira_collect.collect(self.base, self.task, "pr_review", snapshot)
+        self.assertNotIn("customfield_10092", view["fields"])
+        self.assertNotIn("customfield_10093", view["fields"])
+        self.assertIn("fixVersions", view["future"])
+        self.assertIsNone(quality_write.jira_field_body(self.base, self.task, "fix_details"))
+        with self.assertRaisesRegex(ValueError, "保留首轮"):
+            jira_collect.collect(self.base, self.task, "pr_review", snapshot, {"customfield_10093": "覆盖"})
+        with mock.patch.object(station, "evaluate_completion", return_value={"ready": False, "problems": ["awaiting_merge"]}):
+            with self.assertRaisesRegex(ValueError, "尚未验收并合并"):
+                jira_collect.collect(self.base, self.task, "pr_review", snapshot, {"fixVersions": [{"id": "4"}]})
+        with mock.patch.object(station, "evaluate_completion", return_value={
+                "ready": True, "proof": {"deliveries": [{"pr": "1"}]}, "problems": []}):
+            with self.assertRaisesRegex(ValueError, "保留已有"):
+                jira_collect.collect(self.base, self.task, "pr_review", snapshot, {"fixVersions": [{"id": "4"}]})
+            row = jira_collect.collect(self.base, self.task, "pr_review", snapshot,
+                                       {"fixVersions": [{"id": "3"}, {"id": "4"}]})["fields"]["fixVersions"]
+            self.assertTrue(row["valid_value"])
+
     def test_git_start_failure_is_not_missing_branch(self):
         with mock.patch.object(git_refs.subprocess, "run", side_effect=FileNotFoundError("missing git")):
             with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):

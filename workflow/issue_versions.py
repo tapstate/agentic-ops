@@ -19,6 +19,11 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def rules_digest(spec):
+    # 新规则随重新确认的规划启用，已有 run 的分支绑定仍然有效。
+    return digest({key: value for key, value in spec.items() if key != "sequential_delivery"})
+
+
 def remote_refs(origin, branches):
     """一次精确查询；连接失败与不存在分别报告，不修改任何工作树/ref。"""
     print("正在核验主仓远端分支：%s（最长 30 秒）" % "、".join(sorted(branches)), file=sys.stderr, flush=True)
@@ -80,7 +85,10 @@ def resolve(base, task, payload):
     if develop.get("revision") != refs[preferred]:
         raise ValueError("优先分支证据必须绑定当前完整 SHA")
     observed_names = sorted(v["name"] for v in raw) if isinstance(raw, list) and all(isinstance(v, dict) and isinstance(v.get("name"), str) for v in raw) else None
-    return {"run_id": task["run_id"], "rules_digest": digest(spec),
+    prior_line = (task.get("facts", {}).get("handoff_resume") or {}).get("repair_line")
+    if prior_line and prior_line["next_branch"] != branch:
+        raise ValueError("实施分支与已回读的下一条修复线不一致")
+    result = {"run_id": task["run_id"], "rules_digest": rules_digest(spec),
             "observed": observed, "source_ref": observed["source_ref"],
             "versions": versions, "confirmation": effective["proof"],
             "primary_branch": branch, "develop": develop,
@@ -88,6 +96,9 @@ def resolve(base, task, payload):
             "sync_status": "pending" if sorted(v["name"] for v in versions) != observed_names else "not_needed",
             "refs": refs, "refs_verified_at": datetime.now(timezone.utc).isoformat(),
             "origin": origin}
+    if spec.get("sequential_delivery") is True:
+        result["sequential_delivery"] = True
+    return result
 
 
 def problems(base, task):
@@ -95,7 +106,7 @@ def problems(base, task):
     if not spec:
         return []
     plan = task.get("facts", {}).get(FACT)
-    if not isinstance(plan, dict) or plan.get("run_id") != task["run_id"] or plan.get("rules_digest") != digest(spec):
+    if not isinstance(plan, dict) or plan.get("run_id") != task["run_id"] or plan.get("rules_digest") != rules_digest(spec):
         return ["影响版本与优先修复线尚未核验：使用 task.py issue-versions 导入 Jira fields.versions 及 develop 核验证据"]
     profile = project_rules.load_profile(station=base)
     result = []

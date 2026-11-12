@@ -194,7 +194,7 @@ def check(base, issue_key, jira_input):
 
 
 def check_snapshot(base, issue_key, snapshot):
-    from workflow import external_sync
+    from workflow import external_sync, repair_delivery
     task = task_store.read_task(base, issue_key)
     rules = quality.config(base, task)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
@@ -222,7 +222,8 @@ def check_snapshot(base, issue_key, snapshot):
     groups = {
         "linked_test_tasks": linked_problems,
         "pr_checks": ci_problems(base, delivery_task, packet),
-        "task_checks": quality_problems(base, task, rules, snapshot),
+        "task_checks": quality_problems(base, task, rules, snapshot)
+        + repair_delivery.impact_problems(base, task, snapshot.get("issue", {})),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", []), rules),
     }

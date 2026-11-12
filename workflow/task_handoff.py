@@ -3,9 +3,22 @@ from __future__ import annotations
 
 import json
 import tempfile
-from workflow import engineering_baseline as baseline, project_rules, station_source as source
+from workflow import engineering_baseline as baseline, project_rules, repair_delivery, repository_delivery
+from workflow import station_source as source
 
 FORMAT = 'agenticops-handoff-v3'
+
+
+def fetch_handoff_commit(origin, sha, alternative=None):
+    """在空仓库证明确切对象可取回，源工作分支可以已被 GitHub 删除。"""
+    with tempfile.TemporaryDirectory(prefix='ao-handoff-baseline-') as directory:
+        source.git(directory, 'init', '--bare')
+        result = source.git(directory, 'fetch', '--depth=1', '--no-tags', '--', origin, sha, check=alternative is None)
+        if result.returncode and alternative:
+            source.git(directory, 'fetch', '--depth=1', '--no-tags', '--', origin, alternative)
+        if source.git(directory, 'rev-parse', 'FETCH_HEAD').stdout.strip() == sha:
+            return
+    raise ValueError('归档提交无法从远端准确取回：' + sha)
 
 
 def prepare(base, task, supplied):
@@ -22,6 +35,9 @@ def prepare(base, task, supplied):
         raise ValueError('放弃代码必须逐仓给出研发明确决定的来源')
     frozen = task.get('engineering_baseline', {})
     baseline.validate(frozen)
+    repair_line, proof = repair_delivery.archive_line(base, task)
+    if repair_line and discard:
+        raise ValueError('已验收合并的修复线应保留交付事实')
     repositories = {}
     for name, entry in sorted(frozen['repositories'].items()):
         binding = bindings.get(name)
@@ -41,15 +57,19 @@ def prepare(base, task, supplied):
             raise ValueError('归档源码不在登记工作分支：' + name)
         if head == entry['commit_sha']:
             # 临时空对象库证明固定对象确实可从远端取回，不能用已有本地对象冒充。
-            with tempfile.TemporaryDirectory(prefix='ao-handoff-baseline-') as directory:
-                source.git(directory, 'init', '--bare')
-                source.git(directory, 'fetch', '--depth=1', '--no-tags', '--', entry['origin'], head)
-                if source.git(directory, 'rev-parse', 'FETCH_HEAD').stdout.strip() != head:
-                    raise ValueError('归档固定基线远端回读不一致：' + name)
+            fetch_handoff_commit(entry['origin'], head)
             repositories[name] = dict(row, disposition='baseline')
             continue
         if not binding:
             raise ValueError('未登记仓库偏离冻结基线：' + name)
+        if repair_line:
+            delivery = repository_delivery.current(binding, head)
+            if not delivery or delivery not in proof['deliveries']:
+                raise ValueError('本轮合并证据与实际源码不一致：' + name)
+            fetch_handoff_commit(entry['origin'], head, 'refs/pull/%s/head' % delivery['pr'])
+            fetch_handoff_commit(entry['origin'], delivery['merge_commit'])
+            repositories[name] = dict(row, disposition='merged', delivery=delivery)
+            continue
         observed = source.git(path, 'ls-remote', '--refs', 'origin', 'refs/heads/' + branch).stdout.splitlines()
         if observed != [head + '\trefs/heads/' + branch]:
             raise ValueError('需保留代码尚未在对应远端分支核实，请按授权推送并回读：' + name)
@@ -67,6 +87,8 @@ def prepare(base, task, supplied):
     packet = {'format': FORMAT, 'issue_key': task['issue_key'], 'task_class': task['task_class'],
               **{key: supplied[key].strip() for key in sorted(required)}, 'evidence': evidence,
               'repositories': repositories, 'pending_external': pending, 'unresolved_operations': unresolved}
+    if repair_line:
+        packet['repair_line'] = repair_line
     rules = project_rules.load_admission(station=base)
     if project_rules.scan_sensitive(rules, json.dumps(packet, ensure_ascii=False)):
         raise ValueError('接续材料包含敏感内容或本机路径，请脱敏后重试；未输出原文')
@@ -109,6 +131,30 @@ def continuation_input(packet):
         raise ValueError('接续材料格式不符，先依据当前合同核实并补齐')
     from workflow import task_store
     task_store.validate_issue_key(packet.get('issue_key'))
+    repair_line = packet.get('repair_line')
+    if repair_line is not None:
+        if not isinstance(repair_line, dict) or packet['format'] != FORMAT:
+            raise ValueError('逐线接续材料格式无效')
+        baseline.text(repair_line.get('run_id'), '原修复线 run')
+        baseline.text(repair_line.get('summary_ref'), '已回读的交付评论')
+        baseline.ref_name(repair_line.get('branch'))
+        next_branch = repair_line.get('next_branch')
+        if next_branch is None:
+            raise ValueError('本轮已完成整单，没有待修复的目标分支')
+        baseline.ref_name(next_branch)
+        if next_branch == repair_line['branch']:
+            raise ValueError('同一修复线按原接管恢复')
+        merged = {name: row for name, row in packet['repositories'].items()
+                  if isinstance(row, dict) and row.get('disposition') == 'merged'}
+        if not merged:
+            raise ValueError('换线接续缺少上一条修复线的合并事实')
+        for name, row in merged.items():
+            baseline.repository_id(name)
+            baseline.ref_name(row.get('target_branch'))
+            repository_delivery.validate(
+                {'repository_id': name, 'target_branch': row['target_branch']}, row.get('delivery'))
+        # 已合并的源码仅作历史证据，下一条线用实际目标分支重新接管。
+        return {}
     result = {}
     for name, row in packet['repositories'].items():
         if not isinstance(row, dict):
@@ -190,6 +236,14 @@ def restore(base, packet, expected_digest, expected_run_id, expected_revision, s
             return {'status': 'already_restored', 'run_id': task['run_id'], 'stage': task['stage']}
         if saved or task['_revision'] != expected_revision:
             raise ValueError('任务已有恢复决定或 revision 已变化，核实当前成果后再继续')
+        repair_line = packet.get('repair_line')
+        if repair_line is not None:
+            from workflow import issue_versions
+            spec = issue_versions.rules(base, task) or {}
+            entry = task['engineering_baseline']['repositories'].get(spec.get('product_repository'), {})
+            if (spec.get('sequential_delivery') is not True or repair_line.get('run_id') == task['run_id']
+                    or entry.get('ref_kind') != 'branch' or entry.get('ref_name') != repair_line['next_branch']):
+                raise ValueError('先按接续点的下一条修复线重新接管并冻结基线')
         for name, row in continuations.items():
             binding = task['task_repositories'].get(name)
             entry = task['engineering_baseline']['repositories'].get(name)
@@ -216,6 +270,8 @@ def restore(base, packet, expected_digest, expected_run_id, expected_revision, s
                       evidence=verified, repositories=packet['repositories'],
                       pending_external=packet.get('pending_external', []),
                       unresolved_operations=packet.get('unresolved_operations', {}))
+        if repair_line:
+            record['repair_line'] = repair_line
         if project_rules.scan_sensitive(rules, json.dumps(record, ensure_ascii=False)):
             raise ValueError('恢复来源或证据含敏感内容，先脱敏')
         task['facts']['handoff_resume'] = record

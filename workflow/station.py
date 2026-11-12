@@ -408,6 +408,10 @@ def completion_proof(base, task):
     result = evaluate_completion(base, task)
     if not result["ready"]:
         raise ValueError("；".join(result["problems"]))
+    from workflow import repair_delivery
+    problems = repair_delivery.close_problems(base, task, result["proof"])
+    if problems:
+        raise ValueError("；".join(problems))
     return result["proof"]
 
 
