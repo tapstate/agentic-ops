@@ -1,5 +1,5 @@
 """Jira 评论写入的本地意图/回执/回读账本；外部调用由原生工具负责。"""
-from workflow import quality, task_store
+from workflow import jira_literal_html, quality, task_store
 import json
 import re
 
@@ -130,6 +130,14 @@ def checkpoint_body(model, checkpoint, rules, ctx, *, check_artifacts=True):
     return "\n\n".join(lines)
 
 
+def native_comment_request(record):
+    """从已保存的 v1 意图派生载荷；仅首次 prepare_write 返回发送请求。"""
+    body = jira_literal_html.literal_text(record["body"]) + "\n\n" + record["delivery_marker"]
+    html = jira_literal_html.render(body)
+    return {"site": record["site"], "issue_key": record["issue_key"],
+            "body_format": "html", "body": html, "rest_body": {"body": jira_literal_html.to_adf(html)}}
+
+
 def reduce(model, command, rules, ctx, *, check_artifacts=True):
     action, p = command["action"], command["payload"]
     records = model["publications"]
@@ -138,7 +146,8 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
         view = quality.checkpoint_view(model, cp, rules, ctx, check_artifacts=check_artifacts)
         if not view["reviewed"] or p["snapshot"] != snapshot(model, rules, ctx, cp, check_artifacts=check_artifacts):
             raise ValueError("评论处置必须绑定当前有效确认")
-        if any(r["status"] in ("intent", "unknown", "created") for r in records.values()):
+        if any(r["status"] in ("intent", "unknown", "created") and not r.get("delivery_only")
+               for r in records.values()):
             raise ValueError("检查点已有在途评论，先回读原操作")
         publication = records.get(p.get("publication_id"))
         if p.get("publication_id") and (not publication or publication["status"] != "verified"):
@@ -151,15 +160,19 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
     key = p["id"]
     if action == "draft":
         previous = records.get(key)
-        if previous and previous["status"] in ("intent", "unknown", "created", "verified"):
+        if previous and previous["status"] in ("intent", "unknown", "created", "verified", "delivered"):
             raise ValueError("该草稿已准备发送或已发送，保留现场；不得覆盖")
         cp = p.get("checkpoint")
+        if cp and p.get("delivery_only"):
+            raise ValueError("检查点评论需要正文核验")
         if cp and p["body"] != checkpoint_body(model, cp, rules, ctx, check_artifacts=check_artifacts):
             raise ValueError("检查点评论必须使用 status 返回的完整 publication_body，不能省略已确认方案或风险")
         records[key] = {"body": p["body"], "status": "draft", "snapshot": snapshot(model, rules, ctx, cp, check_artifacts=check_artifacts),
                         "site": rules["jira"]["site"], "issue_key": ctx["issue_key"]}
         if cp:
             records[key]["checkpoint"] = cp
+        if p.get("delivery_only"):
+            records[key]["delivery_only"] = True
         records[key]["digest"] = quality.digest(records[key])
         return
     record = records.get(key)
@@ -182,12 +195,22 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
                     continue
                 if other["status"] in ("intent", "unknown", "created") and other["body"] == record["body"]:
                     raise ValueError("已有外部写入待核对，请先回读，不得并行重试")
-                if other["status"] == "verified" and other["body"] == record["body"]:
-                    raise ValueError("相同正文已回读确认，不重复发送")
+                if other["body"] == record["body"] and (
+                    other["status"] == "verified" or other["status"] == "delivered" and record.get("delivery_only")
+                ):
+                    raise ValueError("相同正文已有成功记录，不重复发送")
             record["operation_id"] = quality.digest([ctx["issue_key"], ctx["run_id"], key, record["digest"]])
             record["status"] = "intent"
             if p.get("takeover_snapshot"):
                 record["author_account_id"] = p["takeover_snapshot"]["current_user"]["accountId"]
+            if "comment_transport" in p:
+                transport = p["comment_transport"]
+                actor = transport["author_account_id"]
+                if record.get("author_account_id", actor) != actor:
+                    raise ValueError("评论发送用户与已回读接管用户不匹配")
+                jira_literal_html.literal_text(record["body"])
+                record.update(body_transport=transport["format"], author_account_id=actor,
+                              delivery_marker="AgenticOps operation " + record["operation_id"])
     elif action in ("receipt", "readback"):
         if p["operation_id"] != record.get("operation_id"):
             raise ValueError("外部操作编号不匹配")
@@ -205,16 +228,35 @@ def reduce(model, command, rules, ctx, *, check_artifacts=True):
             elif p.get("comment_id"):
                 raise ValueError("不明回执不得声称已知评论 ID")
             record["status"] = p["result"]
+            if p["result"] == "created" and record.get("delivery_only"):
+                if not p.get("source_ref"):
+                    raise ValueError("通知投递成功需要原生写入回执来源")
+                record.update(status="delivered", source_ref=p["source_ref"])
             if p.get("reason"):
                 record["reason"] = p["reason"]
         else:
-            if any(p[k] != record[k] for k in ("site", "issue_key")) or not body_matches(record["body"], p["body"], p.get("body_representation", "exact-text")):
-                raise ValueError("回读目标或正文不匹配，保持待核对，不得重发")
+            if any(p[k] != record[k] for k in ("site", "issue_key")):
+                raise ValueError("回读站点或任务不匹配，保持待核对")
             if record.get("author_account_id") and p.get("author_account_id") != record["author_account_id"]:
                 raise ValueError("回读评论作者与原 Jira 登录用户不匹配")
             if record.get("comment_id") and p["comment_id"] != record["comment_id"]:
                 raise ValueError("回读评论 ID 与回执不匹配")
-            record.update({"status": "verified", "comment_id": p["comment_id"], "source_ref": p["source_ref"]})
+            representation = p.get("body_representation", "exact-text")
+            if record.get("body_transport") == "literal-html-v1":
+                request = native_comment_request(record)
+                if representation == "literal-html-v1":
+                    matches = jira_literal_html.document(request["body"]) == jira_literal_html.document(p["body"])
+                elif representation == "literal-adf-v1":
+                    matches = quality.digest(request["rest_body"]["body"]) == quality.digest(p["body"])
+                else:
+                    raise ValueError("原操作需要原生 HTML 或 ADF 回读，保持待核对，不得重发")
+                if not matches:
+                    raise ValueError("回读结构、完整正文或操作编号不匹配，保持待核对，不得重发")
+            elif (representation in ("literal-html-v1", "literal-adf-v1") or not isinstance(p["body"], str)
+                  or not body_matches(record["body"], p["body"], representation)):
+                raise ValueError("回读正文不匹配，保持待核对，不得重发")
+            record.update(status="delivered" if record.get("delivery_only") else "verified",
+                          comment_id=p["comment_id"], source_ref=p["source_ref"])
     else:
         raise ValueError("未知质量操作")
 

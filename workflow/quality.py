@@ -847,6 +847,8 @@ def apply(base, issue, run_id, revision, command):
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
         if takeover_publication and command['action'] == 'draft':
+            if command['payload'].get('delivery_only'):
+                raise ValueError('接管摘要需要正文核验')
             expected_id = external_sync.takeover_publication_id(base, task, replay(state)['publications'])
             if command['payload']['id'] != expected_id:
                 raise ValueError('接管评论必须复用当前稳定发布编号，不能另发重复评论')
@@ -949,6 +951,11 @@ def apply(base, issue, run_id, revision, command):
                     "sync_actions": [], "sync_diagnostics": ["质量记录已保存，但报告生成失败（%s）；先查询，不得重复 apply" % type(error).__name__]}
         from workflow import external_sync
         result.update(external_sync.safe_actions(base, task, result))
+        if action == "prepare_write":
+            record = model["publications"][payload["id"]]
+            if record.get("body_transport") == "literal-html-v1":
+                from workflow.quality_write import native_comment_request
+                result["native_request"] = native_comment_request(record)
         return result
 
 

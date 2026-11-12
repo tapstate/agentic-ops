@@ -648,7 +648,13 @@ Fix Details 面向任务交付，PR 面向单仓审查。Agent 使用同一批�
 
 正文适用短标题、段落和列表；真正需要映射或比较时才用小表格。关键风险和未完成项直接可见，不藏在折叠区。必要证据实际可访问；仅本机材料说明保全位置与恢复限制。原操作版本、当前安装版本和本次文案使用版本分别表述，不能把升级后的版本覆盖为故障发生版本。
 
-对已核验为字面文本的新草稿，绑定连接器实际支持 HTML 写入和 HTML 回读时，可使用 `workflow/jira_literal_html.py` 增加标题、段落和标签强调。它是无状态协议辅助，不发送、不写账本、不增加质量事件表示或门禁。原确认文本仍进入既有 draft/confirm/prepare_write；发送前在当前 run 的 interaction-path 以 `jira-html-<operation_id>.txt` 保存原始 UTF-8 HTML 意图；`.txt` 沿用 interaction-path 现有文件名合同，文件内容不转义、不转换为纯文本，文件位置可由原操作稳定推导；原生调用显式选择 HTML 格式。参数从当前连接器获取，不写入平台无关 Skill，不猜测旧安装或任意平台支持。
+对已核验为字面文本的新草稿，沿原 draft/confirm，在 `prepare_write` 的 payload 增加 `comment_transport`，填入 `format=literal-html-v1` 与同一连接原生回读的 `author_account_id`。已确认正文、格式版本和作者随原操作保留。仅本次成功准备返回 `native_request`。支持 HTML 的连接器使用其中的 `body`，显式选择 HTML 格式；直接使用 Jira REST v3 时，以 `rest_body` 对象作为请求体。两个表示由同一确认正文生成，使用相同 `site`、`issue_key` 和末尾的 `delivery_marker`；状态查询提供编号和回读线索。连接器参数以其实际工具说明为准。
+
+仅告知已发生事项、且正文不会作为接管、检查点发布或成果接续证据的评论，可在 `draft` 声明 `delivery_only=true`。收到原生写入成功后提交 `receipt`，提供 `result=created`、原 `operation_id`、`comment_id` 和 `source_ref`。状态记为 `delivered`，该通知完成收尾。检查点评论和接管摘要始终需要核验正文；`delivered` 的评论不能关联为检查点发布证据。缺省使用正文核验，已有操作按原意图继续。
+
+需要正文核验时，若成功响应已返回保存后的完整正文、评论 ID、作者及可核对的站点和任务，且当前节点无需更晚时点的状态，可直接把该响应作为 `readback` 的来源，省去再次查询和单独记录 `created`。如果响应只给 ID、缺字段或仅回显请求，按 ID 补查。响应丢失时在原站点和任务分页回读，按原作者的 `accountId` 和完整编号唯一定位。无匹配或多个匹配时保留未知。MCP 评论列表须选择能返回 `author.accountId` 的视图，Atlassian MCP 使用 `view=full` 和 `responseContentFormat=html`，将原生 `body` 以 `body_representation=literal-html-v1` 提交。直接使用 Jira REST v3 时，以 `body_representation=literal-adf-v1` 提交原始 `body` 对象；`renderedBody` 可能加入任务链接等展示元素，不能用来核验原始文档。两条路径均核对站点、任务、作者、已知评论 ID、正文和结构。找到评论但正文变化时保留原操作待核对，继续无依赖工作。编号用于回读定位，Jira 不提供据此防重的保证。
+
+旧操作若已经通过字面 HTML 辅助发送，沿当时保存的 `jira-html-<operation_id>.txt` 原意图比较。以下 `render` 是旧方式的载荷生成入口，现有在途操作直接使用保存的原文件。
 
 ```sh
 python3 <product-root>/workflow/jira_literal_html.py render --body-file <原确认正文> > <HTML原意图>
@@ -659,7 +665,7 @@ python3 <product-root>/workflow/jira_literal_html.py compare --body-file <原确
 
 原已确认纯文本评论的 Markdown 回读若存在本合同未接纳的转义差异，可只读取得同一评论的原生 HTML，再用 `compare-plain --body-file <原确认正文> --readback <原生回读.json> --site <站点> --issue-key <任务> --comment-id <原编号>` 核验。该模式仅接受无格式 p 段落、text 和 br 换行，按原段落及换行逐字核对；文本节点中的 CR/LF 不当作正文换行，必须由 p/br 明确表达。标题、强调、链接及其它格式语义均拒绝，不依靠扁平文本相等忽略它们。不生成或要求补造旧 HTML 发送意图，不调用 render，不修改 literal-markdown-v1；成功输出仍沿原操作进入既有 exact-text 回读。新 HTML 展示模板仍使用上文保存原意图的 compare，不能用此模式代替。正文确有格式、原生表示不可得或文本不一致时保留待核对，不手工改字符串或重发。
 
-有格式语义、链接、表格、提及或媒体的正文不使用本字面辅助；使用双方一致的受支持原生表示严格核验，编辑前保留远端人工内容。不从扁平文本相等推导结构、链接或权限相同。连接器明确不支持 HTML 且尚未发送时，可在原授权下沿已有字面 Markdown 路径准备；已采用 HTML 展示并发送或结果未知时，只能按原文本、保存的 HTML 意图和原编号回读，不切换格式重发。旧版 intent/unknown/created 沿原正文、原操作及原编号接续，历史事件不改写；原已确认纯文本可按上文 compare-plain 核验同一评论的无格式原生表示，不重新生成 HTML 发送意图，不因展示变更重发接管或检查点评论。HTML 原意图与必要回读属于执行恢复材料，沿原 run 保留；结果未知或待核对时不得当缓存清除，归档/清理前按现有材料保全合同保存可靠副本与定位信息。丢失原意图时只暂停受影响回读，不用新模板重建替代，也不阻塞其它无依赖工作。不新增本地队列、状态字段或平行台账。
+有格式语义、链接、表格、提及或媒体的正文使用双方一致的受支持原生表示严格核验，编辑前保留远端人工内容。连接器明确不支持 HTML 且尚未发送时，可在原授权下沿已有字面 Markdown 路径准备。结果未知时沿原操作及其表示回读。旧版 intent/unknown/created 沿原正文、原操作及原编号接续；原已确认纯文本可按上文 compare-plain 核验同一评论的无格式原生表示。旧操作的 HTML 原意图与必要回读属于执行恢复材料，归档或清理前按现有材料保全合同保存可靠副本与定位信息。丢失原意图时暂停受影响的回读，继续其它无依赖工作。
 
 ### 字段与阶段同步
 
@@ -667,7 +673,7 @@ python3 <product-root>/workflow/jira_literal_html.py compare --body-file <原确
 
 TapData 评论面向研发、测试和审查人。首次接管、方案确定或实质变化、需协作的阻塞、验证/提审/交付形成新结论时发布；同轮相关信息合并，无变化查询、等待及纯内部检查点推进不发评论。阻塞即时告知。正文按“结论、必要依据、后续动作”组织，通常一至三段或三至五项，约 200 字为参考而非截断限制。保留未执行、跳过、失败、未知及覆盖限制，风险接受不等于 PASS。优先链接 PR、具体提交和可访问报告，不堆内部状态码、运行编号、AO 标识和重复基线；详细方案及修复结论进入专用字段。历史结论变化追加简短更正，不静默改写历史。
 
-`publication_body` 是简短素材。Agent 结合真实事实形成普通 `draft`（不绑定单一 checkpoint），复用有效授权沿 confirm/prepare_write、原生写入及 receipt/readback；同一条已回读评论可覆盖多个有效确认。每个确认沿 quality apply 的 `publication_decision` 保存 `checkpoint`、status 返回的 `publication_snapshot`（输入键为 `snapshot`）、`reason`、`source_ref`，合并已发布评论时另带 `publication_id`。无新增信息省略该 ID，记录具体理由和可核验依据；它表示无需新评论，不冒充 published。确认或证据变化后重新评估；已存在的在途评论必须先回读，不能用无需发布掩盖未知结果。内部记录继续使用原质量日志，不新增台账。
+`publication_body` 是简短素材。Agent 结合真实事实形成普通 `draft`（不绑定单一 checkpoint），复用有效授权沿 confirm/prepare_write、原生写入及 receipt/readback；同一条正文已核验的评论可覆盖多个有效确认。每个确认沿 quality apply 的 `publication_decision` 保存 `checkpoint`、status 返回的 `publication_snapshot`（输入键为 `snapshot`）、`reason`、`source_ref`，合并已发布评论时另带 `publication_id`。无新增信息省略该 ID，记录具体理由和可核验依据；它表示无需新评论，不冒充 published。确认或证据变化后重新评估；用于正文核验的在途评论必须先核实原操作；仅投递通知的未知结果单独保留同步待办。内部记录继续使用原质量日志，不新增台账。
 
 方案确认后、实施前同步 Issue Analysis；修改形成且首轮验证后同步阶段性 Fix Details，明确待验收，最终验收或 CI 结论变化后更新。字段采集不是同步成功：先读取完整原值，保留人工内容并形成 proposals，复用有效决定 confirm，再执行 `jira_status prepare_fields --checkpoint <节点> --input <文件>`。输入复用 snapshot/proposals，增加稳定 operation_id；返回 native_request 后由 Agent 原生写入，保存原操作并执行 `readback_fields`，输入带原 operation_id 和原生 snapshot。所有入口均带 issue-key、expected-run-id、dir。明确未写入时可向 readback_fields 提交 result=not_written，snapshot.operation_result 须包含原 operation_id、effect=not_written 和 source_ref，并核验原写前值；只有明确拒绝才能解除未知，不能从未查到推断。回读仅验证原全文，不将旧操作成功解释为当前方案已同步；待办按当前材料判断新鲜度。字段缺值、仅 ID 或无法表示完整富文本时先补查，不当空值覆盖。普通文本保持真实原生值；含媒体或格式结构的字段须使用可保留结构的原生表示，不自行扁平化。
 
@@ -679,9 +685,9 @@ TapData 评论面向研发、测试和审查人。首次接管、方案确定或
 
 确需停下时，必须解释当前检查点要核对什么，并把 `handoff` 转成用户可执行的说明：用例/步骤、预期、执行人、环境、仓库及完整 SHA，要求返回日志/报告与实际结果，列出可选处置和仍可继续的工作。缺少 SHA 的日志先补来源，不猜目标版本；恢复同一 run 时不重复问已有效确认的问题。
 
-`evidence.py` 生成可审阅证据摘要。将准备发送的精确正文保存为草稿，展示给用户确认后，先 `prepare_write`，再由原生 Jira 工具发送，随后导入回执和回读。`verified` 仅代表该评论的目标、编号和正文匹配，不代表 Jira 状态流转或任务发布完成。默认严格核对正文。若已核验原文是字面文本，且原生工具以 Markdown 返回，可在 readback 声明 body_representation=literal-markdown-v1，仅接纳 Jira 在字面 [, ], _、* 和 ~ 前增加反斜杠的转换；原文已有反斜杠、\n、Unicode 转义、链接、代码及其它正文差异不反转义。含 Markdown 格式语义或非文本 ADF 节点时不得使用此表示，需取得双方一致的原生表示后严格核对；不匹配保留现场，不重发。
+`evidence.py` 生成可审阅证据摘要。将准备发送的精确正文保存为草稿，展示给用户确认后，先 `prepare_write`，再由原生 Jira 工具发送，按上文导入成功回执或正文核验证据。`verified` 仅代表该评论的目标、编号和正文匹配，不代表 Jira 状态流转或任务发布完成。默认严格核对正文。若已核验原文是字面文本，且原生工具以 Markdown 返回，可在 readback 声明 body_representation=literal-markdown-v1，仅接纳 Jira 在字面 [, ], _、* 和 ~ 前增加反斜杠的转换；原文已有反斜杠、\n、Unicode 转义、链接、代码及其它正文差异不反转义。含 Markdown 格式语义或非文本 ADF 节点时不得使用此表示，需取得双方一致的原生表示后严格核对；不匹配保留现场，不重发。
 
-发送前正文或关联质量快照变化，会使确认失效。检查点评论只绑定该点快照和处置，后续无关阶段不使它失效；普通汇总草稿仍绑定整体快照。拿到意图后发生超时或中断，先回读核对，不重复调用新增评论。未拿到评论 ID 时只能通过可核实的原始请求与远端记录定位；多个同文评论无法消歧时人工接力。`operation_id` 是本地关联编号，不是 Jira 服务端幂等键。
+发送前正文或关联质量快照变化，会使确认失效。检查点评论只绑定该点快照和处置，后续无关阶段不使它失效；普通汇总草稿仍绑定整体快照。拿到意图后发生超时或中断，先回读核对。旧评论未拿到评论 ID 时，通过可核实的原始请求与远端记录定位；多个同文评论无法消歧时人工接力。新字面 HTML 评论按上文操作编号恢复。
 
 日志按当前 task/run 隔离，追加操作复用任务锁、revision 比对、原子替换和持久化。旧 revision、错误 run、损坏或未知版本不会覆盖原记录。实际代码变化、相关仓库 CI 当前检查事实变化或用例／方式／预期变化使相应确认失效；CI 只绑定最新候选 Head、结果和检查执行身份等事实，观察时间、历史追加及检查展示顺序不单独使确认失效；工作目录指纹只保存摘要，不保存源码。修复前复现仍绑定原版本，不因开始修复而丢失。
 
