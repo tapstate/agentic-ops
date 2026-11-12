@@ -145,6 +145,50 @@ class IssueVersionsTests(unittest.TestCase):
         self.payload["effective"]["execution_branch"] = "release-v4.18.0"
         self.assertEqual("release-v4.18.0", self.resolve()["primary_branch"])
 
+    def test_follow_up_takeover_keeps_forward_jira_status_and_binds_archive(self):
+        from station_fixture import ownership_snapshot
+        from workflow import engineering_baseline, jira_ownership, task_handoff
+        old_run = 'TAP-123-12345678'
+        snapshot = ownership_snapshot(self.base, values={
+            'customfield_10421': 'v1.0.0', 'customfield_10366': '2026-11-12T09:00:00+00:00',
+            'customfield_10462': 'a' * 32, 'customfield_10365': old_run})
+        fields = snapshot['issue']['fields']
+        fields['status'] = {'name': 'Pull Request Submitted'}
+        snapshot['previous_takeover'] = {
+            'observed_fields': {k: fields[k] for k in ('customfield_10421', 'customfield_10366', 'customfield_10462', 'customfield_10365')},
+            'evidence_ref': 'fixture:archive', 'decision_ref': 'fixture:decision', 'conflict_check_ref': 'fixture:clean'}
+        target = 'release-v4.18.0'
+        repo = 'tapdata/tapdata'
+        packet = {'format': task_handoff.FORMAT, 'issue_key': 'TAP-123', 'task_class': 'defect_fix',
+                  'repair_line': {'run_id': old_run, 'branch': 'develop', 'next_branch': target,
+                                  'summary_ref': 'fixture:summary'},
+                  'repositories': {repo: {'target_branch': 'develop', 'disposition': 'merged',
+                      'delivery': {'repository': repo, 'pr': '1', 'target_branch': 'develop',
+                                   'pr_head': 'a' * 40, 'candidate_head': 'a' * 40, 'merge_commit': 'b' * 40,
+                                   'merged_at': '2026-11-12T09:00:00+00:00', 'readback_ref': 'fixture:merge'}}}}
+        digest = engineering_baseline.digest(packet)
+        snapshot['repair_handoff'] = {'packet': packet, 'readback': {
+            'site': snapshot['site'], 'issue_key': 'TAP-123', 'comment_id': '1',
+            'source_ref': 'fixture:archive', 'body': task_handoff.handoff_body(packet, digest)}}
+        with mock.patch('workflow.execution.session_id', return_value='a' * 32):
+            with self.assertRaisesRegex(ValueError, '不满足项目接管准入'):
+                jira_ownership.preflight(self.base, 'TAP-123', snapshot, 'defect_fix')
+            binding = task_handoff.takeover_binding(self.base, 'TAP-123', 'defect_fix', snapshot, target, {})
+            self.assertEqual(digest, binding)
+            self.assertEqual('123', jira_ownership.preflight(
+                self.base, 'TAP-123', snapshot, 'defect_fix', binding)['issue_id'])
+            fields['status'] = {'name': 'Merged'}
+            with self.assertRaisesRegex(ValueError, '不满足项目接管准入'):
+                jira_ownership.preflight(self.base, 'TAP-123', snapshot, 'defect_fix', binding)
+        with self.assertRaisesRegex(ValueError, '目标分支不符'):
+            task_handoff.takeover_binding(self.base, 'TAP-123', 'defect_fix', snapshot, 'develop', {})
+        snapshot['repair_handoff']['readback']['body'] += '已变化'
+        with self.assertRaisesRegex(ValueError, '正文不匹配'):
+            task_handoff.takeover_binding(self.base, 'TAP-123', 'defect_fix', snapshot, target, {})
+        self.task['facts']['required_repair_handoff'] = digest
+        with self.assertRaisesRegex(ValueError, '先恢复'):
+            self.resolve()
+
     def test_follow_up_preserves_first_line_fields_and_defers_fix_versions(self):
         from workflow import jira_collect, quality_write, station
         self.task["facts"]["handoff_resume"] = {"repair_line": {"next_branch": "release-v4.18.0"}}

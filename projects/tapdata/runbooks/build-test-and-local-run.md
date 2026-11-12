@@ -82,7 +82,7 @@ python3 <agenticops-root>/workflow/task.py runtime-path \
 
 1. 开 Draft PR 前用原生 Jira 工具读取并按已证实的版本 ID 更新 `versions`，保留已有有效项。评论总结证据、边界与待核实范围，回读字段和评论。将 `issue`（含 `key`、`fields.versions`）、`source_ref`、`summary_ref` 和 `affected_version_ids` 交给 `workflow/external_sync.py impact-readback --issue-key <key> --expected-run-id <run> --dir <station> --input <json>`。确无已证实 Jira 版本时提供空列表及 `no_affected_version_reason`。回读缺失暂停开 PR，本地分析和验证可继续。PR Ready 快照也提供实时 `fields.versions`。
 2. 合并后回读本轮全部必要 PR 和本轮验收结果。版本分支按已核验的交付版本追加 Jira `fixVersions`，再回读；develop 计划目标留在评论。评论汇总各仓 PR、合并 SHA、证据、版本待发布及剩余线。将 `issue`（含 `fields.versions` 及实际修复版本的 `fields.fixVersions`）、`source_ref`、`summary_ref`、`fix_version_ids`（develop 用空列表）和 `next_branch`（没有剩余修复线才用 null）交给同一入口的 `line-readback`。在途写入先查原操作。线上表单或 Validator 若提前要求 fixVersions，保留状态转换待办，由 Jira 管理方按合并后写入的口径核实处理。
-3. 有下一条线时，复用 [Jira 接续点与任务清理](../../../docs/usage/task-archive-and-resume.md#持久接续点操作)。待归档正文回读及原 run 清理完成，按下一目标分支对齐后接管同一 Jira，再用 `handoff-restore` 接回上一轮成果。已合并 PR 的源分支已删除时，核验 GitHub PR Head、合并提交及必要证据仍可取回。下一轮固定新基线和授权，沿用已证实根因和用例，逐线重新验收。整单 Merged 在必修线均验收合并、版本回读与无法回补的处置均齐备后执行，无需等待发布。
+3. 有下一条线时，复用 [Jira 接续点与任务清理](../../../docs/usage/task-archive-and-resume.md#持久接续点操作)。归档正文回读并清理原 run 后，按下一目标分支接管同一 Jira。在 `takeover --jira-input` 的 Jira 快照中附 `repair_handoff`，包含从同一条评论取得的 `packet` 和归档 `readback`，并按原接管合同核验前一 run 的四项标记与交接。接管在 Jira 已到 Tests Passed 或 Pull Request Submitted 时校验该接续点后继续，再用 `handoff-restore` 接回同一份成果。已合并 PR 的源分支已删除时，核验 GitHub PR Head、合并提交及必要证据仍可取回。下一轮固定新基线和授权，沿用已证实根因和用例，逐线重新验收。整单 Merged 在必修线均验收合并、版本回读与无法回补的处置均齐备后执行，无需等待发布。
 
 ### 测试与提交边界
 

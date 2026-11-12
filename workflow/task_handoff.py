@@ -9,6 +9,42 @@ from workflow import station_source as source
 FORMAT = 'agenticops-handoff-v3'
 
 
+def handoff_body(packet, digest):
+    return ('AgenticOps 任务接续点 ' + digest + '\n\n'
+            '以下记录是已核实成果的保存点，不代表任务完成或环境已恢复。'
+            '已放弃代码需重新实施；外部结果未知须先回读。\n\n'
+            '```json\n' + json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2) + '\n```')
+
+
+def takeover_binding(base, issue, task_class, snapshot, version, overrides):
+    """接管前核对 Jira 接续点与上一轮归属，冻结下一轮需要恢复的摘要。"""
+    material = snapshot.get('repair_handoff')
+    if material is None:
+        return None
+    from workflow import issue_versions, jira_watermark
+    spec = issue_versions.rules(base, {'task_class': task_class}) or {}
+    if spec.get('sequential_delivery') is not True or not isinstance(material, dict):
+        raise ValueError('当前任务不支持此逐线接续点')
+    packet = material.get('packet')
+    continuation_input(packet)
+    line = packet.get('repair_line')
+    if (not line or packet.get('issue_key') != issue or packet.get('task_class') != task_class
+            or line['next_branch'] != version or overrides.get(spec['product_repository'], version) != version):
+        raise ValueError('Jira 接续点与本次任务类型或下一条目标分支不符')
+    rules = jira_watermark.config(base)
+    fields = snapshot['issue']['fields']
+    markers = jira_watermark.marker_values(fields, rules, snapshot)
+    prior_run = markers[rules['marker_fields']['run_id']]
+    if line['run_id'] != prior_run:
+        raise ValueError('Jira 接续点与上一轮接管标记不符')
+    digest = baseline.digest(packet)
+    verify_readback({'site': snapshot['site'], 'packet': packet, 'body': handoff_body(packet, digest)},
+                    material.get('readback'))
+    if material['readback'].get('status') == 'not_sent':
+        raise ValueError('逐线接续需要已写入 Jira 的接续点')
+    return digest
+
+
 def fetch_handoff_commit(origin, sha, alternative=None):
     """在空仓库证明确切对象可取回，源工作分支可以已被 GitHub 删除。"""
     with tempfile.TemporaryDirectory(prefix='ao-handoff-baseline-') as directory:
@@ -93,10 +129,7 @@ def prepare(base, task, supplied):
     if project_rules.scan_sensitive(rules, json.dumps(packet, ensure_ascii=False)):
         raise ValueError('接续材料包含敏感内容或本机路径，请脱敏后重试；未输出原文')
     digest = baseline.digest(packet)
-    body = ('AgenticOps 任务接续点 ' + digest + '\n\n'
-            '以下记录是已核实成果的保存点，不代表任务完成或环境已恢复。'
-            '已放弃代码需重新实施；外部结果未知须先回读。\n\n'
-            '```json\n' + json.dumps(packet, ensure_ascii=False, sort_keys=True, indent=2) + '\n```')
+    body = handoff_body(packet, digest)
     profile = project_rules.load_profile(station=base)
     site = profile.get('jira', {}).get('site')
     if not isinstance(site, str) or not site.startswith('https://'):
@@ -231,6 +264,9 @@ def restore(base, packet, expected_digest, expected_run_id, expected_revision, s
         task = task_store.check_expected_run(base, packet['issue_key'], expected_run_id)
         if task['task_class'] != packet.get('task_class'):
             raise ValueError('恢复任务类型不一致')
+        required_digest = task['facts'].get('required_repair_handoff')
+        if required_digest and required_digest != expected_digest:
+            raise ValueError('恢复内容与新接管时核验的 Jira 接续点不符')
         saved = task['facts'].get('handoff_resume')
         if saved and saved.get('digest') == expected_digest:
             return {'status': 'already_restored', 'run_id': task['run_id'], 'stage': task['stage']}

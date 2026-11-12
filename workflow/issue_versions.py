@@ -75,6 +75,9 @@ def resolve(base, task, payload):
             or not isinstance(develop.get("source_ref"), str) or not develop["source_ref"].strip()):
         raise ValueError("先核验优先分支是否存在同一缺陷，unknown 不能作为 absent")
     preferred = spec["preferred_branch"]
+    handoff = task.get("facts", {}).get("handoff_resume") or {}
+    if (required_handoff := task.get("facts", {}).get("required_repair_handoff")) and handoff.get("digest") != required_handoff:
+        raise ValueError("先恢复新接管时核验的 Jira 接续点，再确认本轮版本计划")
     if develop["status"] == "present" and branch != preferred:
         raise ValueError("优先分支存在同一缺陷，应在该分支修复")
     profile = project_rules.load_profile(station=base)
@@ -85,7 +88,7 @@ def resolve(base, task, payload):
     if develop.get("revision") != refs[preferred]:
         raise ValueError("优先分支证据必须绑定当前完整 SHA")
     observed_names = sorted(v["name"] for v in raw) if isinstance(raw, list) and all(isinstance(v, dict) and isinstance(v.get("name"), str) for v in raw) else None
-    prior_line = (task.get("facts", {}).get("handoff_resume") or {}).get("repair_line")
+    prior_line = handoff.get("repair_line")
     if prior_line and prior_line["next_branch"] != branch:
         raise ValueError("实施分支与已回读的下一条修复线不一致")
     result = {"run_id": task["run_id"], "rules_digest": rules_digest(spec),

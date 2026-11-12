@@ -283,7 +283,7 @@ def cmd_snapshot(args):
 def cmd_record(args):
     if args.key == "station_contract":
         raise ValueError("station_contract 由接管入口管理，不能通过 record 修改")
-    if args.key == "handoff_resume":
+    if args.key in ("handoff_resume", "required_repair_handoff"):
         raise ValueError("handoff_resume 由归档恢复入口管理，不能通过 record 修改")
     task = require(args.dir, args.issue_key)
     if args.key == repair_strategy.OVERRIDE_FACT:

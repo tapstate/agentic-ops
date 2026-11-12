@@ -376,6 +376,21 @@ def plain_adf_matches(expected, observed):
 
 def field_matches(expected, observed, schema, field):
     """只接纳已知 Jira 字段的原生表示；不剥离任意富文本结构。"""
+    if (schema.get("type") == "array" and field in ("fixVersions", "versions")
+            and isinstance(expected, list) and isinstance(observed, list)):
+        # Jira 按项目版本顺序返回字段，可能与写入顺序不同。
+        versions = []
+        for rows in (expected, observed):
+            if any(not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] for row in rows):
+                return False
+            by_id = {row["id"]: row for row in rows}
+            if len(by_id) != len(rows):
+                return False
+            versions.append(by_id)
+        before, after = versions
+        return before.keys() == after.keys() and all(
+            field_matches(row, after[version_id], {"type": "version"}, field)
+            for version_id, row in before.items())
     if expected == observed:
         return True
     kind = schema.get("type")
@@ -383,8 +398,6 @@ def field_matches(expected, observed, schema, field):
         return plain_adf_matches(expected, observed)
     if kind == "array" and isinstance(expected, list) and isinstance(observed, list):
         item = schema.get("items")
-        if field in ("fixVersions", "versions"):
-            item = "version"
         if item not in ("user", "version", "option") or len(expected) != len(observed):
             return False
         return all(field_matches(a, b, {"type": item}, field) for a, b in zip(expected, observed))
