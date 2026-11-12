@@ -7,6 +7,10 @@ Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.
 
 质量 receipt 增加 deferred 与可选 reason：表示已知未写入，必须说明原因；unknown 表示结果不明，不得盲目重发。同步状态不决定本地阶段通过。issue-versions 输入的 effective 保存 versions、execution_branch 和 proof，observed 保留初始 Jira 快照；版本无需 Jira ID，也不映射分支。旧事件按记录时规则重放，人读评论格式由当前 Project 配置决定。
 
+质量 `prepare_write` 可显式选用 `comment_transport.format=literal-html-v1`，由原确认正文、作者、操作编号和该版字面 HTML 规则重放原意图。原生 HTML 和由该意图生成的 Jira REST v3 ADF 各有显式回读表示，REST 核对完整文档。旧事件没有该字段，沿原正文与回读合同重放。使用了新字段或回读表示的质量事件须由支持该格式的版本读取。操作与恢复见[质量指引](../docs/usage/quality-checkpoints.md#jira-回写内容与字面-html-展示)。
+
+质量 `draft.delivery_only=true` 适用于仅需确认投递的通知。原操作的成功 `receipt` 含评论 ID 与来源时可记为 `delivered`；检查点及接管摘要继续要求正文核验。缺省沿原正文核验合同重放，新事件需要支持该字段的版本。
+
 - `gate-request.schema.json`：Adapter 交给 Gate 的标准操作请求。
 - `gate-decision.schema.json`：Gate 返回给 Adapter 的三态标准判定。
 - `adapter-manifest.schema.json`：Manifest v3 的 Agent 接线修订、生成与退役产物、启动方式和 Skill 目标声明，不包含工具 Hook 协议。

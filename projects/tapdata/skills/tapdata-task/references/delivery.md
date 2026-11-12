@@ -44,7 +44,7 @@ Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 - PR 审查按[审查返工](../../../../../docs/usage/quality-checkpoints.md#pr-审查返工)完整回读普通评论及行内线程，逐项修复或说明依据；改变验收预期交研发决定。相同失败沿用原 problem_id，使用失败工具的 review 来源累计轮次，修改后重验当前代码并回读当前 PR CI；不以线程过时或已关闭替代问题核对。
 - PR 合入、发布、Tag、rebase、强推和保护分支写入不被任务授权覆盖。检出来源分支合并到任务工作分支也须明确纳入方案授权，不因需要保持最新而绕过授权。
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-station>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
-- 有新增协作结论才回写简洁评论，同轮合并，保留 draft/confirm/prepare_write/receipt/readback；沿质量合同记录 publication_decision，重复查询或纯内部推进不刷评论。Issue Analysis / Fix Details 的 collect/confirm 不等于写入，必须 prepare_fields、原生写入并 readback_fields。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
+- 有新增协作结论才回写简洁评论，同轮合并，沿[评论写入与回读合同](../../../../../docs/usage/quality-checkpoints.md#jira-回写内容与字面-html-展示)选择连接器支持的格式并记录 publication_decision。Issue Analysis / Fix Details 的 collect/confirm 不等于写入，必须 prepare_fields、原生写入并 readback_fields。已知未写入可用 receipt result=deferred 并给 reason；超时或结果不明记 unknown，先回读原操作。评论、水印、版本或状态同步失败均不阻止不依赖它的本地研发，PR 后用 evidence.py 统一输出执行过程被跳过的处理与警告。
 - 未迁移能力优先使用 Agent 原生能力；没有安全路径时只暂停当前副作用步骤。
 
 归档写入失败时，按[任务授权指引](../../../../../docs/usage/task-authorization.md#清理与退出)展示指定快照、失败原因和实际清理结果，引导研发明确授权修复后重试或放弃。复用原操作和失败摘要，不自动丢弃，不以新 clean 操作绕过；回读结果不明时先核实。

@@ -535,6 +535,9 @@
               "minLength": 1,
               "pattern": "\\S"
             },
+            "delivery_only": {
+              "type": "boolean"
+            },
             "id": {
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
@@ -610,6 +613,23 @@
             "takeover_snapshot": {
               "type": "object"
             },
+            "comment_transport": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "const": "literal-html-v1"
+                },
+                "author_account_id": {
+                  "type": "string",
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "format",
+                "author_account_id"
+              ],
+              "additionalProperties": false
+            },
             "digest": {
               "type": "string",
               "minLength": 1,
@@ -653,6 +673,10 @@
                 "unknown",
                 "deferred"
               ]
+            },
+            "source_ref": {
+              "type": "string",
+              "pattern": "\\S"
             },
             "reason": {
               "type": "string",
@@ -712,9 +736,16 @@
               "pattern": "\\S"
             },
             "body": {
-              "type": "string",
-              "minLength": 1,
-              "pattern": "\\S"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                },
+                {
+                  "type": "object"
+                }
+              ]
             },
             "source_ref": {
               "type": "string",
@@ -729,7 +760,9 @@
               "type": "string",
               "enum": [
                 "exact-text",
-                "literal-markdown-v1"
+                "literal-markdown-v1",
+                "literal-html-v1",
+                "literal-adf-v1"
               ]
             }
           },

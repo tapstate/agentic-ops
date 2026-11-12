@@ -2545,6 +2545,113 @@ class QualityTests(unittest.TestCase):
             'issue_key': 'TAP-123', 'comment_id': '100', 'body': body, 'source_ref': 'fixture:legacy/100'})
         self.assertEqual('verified', self.view()['publications']['legacy']['status'])
 
+    def test_literal_html_transport_preserves_content_required_by_publication_decision(self):
+        self.checkpoint('q1-intake', outcome='not_applicable')
+        original = '## TAP-123 验证结论\n\n结果：a_b & <检查>\n- SHA `abcdef`，待验证 P-01~P-11'
+        self.apply('draft', {'id': 'native-html', 'body': original})
+        draft = self.view()['publications']['native-html']
+        self.apply('confirm', {'id': 'native-html', 'digest': draft['digest'], 'proof': proof()})
+        prepare = {'id': 'native-html', 'digest': draft['digest'],
+                   'comment_transport': {'format': 'literal-html-v1', 'author_account_id': 'fixture-actor'}}
+        prepared = self.apply('prepare_write', prepare)
+        record = prepared['publications']['native-html']
+        marker = 'AgenticOps operation ' + record['operation_id']
+        body = ('<h3>## TAP-123 验证结论</h3>'
+                '<p><strong>结果：</strong>a_b &amp; &lt;检查&gt;<br>- SHA `abcdef`，待验证 P-01~P-11</p>'
+                '<p>' + marker + '</p>')
+        adf = {'type': 'doc', 'version': 1, 'content': [
+            {'type': 'heading', 'attrs': {'level': 3}, 'content': [{'type': 'text', 'text': '## TAP-123 验证结论'}]},
+            {'type': 'paragraph', 'content': [
+                {'type': 'text', 'text': '结果：', 'marks': [{'type': 'strong'}]},
+                {'type': 'text', 'text': 'a_b & <检查>'}, {'type': 'hardBreak'},
+                {'type': 'text', 'text': '- SHA `abcdef`，待验证 P-01~P-11'}]},
+            {'type': 'paragraph', 'content': [{'type': 'text', 'text': marker}]},
+        ]}
+        self.assertEqual({'site': record['site'], 'issue_key': 'TAP-123', 'body_format': 'html', 'body': body,
+                          'rest_body': {'body': adf}}, quality.cli_report(prepared)['native_request'])
+        self.assertEqual(original, record['body'])
+        self.assertEqual(marker, self.view()['publications']['native-html']['delivery_marker'])
+        self.assertNotIn('native_request', self.view())
+        with self.assertRaises(ValueError):
+            self.apply('prepare_write', prepare)
+
+        operation = {'id': 'native-html', 'operation_id': record['operation_id']}
+        self.apply('receipt', dict(operation, result='unknown'))
+        observed = body.replace('<h3>', '<h3 data-local-id="fixture">').replace('<br>', '<br/>').replace('&amp;', '&#38;')
+        payload = dict(operation, site=record['site'], issue_key='TAP-123', comment_id='104',
+                       source_ref='fixture:jira/104', author_account_id='fixture-actor',
+                       body_representation='literal-html-v1', body=observed)
+        decision = {'checkpoint': 'q1-intake', 'snapshot': self.view()['checkpoints']['q1-intake']['publication_snapshot'],
+                    'reason': '同轮发布', 'source_ref': 'fixture:jira/104', 'publication_id': 'native-html'}
+        for change in ({'body': observed.replace('abcdef', 'fedcba')},
+                       {'body': '<p>' + marker + '</p>'}, {'body': observed.replace(marker, '编号缺失')},
+                       {'body': observed.replace('<strong>', '').replace('</strong>', '')},
+                       {'body': original, 'body_representation': 'exact-text'},
+                       {'author_account_id': 'another-actor'}, {'site': 'https://other.test'},
+                       {'issue_key': 'OTHER-1'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.apply('readback', dict(payload, **change))
+        with self.assertRaisesRegex(ValueError, '先回读原操作'):
+            self.apply('publication_decision', decision)
+        edited = copy.deepcopy(adf)
+        edited['content'][1]['content'][-1]['text'] = '- SHA `fedcba`，待验证 P-01~P-11'
+        rest_payload = dict(payload, body_representation='literal-adf-v1', body=adf)
+        with self.assertRaisesRegex(ValueError, '正文'):
+            self.apply('readback', dict(rest_payload, body=edited))
+        with self.assertRaisesRegex(ValueError, '正文'):
+            self.apply('readback', dict(rest_payload, body=observed))
+        self.assertEqual('unknown', self.view()['publications']['native-html']['status'])
+        self.assertEqual('verified', self.apply('readback', rest_payload)['publications']['native-html']['status'])
+        self.assertTrue(self.apply('publication_decision', decision)['checkpoints']['q1-intake']['publication_resolved'])
+
+    def test_notification_receipt_closes_delivery_and_content_uses_complete_response(self):
+        from workflow import external_sync
+
+        checkpoint = 'q1-intake'
+        self.checkpoint(checkpoint, outcome='not_applicable')
+        with self.assertRaisesRegex(ValueError, '检查点评论需要正文核验'):
+            self.apply('draft', {'id': 'invalid', 'body': '检查点正文', 'checkpoint': checkpoint, 'delivery_only': True})
+
+        def prepare(key, body, **draft_options):
+            record = self.apply('draft', {'id': key, 'body': body, **draft_options})['publications'][key]
+            binding = {'id': key, 'digest': record['digest']}
+            self.apply('confirm', {**binding, 'proof': proof()})
+            result = self.apply('prepare_write', {**binding, 'comment_transport': {
+                'format': 'literal-html-v1', 'author_account_id': 'fixture-actor'}})
+            return result, {'id': key, 'operation_id': result['publications'][key]['operation_id']}
+
+        _, notice = prepare('notice', '已通知相关研发', delivery_only=True)
+        receipt = dict(notice, result='created', comment_id='105')
+        with self.assertRaisesRegex(ValueError, '回执来源'):
+            self.apply('receipt', receipt)
+        delivered = self.apply('receipt', dict(receipt, source_ref='fixture:jira/create/105'))
+        self.assertEqual('delivered', delivered['publications']['notice']['status'])
+        self.assertFalse(any(row['id'] == 'notice' for row in delivered['sync_actions']))
+        self.assertFalse(any(row['kind'] == 'comment:notice'
+                             for row in external_sync.existing_warnings(self.base, self.task)))
+        decision = {'checkpoint': checkpoint, 'snapshot': self.view()['checkpoints'][checkpoint]['publication_snapshot'],
+                    'reason': '测试合并发布', 'source_ref': 'fixture:jira/decision'}
+        with self.assertRaisesRegex(ValueError, '远端回读'):
+            self.apply('publication_decision', dict(decision, publication_id='notice'))
+
+        lost, unknown = prepare('lost-notice', '另一条独立通知', delivery_only=True)
+        self.apply('receipt', dict(unknown, result='unknown'))
+        self.assertTrue(any(row['kind'] == 'comment:lost-notice' and row['status'] == 'unknown'
+                            for row in external_sync.existing_warnings(self.base, self.task)))
+        evidence, operation = prepare('evidence', '实际的验收正文')
+        response = dict(operation, site=evidence['native_request']['site'], issue_key='TAP-123',
+                        comment_id='106', author_account_id='fixture-actor', source_ref='fixture:jira/create/106',
+                        body=evidence['native_request']['rest_body']['body'], body_representation='literal-adf-v1')
+        with self.assertRaisesRegex(ValueError, '正文'):
+            self.apply('readback', dict(response, body={}))
+        verified = self.apply('readback', response)
+        self.assertEqual('verified', verified['publications']['evidence']['status'])
+        self.assertTrue(self.apply('publication_decision',
+                                   dict(decision, publication_id='evidence'))['checkpoints'][checkpoint]['publication_resolved'])
+        recovered = self.apply('readback', dict(response, **unknown, comment_id='107', source_ref='fixture:jira/107',
+                                                body=lost['native_request']['rest_body']['body']))
+        self.assertEqual('delivered', recovered['publications']['lost-notice']['status'])
+
     def test_publication_resolution_merges_without_claiming_unpublished_success(self):
         from workflow import external_sync
         self.plan(); self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
@@ -3881,6 +3988,8 @@ class SyncRecoveryTests(unittest.TestCase):
             self.assertNotIn(text, row['body'])
         self.assertEqual(report, self.view())
         self.assertEqual(actions, external_sync.actions(self.base, self.task, report)['sync_actions'])
+        with self.assertRaisesRegex(ValueError, '接管摘要需要正文核验'):
+            self.apply('draft', {'id': row['id'], 'body': row['body'], 'delivery_only': True})
         record = self.apply('draft', {'id': row['id'], 'body': row['body']})['publications'][row['id']]
         action = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
         self.assertEqual('confirm', action['quality_command']['action'])
@@ -3897,8 +4006,15 @@ class SyncRecoveryTests(unittest.TestCase):
             self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': stale})
         jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
         snapshot['issue']['fields']['customfield_10366'] = '2026-10-27T11:52:13.987Z'
-        record = self.apply('prepare_write', {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot})['publications'][row['id']]
-        self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'], 'result': 'unknown'})
+        prepare = {'id': row['id'], 'digest': record['digest'], 'takeover_snapshot': snapshot,
+                   'comment_transport': {'format': 'literal-html-v1', 'author_account_id': 'assignee-user'}}
+        with self.assertRaisesRegex(ValueError, '接管用户'):
+            self.apply('prepare_write', prepare)
+        prepare['comment_transport']['author_account_id'] = 'login-user'
+        prepared = self.apply('prepare_write', prepare)
+        record = prepared['publications'][row['id']]
+        self.apply('receipt', {'id': row['id'], 'operation_id': record['operation_id'],
+                               'result': 'created', 'comment_id': 'takeover-comment'})
         pending = next(item for item in external_sync.actions(self.base, self.task)['sync_actions'] if item['id'] == row['id'])
         self.assertEqual('readback', pending['next_action'])
         self.assertEqual('readback', pending['quality_command']['action'])
@@ -3906,13 +4022,17 @@ class SyncRecoveryTests(unittest.TestCase):
         self.assertEqual('pending', progress['status'])
         self.assertEqual(record['operation_id'], progress['summary']['operation_id'])
         self.assertEqual(row['body'], pending['record']['body'])
-        with self.assertRaisesRegex(ValueError, '作者'):
-            self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
-                'issue_key': self.task['issue_key'], 'comment_id': 'wrong-author', 'body': row['body'],
-                'source_ref': 'fixture:wrong-author', 'author_account_id': 'assignee-user'})
-        self.apply('readback', {'id': row['id'], 'operation_id': record['operation_id'], 'site': record['site'],
-            'issue_key': self.task['issue_key'], 'comment_id': 'takeover-comment', 'body': row['body'],
-            'source_ref': 'fixture:jira/takeover-comment', 'author_account_id': 'login-user'})
+        payload = dict(pending['quality_command']['payload'], comment_id='takeover-comment',
+                       body=prepared['native_request']['body'], source_ref='fixture:jira/takeover-comment',
+                       author_account_id='login-user')
+        self.assertEqual('literal-html-v1', payload['body_representation'])
+        for change, error in (({'author_account_id': 'assignee-user'}, '作者'),
+                              ({'comment_id': 'wrong-comment'}, '评论 ID'),
+                              ({'body': payload['body'].replace('tapdata/tapdata：develop', 'tapdata/tapdata：main')}, '正文')):
+            with self.assertRaisesRegex(ValueError, error):
+                self.apply('readback', dict(payload, **change))
+            self.assertFalse(external_sync.actions(self.base, self.task)['takeover']['steps']['summary'])
+        self.apply('readback', payload)
         self.assertFalse(any(item['id'] == row['id'] for item in external_sync.actions(self.base, self.task)['sync_actions']))
         self.assertEqual('complete', external_sync.actions(self.base, self.task)['takeover']['status'])
         changed = copy.deepcopy(snapshot)

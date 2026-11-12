@@ -117,6 +117,27 @@ def document(value, plain=False):
     return parser.blocks
 
 
+def to_adf(value):
+    """将字面 HTML v1 的有限节点编码为 Jira REST v3 正文。"""
+    blocks = []
+    for tag, parts in document(value):
+        nodes = []
+        for kind, value in parts:
+            for index, line in enumerate(value.split('\n')):
+                if index:
+                    nodes.append({'type': 'hardBreak'})
+                if line:
+                    node = {'type': 'text', 'text': line}
+                    if kind == 'strong':
+                        node['marks'] = [{'type': 'strong'}]
+                    nodes.append(node)
+        if tag == 'h3':
+            blocks.append({'type': 'heading', 'attrs': {'level': 3}, 'content': nodes})
+        else:
+            blocks.append({'type': 'paragraph', 'content': nodes})
+    return {'type': 'doc', 'version': 1, 'content': blocks}
+
+
 def readback_metadata(readback, site, issue_key, comment_id):
     """仅核验原生材料的目标与来源；原操作及作者绑定仍由所属接口检查。"""
     if not isinstance(readback, dict):

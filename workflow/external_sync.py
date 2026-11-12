@@ -120,7 +120,7 @@ def existing_warnings(base, task):
         for key, record in quality.replay(state)["publications"].items():
             if state["run_id"] != task["run_id"] and record["status"] not in ("intent", "unknown", "created"):
                 continue
-            if record["status"] not in ("verified", "not_required"):
+            if record["status"] not in ("verified", "delivered", "not_required"):
                 add("comment:" + key, "unknown" if record["status"] in ("intent", "unknown", "created") else "deferred",
                     record.get("reason", "评论状态：" + record["status"]), record.get("source_ref", ""), state["run_id"])
     return result
@@ -351,7 +351,7 @@ def actions(base, task, report=None):
     intake_id = takeover_publication_id(base, task, report.get("publications", {}))
     covered = set()
     for key, record in publications.items():
-        if record["status"] in ("verified", "not_required"):
+        if record["status"] in ("verified", "delivered", "not_required"):
             continue
         unknown = record["status"] in ("intent", "unknown", "created")
         cp = record.get("checkpoint")
@@ -443,6 +443,8 @@ def actions(base, task, report=None):
                 if recovery:
                     row["quality_command"] = {"action": "readback", "payload": {"id": intake_id,
                         "operation_id": record["operation_id"], "site": record["site"], "issue_key": task["issue_key"]}}
+                    if record.get("body_transport"):
+                        row["quality_command"]["payload"]["body_representation"] = record["body_transport"]
                     row["required_input"] = progress["summary"]["readback_requirements"]
             elif active and progress["steps"]["source"] and progress["steps"]["markers"]:
                 if "body" in row:
