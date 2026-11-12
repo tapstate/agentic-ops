@@ -200,6 +200,13 @@
           "minLength": 1,
           "pattern": "\\S"
         },
+        "dependency_revisions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+          }
+        },
         "origin": {
           "type": "string",
           "minLength": 1,

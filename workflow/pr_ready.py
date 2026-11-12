@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import ci, jira_status, jira_tests, quality, task_store, verification  # noqa: E402
+from workflow import ci, jira_status, jira_tests, quality, repository_delivery, task_store, verification  # noqa: E402
 
 
 def _jira_test_tasks(path, issue_key, rules):
@@ -90,14 +90,20 @@ def submission_input(base, task):
         if not isinstance(rows, list):
             raise ValueError("提审证据必须是列表")
         seen = set()
+        current_rows = []
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("提审证据必须是对象")
             repo = row.get("repository")
             pr = row.get("pr") if kind == "checks_exceptions" else row.get("number")
+            binding = task.get("task_repositories", {}).get(repo, {}) if isinstance(repo, str) else {}
+            if (isinstance(repo, str) and repo in known and str(pr) != known[repo]
+                    and any(str(item.get("pr")) == str(pr) for item in binding.get("deliveries", []))):
+                continue
             if not isinstance(repo, str) or repo not in known or str(pr) != known[repo] or repo in seen:
                 raise ValueError("提审证据仓库、PR 不匹配或重复")
             seen.add(repo)
+            current_rows.append(row)
             if kind == "checks_exceptions":
                 if not isinstance(row.get("proof"), dict):
                     raise ValueError("Checks 例外缺少真实决定来源")
@@ -105,7 +111,7 @@ def submission_input(base, task):
                 if (row.get("decision") != "accept_checks_and_submit"
                         or not isinstance(row.get("reason"), str) or not row["reason"].strip()):
                     raise ValueError("Checks 例外必须说明具体缺口与提审决定")
-        packet[kind] = rows
+        packet[kind] = current_rows
     from workflow import project_rules
     if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(packet, ensure_ascii=False)):
         raise ValueError("提审证据含敏感内容")
@@ -199,6 +205,17 @@ def check_snapshot(base, issue_key, snapshot):
         context = quality.context(base, task)
         delivery_task = dict(task, repositories=[repo for repo in task.get("repositories", [])
             if not verification.unchanged_repository(context["repositories"][repo["repository"]])])
+    bindings = task.get("task_repositories", {})
+    merged = []
+    pending = []
+    for repo in delivery_task.get("repositories", []):
+        binding = bindings.get(repo["repository"])
+        delivery = repository_delivery.current(binding, local_head(repo)) if binding else None
+        if delivery:
+            merged.append(delivery)
+        else:
+            pending.append(repo)
+    submission_task = dict(delivery_task, repositories=pending)
     source_ref = snapshot["source_ref"]
     linked_problems, linked_tests, ignored_tests = jira_tests.acceptance_tests(base, task, snapshot, rules)
     linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
@@ -216,7 +233,7 @@ def check_snapshot(base, issue_key, snapshot):
         try:
             version = describe(project_rules.product_root_from_station(base))
             publication, summaries = test_coverage.publication_problems(
-                delivery_task, packet, quality.replay(quality.load(base, task)), quality.context(base, task), rules, version)
+                submission_task, packet, quality.replay(quality.load(base, task)), quality.context(base, task), rules, version)
         except (ValueError, OSError) as error:
             publication = ["PR 测试总结无法核验：" + str(error)]
         groups["pr_publication"] = publication
@@ -242,22 +259,24 @@ def check_snapshot(base, issue_key, snapshot):
     if rules.get("change_only_pr") and not delivery_task.get("repositories") and not no_pr_required:
         groups["pr_checks"].append("当前任务没有可交付的源码变更；不能以无变更仓库或空 PR 完成功能交付")
     problems = [problem for values in groups.values() for problem in values]
-    submissions = submission_status(delivery_task, packet)
+    submissions = submission_status(submission_task, packet)
     preflight_ready = not problems
-    ready = preflight_ready and (no_pr_required or bool(submissions) and all(r["confirmed"] for r in submissions))
+    ready = preflight_ready and (no_pr_required or bool(merged or submissions)
+                                 and all(r["confirmed"] for r in submissions))
     return {"issue_key": issue_key, "run_id": task["run_id"], "source_ref": source_ref,
             "preflight_ready": preflight_ready, "ready": ready,
             "pr_required": not no_pr_required,
             "required_pr_summaries": summaries,
             "submission_status": "not_required" if ready and no_pr_required else "confirmed" if ready else ("pending" if preflight_ready else "blocked"),
             "pull_requests": submissions,
+            "merged_deliveries": merged,
             "remaining": [r for r in submissions if not r["confirmed"]],
             "ignored_tests": [{"key": test["key"], "test_type": test["test_type"],
                                 "guidance": test["guidance"]} for test in ignored_tests],
             "checks": {key: {"passed": not value, "problems": value} for key, value in groups.items()},
             "jira_status_todos": status_todos,
             "warnings": external_sync.warnings(base, task),
-            "next": ("全部目标 PR 已回读为 GitHub Ready for review；按项目配置同步 Jira 提审，告知研发审查并合并后回来继续收尾；不自动合并。" if ready else
+            "next": ("当前候选已回读为 GitHub Ready for review 或已合并；按项目配置同步 Jira，再处理剩余审查和交付。" if ready else
                      "预检通过，按有效授权原生推进剩余 PR 并回读；未知写入先回读，不重建或盲目重发。" if preflight_ready else
                      "处理上述预检问题后重新核对；尚不能报告 PR Ready。")}
 
