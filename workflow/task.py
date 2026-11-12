@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import station_context
-from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, station_source, task_checks, task_store  # noqa: E402
+from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, repository_delivery, station_source, task_checks, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -458,20 +458,28 @@ def cmd_repository_record(args):
     if args.pr is None and args.ci is None and not getattr(args, "delivery_input", None):
         print("错误：至少提供 --pr 或 --ci", file=sys.stderr)
         return 2
+    binding = task["task_repositories"][args.repo]
+    repair_digest = args.repair_delivery_digest
+    if bool(repair_digest) != bool(args.decision_ref) or (repair_digest and not args.delivery_input):
+        raise ValueError("交付修补需要原记录摘要、合并回读和研发决定")
+    before = (item["pull_request"], item["ci"], list(binding["deliveries"]))
     if args.pr is not None:
         item["pull_request"] = args.pr
     if args.ci is not None:
         item["ci"] = args.ci
-    if getattr(args, "delivery_input", None):
+    event = {"ts": now(), "event": "repository_result", "repository": args.repo}
+    if args.delivery_input:
         delivery = json.loads(Path(args.delivery_input).read_text(encoding="utf-8"))
-        if not isinstance(delivery, dict) or delivery.get("repository") != args.repo:
-            raise ValueError("交付回读必须绑定当前仓库")
-        if project_rules.scan_sensitive(admission(args.dir), json.dumps(delivery, ensure_ascii=False)):
-            raise ValueError("交付回读包含敏感内容")
-        task["task_repositories"][args.repo]["deliveries"] = [delivery]
-    task["history"].append(
-        {"ts": now(), "event": "repository_result", "repository": args.repo}
-    )
+        evidence = {"delivery": delivery, "decision_ref": args.decision_ref}
+        if project_rules.scan_sensitive(admission(args.dir), json.dumps(evidence, ensure_ascii=False)):
+            raise ValueError("交付回读或决定包含敏感内容")
+        repaired = repository_delivery.record(binding, delivery, repair_digest)
+        if repaired is not None:
+            event.update(repaired_delivery=repaired, decision_ref=args.decision_ref)
+    if before == (item["pull_request"], item["ci"], binding["deliveries"]):
+        print("仓库结果已记录：" + args.repo)
+        return 0
+    task["history"].append(event)
     save(args.dir, task)
     print("已记录仓库结果：%s" % args.repo)
     return 0
@@ -1046,6 +1054,8 @@ def main():
     record.add_argument("--pr")
     record.add_argument("--ci")
     record.add_argument("--delivery-input")
+    record.add_argument("--repair-delivery-digest")
+    record.add_argument("--decision-ref")
     record.add_argument("--dir", default=".")
     record.set_defaults(func=cmd_repository_record)
     p = sub.add_parser("advance")

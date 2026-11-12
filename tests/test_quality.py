@@ -2431,6 +2431,31 @@ class QualityTests(unittest.TestCase):
                 self.automatic_checkpoint()
             self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
 
+    def test_cross_repository_execution_requires_the_current_combination(self):
+        self.reference_feature()
+        base_context = quality.context(self.base, self.task)
+        own = "tapdata/tapdata"
+        dependency = "tapdata/tapdata-web"
+        own_head = base_context["repositories"][own]["live_revision"]
+        versions = {own: own_head, dependency: "b" * 40}
+        original_context = quality.context
+        def context(base, task):
+            result = original_context(base, task)
+            result["item_dependency_revisions"] = {"case-a": dict(versions)}
+            return result
+        with mock.patch.object(quality, "context", side_effect=context):
+            self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+            self.execute()
+            with self.assertRaisesRegex(ValueError, "最后一次执行"):
+                self.decide()
+            self.execute(execution_id="combination", dependency_revisions=dict(versions))
+            self.decide(evidence_id="combination")
+            self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+            versions[dependency] = "c" * 40
+            self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+            with self.assertRaisesRegex(ValueError, "最后一次执行"):
+                self.decide(evidence_id="combination")
+
     def test_prepare_write_rescans_saved_body_with_current_sensitive_rules(self):
         self.apply('draft', {'id': 'summary', 'body': '待发送正文'})
         record = self.view()['publications']['summary']
@@ -3031,18 +3056,14 @@ class FeatureFlowTests(unittest.TestCase):
             self.assertIn("customfield_10414", missing_decision["blocking_fields"])
             # Jira 已到目标也不能替代当前候选合并核验。
             doc["issue"]["fields"]["status"]["name"] = "Merged"
-            delivery['pr_head'] = 'c' * 40
-            delivery_path.write_text(json.dumps(delivery))
-            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "2")
             bad = jira_status.prepare(self.ws, "TAP-123", "merged", doc, "op-fixture-newhead")
             self.assertEqual("delivery_not_verified", bad['reason'])
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         if self.task_class == "feature_change":
             self.git("-C", str(worktree), "checkout", "--", "feature.py")
-            delivery['pr_head'] = head
-            delivery_path.write_text(json.dumps(delivery))
-            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--delivery-input", str(delivery_path))
+            self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
             self.cli("task.py", "advance", "--note", "fixture:合并核验完成，Jira 审批缺项保留交接")
             final = json.loads(self.cli("task.py", "next", mutation=False))
             self.assertEqual("completed", final['stage'])
@@ -3091,6 +3112,21 @@ class MixedRepositoryDeliveryTests(unittest.TestCase):
         self.assertEqual(['tapdata/connectors'], [r['repository'] for r in result['pull_requests']])
         self.packet['pull_requests'][0]['isDraft'] = True
         self.assertFalse(self.check()['ready'])
+
+    def test_merged_repository_does_not_require_open_readback(self):
+        name = "tapdata/connectors"
+        self.task["task_repositories"] = {name: {"repository_id": name, "target_branch": "develop",
+            "observation": {"results": {"pull_request": "1"}}, "deliveries": [
+                {"repository": name, "pr": "1", "target_branch": "develop", "candidate_head": "b" * 40,
+                 "pr_head": "b" * 40, "merge_commit": "c" * 40, "readback_ref": "fixture:merged",
+                 "merged_at": proof()["at"]}]}}
+        self.packet["pull_requests"][0]["state"] = "MERGED"
+        result = self.check()
+        self.assertTrue(result["ready"], result)
+        self.assertEqual([], result["pull_requests"])
+        self.assertEqual(["1"], [row["pr"] for row in result["merged_deliveries"]])
+        self.task["task_repositories"][name]["observation"]["follow_up_after_pr"] = "1"
+        self.assertFalse(self.check()["ready"])
 
     def test_dirty_unknown_new_commit_or_missing_baseline_requires_delivery(self):
         state = self.ctx['repositories']['tapdata/main']
