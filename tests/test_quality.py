@@ -1083,6 +1083,15 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(task.cmd_advance(args), 3)
         self.execute(execution_id="run-2", origin="manual")
         self.automatic_checkpoint()
+        # 新 run 在 PR 阶段前核对同一 Jira 已落地的版本 ID 和评论。
+        self.assertEqual(task.cmd_advance(args), 3)
+        from workflow import external_sync, repair_delivery
+        jira_issue = {"key": "TAP-123", "fields": {"versions": [{"id": "91", "name": "fixture-version"}]}}
+        current = task.load(self.base, "TAP-123")
+        impact = repair_delivery.impact_receipt(current, {
+            "issue": jira_issue, "source_ref": "fixture:jira/issue", "summary_ref": "fixture:jira/comment/91",
+            "affected_version_ids": ["91"]})
+        external_sync.save_receipt(self.base, current, "repair_impact", impact)
         self.assertEqual(task.cmd_advance(args), 0)
         self.task = task.load(self.base, "TAP-123")
         args.expected_stage = "pr_review"
@@ -1098,7 +1107,7 @@ class QualityTests(unittest.TestCase):
         self.task = recovered
         jira_input = self.base / "jira-tests.json"
         jira_input.write_text(json.dumps({"source_ref": "fixture:jira",
-            "issue": {"key": "TAP-123", "fields": {"issuelinks": [
+            "issue": {"key": "TAP-123", "fields": {"versions": jira_issue["fields"]["versions"], "issuelinks": [
                 {"type": {"inward": "is tested by", "outward": "tests"}, "inwardIssue": {
                     "key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
             "linked_test_details": [{"key": "TAP-T1", "test_type": "Manual",

@@ -78,6 +78,41 @@ class HandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 task_handoff.verify_readback(candidate, dict(receipt, **changed))
 
+    def test_merged_source_branch_can_disappear_before_line_handoff(self):
+        from workflow import engineering_baseline, external_sync, issue_versions, station_cleanup
+        path = self.prepare_task()
+        name = 'tapdata/tapdata'
+        head = self.git(path, 'rev-parse', 'HEAD')
+        self.git(path, 'push', 'origin', 'HEAD:refs/heads/develop', 'HEAD:refs/pull/42/head')
+        self.git(path, 'push', 'origin', '--delete', self.branch)
+        self.task['facts'][issue_versions.FACT] = {'primary_branch': 'develop', 'sequential_delivery': True}
+        delivery = {'repository': name, 'target_branch': 'develop', 'candidate_head': head, 'pr_head': head,
+                    'merge_commit': head, 'pr': '42', 'merged_at': '2026-11-12T12:00:00+08:00',
+                    'readback_ref': 'fixture:github/pr/42'}
+        self.task['task_repositories'][name]['deliveries'] = [delivery]
+        task_store.write_task(self.ws, self.task)
+        self.task = task_store.read_task(self.ws)
+        proof = {'deliveries': [delivery]}
+        line = {'branch': 'develop', 'next_branch': 'release-v4.15.0', 'summary_ref': 'fixture:jira/comment/9',
+                'run_id': self.task['run_id'], 'proof_digest': engineering_baseline.digest(proof),
+                'plan_digest': engineering_baseline.digest(self.task['facts'][issue_versions.FACT])}
+        external_sync.save_receipt(self.ws, self.task, 'repair_line', line)
+        with mock.patch.object(station, 'evaluate_completion', return_value={'ready': True, 'proof': proof}):
+            pending = self.archive('op-merged-line')
+            saved = self.archive('op-merged-line', self.readback(pending))
+        packet = saved['archive_payload']['snapshot']['handoff']['packet']
+        self.assertEqual(line, packet['repair_line'])
+        self.assertEqual('merged', packet['repositories'][name]['disposition'])
+        self.assertEqual({}, task_handoff.continuation_input(packet))
+        incomplete = copy.deepcopy(packet)
+        del incomplete['repositories'][name]['delivery']
+        with self.assertRaisesRegex(ValueError, '合并事实不符'):
+            task_handoff.continuation_input(incomplete)
+        self.assertEqual([], station_cleanup.plan(self.ws)['source']['repositories'][0]['unpreserved_refs'])
+        self.git(path, 'push', 'origin', ':refs/pull/42/head')
+        self.assertIn('refs/heads/' + self.branch,
+                      station_cleanup.plan(self.ws)['source']['repositories'][0]['unpreserved_refs'])
+
     setUp = records.RecordTests.setUp
     prepare_engineering = records.RecordTests.prepare_engineering
     write = records.RecordTests.write

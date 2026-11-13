@@ -1,6 +1,6 @@
 """共享阶段检查；只读核对现役规则，不承担 CLI 或生命周期写入。"""
 from gate import engine
-from workflow import authorization, issue_versions, project_rules, quality, station_source
+from workflow import authorization, issue_versions, project_rules, quality, repair_delivery, station_source
 
 
 def check_advance(task, target, base, spec):
@@ -16,6 +16,8 @@ def check_advance(task, target, base, spec):
             problems.append("编码前仓库未就绪：%s" % error)
     if target in ("design_review", "implementation"):
         problems.extend(issue_versions.problems(base, task))
+    if target == "pr_review":
+        problems.extend(repair_delivery.impact_problems(base, task))
     flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
     if target == "design_review":
         missing = project_rules.missing_required(spec, task["task_class"], task.get("facts"))

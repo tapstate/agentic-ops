@@ -505,7 +505,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
 
 ## 影响版本与优先修复线
 
-任务开始保留一次 Jira 初始快照；本次采用的版本由用户确认并记录在本地，后续读取不覆盖它。版本名称不映射 Git 分支。先核验 develop，存在同一缺陷时优先在 develop 修复；否则独立确认一条真实实施分支。只核验优先分析分支与实际选择分支，其它受影响版本的合并与验证列为后续事项。
+任务开始保留一次 Jira 初始快照；本次采用的版本由用户确认并记录在本地，后续读取不覆盖它。版本名称不映射 Git 分支。先核验 develop，存在同一缺陷时优先在 develop 修复；否则独立确认一条真实实施分支。每轮核验优先分析分支与实际选择分支。TapData 缺陷的开 PR 前回写及逐线接续，见[Jira 回写与换线](../../projects/tapdata/runbooks/build-test-and-local-run.md#jira-回写与换线)。
 
 用 `task.py issue-versions --issue-key <issue> --expected-run-id <run> --input <json> --dir <station>` 导入；source_ref、完整 SHA 和确认来源必须来自实际记录：
 

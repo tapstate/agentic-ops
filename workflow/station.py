@@ -66,9 +66,14 @@ def takeover(base, request, operation_id, expected_revision):
             runtime = Path(base) / station_layout.station_name(base, "task-runtime")
             if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空；保留残留，尚未创建操作")
-        from workflow import station_takeover, jira_ownership
+        from workflow import station_takeover, jira_ownership, task_handoff
+        snapshot = request.get('jira_snapshot', {})
+        repair_handoff = None
         def prepare_request():
-            jira_ownership.preflight(base, issue, request.get('jira_snapshot', {}), request['task_class'])
+            nonlocal repair_handoff
+            repair_handoff = task_handoff.takeover_binding(base, issue, request['task_class'], snapshot,
+                                                         request['version'], request.get('explicit_branches', {}))
+            jira_ownership.preflight(base, issue, snapshot, request['task_class'], repair_handoff)
             value = station_takeover.preflight(base, request)
             station_takeover.prepare_tools(base, request)
             return value
@@ -85,6 +90,11 @@ def takeover(base, request, operation_id, expected_revision):
                     "task_repositories": {}, "terminal_proof": None, "archive_ref": None}
             if routing is not None:
                 task["facts"]["jira_routing"] = routing
+            if snapshot.get('repair_handoff') and not repair_handoff:
+                repair_handoff = task_handoff.takeover_binding(base, issue, request['task_class'], snapshot,
+                                                              request['version'], request.get('explicit_branches', {}))
+            if repair_handoff:
+                task['facts']['required_repair_handoff'] = repair_handoff
             runtime = station_directories.path_at(base, station_layout.station_name(base, "task-runtime"))
             if any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空")
@@ -408,6 +418,10 @@ def completion_proof(base, task):
     result = evaluate_completion(base, task)
     if not result["ready"]:
         raise ValueError("；".join(result["problems"]))
+    from workflow import repair_delivery
+    problems = repair_delivery.close_problems(base, task, result["proof"])
+    if problems:
+        raise ValueError("；".join(problems))
     return result["proof"]
 
 

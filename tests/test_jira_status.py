@@ -101,6 +101,20 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(original['fields'], recovered['fields'])
         self.assertIsNone(jira_collect.prepare_fields(self.base, self.task, 'design_review', doc)['native_request'])
 
+    def test_jira_version_readback_accepts_native_order_but_requires_exact_membership(self):
+        from workflow.jira_collect import field_matches
+        expected = [{'id': '10935'}, {'id': '10899', 'name': 'v4.22.0'}]
+        returned = [{'id': '10899', 'name': 'v4.22.0', 'released': True},
+                    {'id': '10935', 'name': 'v4.21.0', 'released': True}]
+        schema = {'type': 'array', 'items': 'version'}
+        for field in ('versions', 'fixVersions'):
+            with self.subTest(field=field):
+                self.assertTrue(field_matches(expected, returned, schema, field))
+                self.assertFalse(field_matches(expected, returned[:1], schema, field))
+                self.assertFalse(field_matches(expected, [returned[0], returned[0]], schema, field))
+                self.assertFalse(field_matches(expected, [dict(returned[0], name='other'), returned[1]], schema, field))
+        self.assertFalse(field_matches(expected, returned, schema, 'other_field'))
+
     def test_delivery_mappings_are_type_specific_and_require_real_evidence(self):
         for task_class, issue_type, ids in (("defect_fix", "10011", ("131", "291")),
                                             ("feature_change", "10010", ("91", "111"))):

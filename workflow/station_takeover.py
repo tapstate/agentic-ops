@@ -87,6 +87,9 @@ def correct(base, issue, run_id, operation_id, revision, request_digest, version
             raise ValueError("必须更正当前未交接的原 takeover 操作")
         request = copy.deepcopy(operation["request"])
         request.update(version=version, explicit_branches=overrides)
+        from workflow import task_handoff
+        task_handoff.takeover_binding(base, issue, request['task_class'], request.get('jira_snapshot', {}),
+                                      version, overrides)
         after_digest = baseline.digest(request)
         revisions = operation.get("takeover_revisions", [])
         if revisions and revisions[-1] == {"before_request": revisions[-1]["before_request"],
