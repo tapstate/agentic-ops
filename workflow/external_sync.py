@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import jira_status, jira_watermark, quality, task_store
+from workflow import jira_status, jira_watermark, quality, repair_delivery, task_store
 
 
 def state_path(base, task):
@@ -54,11 +54,13 @@ def record_readback(base, task, payload):
         raise ValueError("Jira 字段与本地有效事实不一致，保留待办")
     record = {"status": "verified", "fact_digest": quality.digest(value), "jira_field": payload["jira_field"],
               "source_ref": payload["source_ref"]}
+    return save_receipt(base, task, key, record)
+
+
+def save_receipt(base, task, key, record):
     from workflow import project_rules
     if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(record, ensure_ascii=False)):
         raise ValueError("回读来源含敏感内容，请脱敏")
-    records = load(base, task)
-    records[key] = record
     with task_store.task_run_lock(base, task["issue_key"]):
         current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
         task_store.require_development(base, current)
@@ -66,6 +68,8 @@ def record_readback(base, task, payload):
             raise ValueError("工位 revision 已变化，拒绝过期字段回读")
         if current.get("facts") != task.get("facts"):
             raise ValueError("本地事实已变化，拒绝过期回读")
+        records = load(base, current)
+        records[key] = record
         task_store._write_json_atomic(state_path(base, task), {"issue_key": task["issue_key"], "run_id": task["run_id"], "fields": records})
     return record
 
@@ -156,7 +160,8 @@ def warnings(base, task, report=None):
                 add("jira_status:" + node, "deferred", "本节点尚无同步记录")
     plan = task.get("facts", {}).get("issue_version_plan", {})
     version_receipt = load(base, task).get("problem_version", {})
-    if plan.get("sync_status") == "pending" and version_receipt.get("fact_digest") != quality.digest(task.get("facts", {}).get("problem_version")):
+    if (not repair_delivery.enabled(task) and plan.get("sync_status") == "pending"
+            and version_receipt.get("fact_digest") != quality.digest(task.get("facts", {}).get("problem_version"))):
         add("affected_versions", "deferred", "本地确认版本：%s；Jira 初始值：%s" % (
             "、".join(v["name"] for v in plan["versions"]),
             plan.get("observed", {}).get("issue", {}).get("fields", {}).get("versions")), plan.get("source_ref", ""))
@@ -476,7 +481,7 @@ def safe_actions(base, task, report=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "readback"))
+    parser.add_argument("command", choices=("status", "readback", "impact-readback", "line-readback"))
     parser.add_argument("--issue-key", required=True)
     parser.add_argument("--dir", default=".")
     parser.add_argument("--expected-run-id")
@@ -486,15 +491,27 @@ def main():
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue, execution=args.command != "status"):
             task = task_store.read_task(args.dir, issue)
-            if args.command == "readback":
+            if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
                 task_store.require_development(args.dir, task)
                 if not args.input:
-                    raise ValueError("readback 需要 --input")
-                result = record_readback(args.dir, task, json.loads(Path(args.input).read_text(encoding="utf-8")))
+                    raise ValueError("回读需要 --input")
+                payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+                if args.command == "readback":
+                    result = record_readback(args.dir, task, payload)
+                else:
+                    from workflow import jira_collect, project_rules
+                    jira_collect.require_safe(project_rules.load_admission(station=args.dir), payload, "修复线回读")
+                    if args.command == "impact-readback":
+                        result = save_receipt(args.dir, task, "repair_impact", repair_delivery.impact_receipt(task, payload))
+                    else:
+                        result = save_receipt(args.dir, task, "repair_line", repair_delivery.line_receipt(args.dir, task, payload))
             else:
                 result = {**actions(args.dir, task),
                           "fact_digests": {key: quality.digest(value) for key, value in task.get("facts", {}).items()}}
+                if repair_delivery.enabled(task):
+                    result["draft_pr_blockers"] = repair_delivery.impact_problems(args.dir, task)
+                    result["repair_line"] = load(args.dir, task).get("repair_line")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, KeyError, TypeError, OSError) as error:

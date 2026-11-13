@@ -61,16 +61,32 @@ python3 <agenticops-root>/workflow/task.py runtime-path \
 
 所有 release 修复在实施前都必须确认 develop 是否存在同一问题。使用已核验的 develop 源码版本、真实调用链和适用复现或测试依据判断；CI 绿色、无法复现或暂时读不到源码不能单独证明不受影响。未能确认时继续无依赖的分析和复现准备，暂停 release 修复实施，不自动选择先修 release。各仓版本按既有分支对齐结果核验，不把主仓分支名称套给配套仓库。
 
-- develop 存在问题：先在基于 develop 的任务分支完成业务修复、适用集成用例和修复验证及回归，取得绑定实际提交的有效结果，再引导用户把业务提交合入对应 release 的任务分支。没有先修 release 的紧急例外；验证失败或缺少必要证据时不交接为可回补成果。
+- develop 存在问题：先完成业务修复、适用集成用例和回归，回读 develop 的验收与合并事实后再接续需要修复的 release。先处理仍维护的报障线，再核对最新实际发布线；目标重合只处理一次。报障线无法回补时，明确原因、升级目标、验证与接续责任，由研发单独确认。
 - develop 不存在问题：分析并说明其不受影响的原因，包括已修复、实现不同或场景不适用等源码依据；参考其正确实现，在 release 的任务分支形成最小修复。核对接口与依赖差异，不盲目复制 develop 代码，也不为本问题修改 develop。无法解释不受影响的原因时继续分析，不凭绿色检查猜结论。
 
 回补前给用户提供各仓业务提交的完整 SHA、顺序、必要前置依赖、对应 release 分支、适配或冲突风险和验证方法。用户负责跨分支合入；Agent 不自动 cherry-pick 或代办合并，不把实施授权解释成合入授权。目标是 release 的任务分支，不是直接写受保护分支。回补依赖过重或实现差异明显时，先说明差异并形成适用于 release 的最小适配方案；实质范围或风险变化按原任务授权合同处理。
 
 用户完成后，回读实际仓库、任务分支、提交和差异，核验业务修复及依赖完整，允许适用普通 `test`，没有带入 IT 或无关功能。对回补或直接修复后的 release 实际代码/构建产物做功能验证和必要回归，最终证据绑定实际完整 SHA，再按已有授权创建或更新 release PR。回补结果未知或源码版本不符时只暂停依赖步骤，不假定成功。develop 结果不能代替 release 验证；跨分支待办和对应关系记录在现有 Jira、PR 与任务材料中，不新增台账。
 
+### 开 PR 前的版本影响分析
+
+基于报障构建、当前修复线和根因，用 Git、实际发布记录和复现证据界定受影响版本。能从引入点、回补与修复证据可靠界定范围时，记录证实的整个区间；影响可能更广且无法可靠缩小时才扩查。后续线的独立复现、实现与验收在各自轮次处理。
+
+- TapData `v4.0.0` 升级架构。3.x 与 4.x 各自判断和修复，不跨代回补。相同症状须分别核对实际触发路径。
+- TapData `v4.20.0` 的 TM 与 Engine 升到 Spring Boot 4.0.6。仅在根因确认由该升级触发时，排除更早的回补目标；相似症状本身不足以排除影响。[升级 PR](https://github.com/tapdata/tapdata/pull/3285)
+- [飞书规范版本清单](https://tapdata.feishu.cn/wiki/XwbgwKDHAifEObkOxYYcD5LqnWe?sheet=9xipCN) 用于排查优先级。读取环境、使用状态、登记月份和 Jira 对照版本，优先核对仍在生产使用且可能命中根因的版本，计划部署或升级单独看待。对照版本并不证明现场补丁号；影响及版本 ID 依赖安装、镜像、构建、源码或发布证据。清单缺失或不可读时，继续 Git、发布和复现分析，评论披露覆盖。
+
+### Jira 回写与换线
+
+一个 run 处理一条修复线。同线各仓分别保留候选和 PR，合并授权及验证仍按现有规则。首条实际实施线写 Issue Analysis 和 Fix Details。每轮影响分析、合并、下一条线或升级决定使用原 Jira 评论，其他轮次保留首轮字段正文。
+
+1. 开 Draft PR 前用原生 Jira 工具读取并按已证实的版本 ID 更新 `versions`，保留已有有效项。评论总结证据、边界与待核实范围，回读字段和评论。将 `issue`（含 `key`、`fields.versions`）、`source_ref`、`summary_ref` 和 `affected_version_ids` 交给 `workflow/external_sync.py impact-readback --issue-key <key> --expected-run-id <run> --dir <station> --input <json>`。确无已证实 Jira 版本时提供空列表及 `no_affected_version_reason`。回读缺失暂停开 PR，本地分析和验证可继续。PR Ready 快照也提供实时 `fields.versions`。
+2. 合并后回读本轮全部必要 PR 和本轮验收结果。版本分支按已核验的交付版本追加 Jira `fixVersions`，再回读；develop 计划目标留在评论。评论汇总各仓 PR、合并 SHA、证据、版本待发布及剩余线。将 `issue`（含 `fields.versions` 及实际修复版本的 `fields.fixVersions`）、`source_ref`、`summary_ref`、`fix_version_ids`（develop 用空列表）和 `next_branch`（没有剩余修复线才用 null）交给同一入口的 `line-readback`。在途写入先查原操作。线上表单或 Validator 若提前要求 fixVersions，保留状态转换待办，由 Jira 管理方按合并后写入的口径核实处理。
+3. 有下一条线时，复用 [Jira 接续点与任务清理](../../../docs/usage/task-archive-and-resume.md#持久接续点操作)。归档正文回读并清理原 run 后，按下一目标分支接管同一 Jira。在 `takeover --jira-input` 的 Jira 快照中附 `repair_handoff`，包含从同一条评论取得的 `packet` 和归档 `readback`，并按原接管合同核验前一 run 的四项标记与交接。接管在 Jira 已到 Tests Passed 或 Pull Request Submitted 时校验该接续点后继续，再用 `handoff-restore` 接回同一份成果。已合并 PR 的源分支已删除时，核验 GitHub PR Head、合并提交及必要证据仍可取回。下一轮固定新基线和授权，沿用已证实根因和用例，逐线重新验收。整单 Merged 在必修线均验收合并、版本回读与无法回补的处置均齐备后执行，无需等待发布。
+
 ### 测试与提交边界
 
-本节区分普通 `test` 与 IT，不是禁止所有测试进入低版本。普通 `test`（通常为 `src/test/java`、`src/test/resources`）可随适用业务变更合入低版本 release，须核对目标版本 API、依赖和测试入口并验证；不因它在 CI 中执行就归为 IT。IT 指项目的集成测试用例及其专用 fixture、配置和框架（例如经 POM 核验的 `src/it` 或独立 `it` 模块），新增或修改集中在基于 develop 的任务分支，经 PR 进入 develop，不得回补低版本；也不主动删除 release 已有测试。目录名称、Surefire/Failsafe 插件及是否在 CI 运行都只是线索，分类须结合实际用途、POM 与 CI 入口；混合目录逐项核对，无法确定时先说明具体文件和依据，不能一概排除普通 `test` 或将 `it` 改名后回补。release 缺少集成入口时采用目标版本适用的复现、单元测试、功能验证和回归，明确未覆盖范围；替代验证不能冒充集成测试 PASS，也不自动解除已有验收条件或具体缺口处置。
+普通 `test` 可随适用业务变更合入低版本 release，须核对目标版本 API、依赖和测试入口。IT 用例、专用 fixture、配置与框架的新建在 develop 维护，不随业务补丁回补。release 运行本线已有且适用的 IT，只允许最小修正本线已有且被本次修复直接影响的 IT，不降低断言强度。结合实际用途、POM 与 CI 入口识别普通测试与 IT，混合目录逐项核对。release 缺少适用 IT 时，使用可用的复现、普通测试、功能验证或 Jira Manual Test，记录覆盖和剩余缺口，并按现有验收处理。
 
 业务变更与集成测试变更必须分开提交，不得混在同一个 commit 中。业务提交包含功能/修复代码、必要生产配置及适用普通 `test`；IT 提交包含集成测试用例、专用 fixture、测试配置及框架调整。同一文件包含两类修改时按用途拆分。业务提交必须能独立构建和运行，不依赖集成测试提交；核对其完整生产依赖。两类提交在同一任务和 PR 中关联审查，集成测试提交依赖哪些业务提交须明确，最终 develop 验证覆盖两者组成的完整 PR Head。
 

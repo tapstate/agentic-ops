@@ -21,7 +21,8 @@
       "issue_versions": {
         "field": "versions",
         "product_repository": "tapdata/tapdata",
-        "preferred_branch": "develop"
+        "preferred_branch": "develop",
+        "sequential_delivery": true
       },
       "required_facts": [
         {

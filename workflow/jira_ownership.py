@@ -55,7 +55,7 @@ def require(base, issue, *, archival=False):
         raise ValueError('四项接管标记归属尚未核验；先原生读取并 prepare/complete，暂停依赖归属的写入')
 
 
-def preflight(base, issue, snapshot, task_class=None):
+def preflight(base, issue, snapshot, task_class=None, repair_handoff=None):
     from workflow import jira_coordination
     jira_coordination.require_retired(base)
     result = inspect(base, issue, snapshot)
@@ -69,7 +69,14 @@ def preflight(base, issue, snapshot, task_class=None):
     if workflow is not None:
         allowed = [row['name'] for row in workflow.get('statuses', [])
                    if row.get('stage') in ('waiting_takeover', 'implementation')]
-    if (fields.get('status', {}).get('name') not in allowed
+    status = fields.get('status', {}).get('name')
+    if repair_handoff:
+        from workflow import jira_status
+        attempts = jira_status.config(base, {'task_class': task_class})['attempts']
+        if any(jira_status.status_matches(attempts.get(key, {}), status, 'to')
+               for key in ('tests_passed', 'pr_submitted')):
+            allowed = [*allowed, status]
+    if (status not in allowed
             or fields.get('assignee', {}).get('accountId') != snapshot['current_user']['accountId']):
         raise ValueError('Jira 状态或经办人不满足项目接管准入')
     if task_class is not None:

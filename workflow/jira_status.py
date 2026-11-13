@@ -214,11 +214,15 @@ def transition_for(snapshot, rule):
 
 def delivery_ready(base, task, trigger, snapshot):
     """交付状态沿用真实 PR/完成检查，不以 Jira 状态或检查点名称代替合并。"""
-    from workflow import station, pr_ready
+    from workflow import repair_delivery, station, pr_ready
     try:
         completion = station.evaluate_completion(base, task)
         if completion["ready"] and completion["proof"]["deliveries"]:
-            return True, []
+            if trigger == "merged":
+                problems = repair_delivery.close_problems(base, task, completion["proof"], snapshot.get("issue", {}))
+                return not problems, problems
+            problems = repair_delivery.impact_problems(base, task, snapshot.get("issue", {}))
+            return not problems, problems
         if trigger == "merged":
             return False, completion["problems"] or ["当前任务没有已核验合并的代码交付"]
         result = pr_ready.check_snapshot(base, task["issue_key"], snapshot)
@@ -267,6 +271,7 @@ def field_mapping(field, name, rules):
 
 
 def guidance_for(fields, rules, task):
+    from workflow import repair_delivery
     configured = rules.get("field_guidance", {})
     result = []
     for item in fields:
@@ -274,7 +279,7 @@ def guidance_for(fields, rules, task):
         name = item.get("name", field) if isinstance(item, dict) else field
         logical, mapping = field_mapping(field, name, rules)
         sources = mapping.get("local_sources", [])
-        result.append({
+        entry = {
             "field": field,
             "name": name,
             "mapping": logical,
@@ -284,12 +289,17 @@ def guidance_for(fields, rules, task):
             "auto_fill": mapping.get("auto_fill", False),
             "guidance": mapping.get("guidance") or configured.get(
                 field, "在 Jira 转换面板补齐该必填字段并回读；没有可信来源时跳过状态流转。"),
-        })
+        }
+        if field == "fixVersions" and repair_delivery.enabled(task):
+            entry.update(collect_at="对应版本分支验收并合并后", auto_fill=False,
+                         guidance="目标版本先写评论。线上提前必填时保留转换待办，请 Jira 管理方核实校验时机。")
+        result.append(entry)
     return result
 
 
 @sync_recovery.locked
 def prepare(base, issue_key, trigger, snapshot, operation_id=None):
+    from workflow import repair_delivery
     task = task_store.read_task(base, issue_key)
     from workflow import station_takeover, quality, external_sync
     if trigger == 'takeover':
@@ -405,7 +415,9 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
         if not ready:
             record.update(outcome="skipped", reason=reason, ignored_tests=ignored_view,
                           guidance=[{"guidance": problem} for problem in problems])
-        elif status_matches(rule, status["name"], "to"):
+        elif (status_matches(rule, status["name"], "to")
+                or repair_delivery.previous_line(task) and status_matches(
+                    rules.get("attempts", {}).get("pr_submitted", {}), status["name"], "to")):
             record.update(outcome="satisfied", reason="target_already_reached",
                           ignored_tests=ignored_view, guidance=[])
         elif not status_matches(rule, status["name"], "from"):

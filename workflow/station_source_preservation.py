@@ -7,7 +7,7 @@ import json
 import stat
 from pathlib import Path
 
-from workflow import project_rules, station_clean_rules as rules
+from workflow import project_rules, repair_delivery, repository_delivery, station_clean_rules as rules
 from workflow import station_layout, station_source as source, task_store
 
 
@@ -179,8 +179,20 @@ def source_preservation(base, config, retained_heads=None):
                 remote_error = '远端回读失败；不能证明已经推送，先核实保全或由研发明确放弃'
         entry = frozen.get(relative)
         managed = 'refs/heads/' + source.baseline_branch(entry) if entry and source.baseline_branch(entry) else None
+        delivered_ref, delivered_head = None, None
+        binding = task.get('task_repositories', {}).get(relative)
+        if trusted and binding and repair_delivery.enabled(task):
+            work_ref = 'refs/heads/' + binding['work_branch']
+            candidate = local.get(work_ref)
+            delivery = repository_delivery.current(binding, candidate) if candidate else None
+            if delivery and remote.get('refs/pull/%s/head' % delivery['pr']) == candidate:
+                delivered_ref, delivered_head = work_ref, candidate
+        # 已交付轮次的本地目标分支有时仍停在冻结起点，该对象由源码归位保留。
+        frozen_target = ('refs/heads/' + entry['ref_name']
+                         if delivered_ref and entry and entry['ref_kind'] == 'branch' else None)
         losses = [key for key, value in local.items() if remote.get(key) != value
-                  and not (key == managed and value == entry['commit_sha']
+                  and (key, value) != (delivered_ref, delivered_head)
+                  and not (key in (managed, frozen_target) and value == entry['commit_sha']
                            and (value in remote.values() or retained_heads.get(relative) == value))]
         unchecked = [] if bare else [row[2:] for row in git(path, 'ls-files', '-v', '-z').split('\0')
                                      if row and (row[0].islower() or row[0] == 'S')]

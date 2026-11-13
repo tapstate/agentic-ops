@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from workflow import project_rules, quality, task_store
+from workflow import issue_versions, project_rules, quality, repair_delivery, task_store
 
 CHECKPOINTS = ("intake", "design_review", "acceptance", "pr_review", "transition")
 
@@ -147,7 +147,7 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
     from workflow import jira_status
     if checkpoint not in CHECKPOINTS:
         raise ValueError("未知 Jira 采集阶段")
-    _, fields, status = jira_status.issue_from(snapshot, task["issue_key"])
+    issue, fields, status = jira_status.issue_from(snapshot, task["issue_key"])
     if not present(snapshot.get("source_ref")):
         raise ValueError("采集快照缺少来源")
     admission = project_rules.load_admission(station=base)
@@ -156,6 +156,15 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
     proposals = proposals or {}
     if not isinstance(proposals, dict):
         raise ValueError("proposals 必须为字段值对象")
+    if repair_delivery.enabled(task) and "fixVersions" in proposals:
+        plan = task["facts"][issue_versions.FACT]
+        if plan["primary_branch"] == issue_versions.rules(base, task)["preferred_branch"]:
+            raise ValueError("develop 的目标版本写入评论；待对应版本分支合并后再更新 fixVersions")
+        repair_delivery.merge_proof(base, task)
+        before = repair_delivery.field_ids(issue, task, "fixVersions")
+        after = repair_delivery.field_ids({"key": task["issue_key"], "fields": proposals}, task, "fixVersions")
+        if not before <= after:
+            raise ValueError("逐线交付仅追加修复版本，保留已有 fixVersions")
     decisions = jira_status.load_state(base, task).get("decisions", {})
     metadata, uses, unknown = {}, {}, []
     transitions = snapshot.get("transitions")
@@ -200,6 +209,10 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
               "coverage": configuration["coverage"], "fields": {}}
     for key, rule in sorted(rows.items()):
         meta = metadata.get(key, {})
+        if repair_delivery.previous_line(task) and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
+            if key in proposals:
+                raise ValueError("回补线保留首轮 Issue Analysis / Fix Details，请在 Jira 评论总结")
+            continue
         schema = meta.get("schema") or {"type": rule.get("value_type")}
         options = sorted(meta.get("allowedValues", []), key=lambda item: json.dumps(item, sort_keys=True))
         old = decisions.get(key, {})
@@ -214,6 +227,8 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
         digest = quality.digest(semantic)
         needed = required(rule["required_when"], dict(fields, **proposals), metadata) or meta.get("required") is True
         due = CHECKPOINTS.index(rule["collect_at"]) <= CHECKPOINTS.index(checkpoint) or meta.get("required") is True
+        if key == "fixVersions" and repair_delivery.enabled(task) and key not in proposals:
+            needed = due = meta.get("required") is True
         row = dict(semantic, digest=digest, required=needed, collect_at=rule["collect_at"],
                    transitions=sorted(set(rule["transitions"] + uses.get(key, []))),
                    suggestions=[{"source": path, "value": get(task, path)} for path in rule["source"] if present(get(task, path))],
@@ -361,6 +376,21 @@ def plain_adf_matches(expected, observed):
 
 def field_matches(expected, observed, schema, field):
     """只接纳已知 Jira 字段的原生表示；不剥离任意富文本结构。"""
+    if (schema.get("type") == "array" and field in ("fixVersions", "versions")
+            and isinstance(expected, list) and isinstance(observed, list)):
+        # Jira 按项目版本顺序返回字段，可能与写入顺序不同。
+        versions = []
+        for rows in (expected, observed):
+            if any(not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] for row in rows):
+                return False
+            by_id = {row["id"]: row for row in rows}
+            if len(by_id) != len(rows):
+                return False
+            versions.append(by_id)
+        before, after = versions
+        return before.keys() == after.keys() and all(
+            field_matches(row, after[version_id], {"type": "version"}, field)
+            for version_id, row in before.items())
     if expected == observed:
         return True
     kind = schema.get("type")
@@ -368,8 +398,6 @@ def field_matches(expected, observed, schema, field):
         return plain_adf_matches(expected, observed)
     if kind == "array" and isinstance(expected, list) and isinstance(observed, list):
         item = schema.get("items")
-        if field in ("fixVersions", "versions"):
-            item = "version"
         if item not in ("user", "version", "option") or len(expected) != len(observed):
             return False
         return all(field_matches(a, b, {"type": item}, field) for a, b in zip(expected, observed))
@@ -433,6 +461,8 @@ def field_sync_actions(base, task):
     result = [{"id": "fields:" + key, "kind": "jira_fields", "status": "unknown",
                "next_action": "readback_fields", "operation_id": key, "fields": row["fields"]}
               for key, row in writes.items() if row["status"] == "intent"]
+    if repair_delivery.previous_line(task):
+        return result
     for logical in ("issue_analysis", "fix_details"):
         rule = spec["fields"].get(logical)
         if not rule:
