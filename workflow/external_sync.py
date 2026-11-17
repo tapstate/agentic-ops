@@ -292,7 +292,8 @@ def takeover_progress(base, task, publications, *, summary_required=True):
                     "issue_key": task["issue_key"], "expected_run_id": task["run_id"],
                     **({"outcome": "unknown"} if marker_action == "complete" else {})},
                 "required_input": ["site", "source_ref", "issue", "current_user"],
-                "recovery": "缺 value 不等于 null；显式字段补查。已有意图先 complete 回读；仅证实未生效且归属未变才 prepare 重试原载荷"},
+                "recovery": ("缺 value 不等于 null；显式字段补查。已有意图时，将 Jira 原始字段值（含 REST 回读）直接交给 complete 核验；"
+                             "接管时间由 complete 按分钟比较，采集脚本不得逐字比较或改写。仅证实未生效且归属未变才 prepare 重试原载荷")},
             "summary": {"required": summary_required, "publication_id": publication_id, "operation_id": publication.get("operation_id"),
                 "status": publication.get("status", "not_attempted"),
                 "write_started": "unknown" if publication.get("status") in ("intent", "unknown") else publication.get("status", "not_attempted"),
