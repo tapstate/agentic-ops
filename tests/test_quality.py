@@ -4015,9 +4015,13 @@ class SyncRecoveryTests(unittest.TestCase):
         marker_id = progress['markers']['operation_id']
         self.assertEqual(initial_marker_id, marker_id)
         self.assertEqual('complete', progress['markers']['command']['action'])
+        self.assertIn('直接交给 complete 核验', progress['markers']['recovery'])
         snapshot['issue']['fields'].update(marker['expected_fields'])
-        snapshot['issue']['fields']['customfield_10366'] = '2026-10-27T11:52:00.000Z'
-        jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
+        readback_time = '2026-10-27T11:52:00.000Z'
+        snapshot['issue']['fields']['customfield_10366'] = readback_time
+        result = jira_watermark.complete(self.base, self.task['issue_key'], 'unknown', snapshot)
+        self.assertEqual('verified', result['outcome'])
+        self.assertEqual(readback_time, result['readback_fields']['customfield_10366'])
         self.task = task_store.read_task(self.base)
         report = self.view()
         actions = external_sync.actions(self.base, self.task, report)['sync_actions']
