@@ -63,7 +63,7 @@ def accepted_it(model, report, ctx, rules):
     policy = it_manual.config(rules)
     for item_id in point["due"]:
         item = report["items"][item_id]
-        if (item["plan"].get("method") != "unit" or item["plan"].get("timing") != "after_fix"
+        if (item["plan"].get("method") not in ("unit", "integration") or item["plan"].get("timing") != "after_fix"
                 or item["plan"].get("expected_result") != "PASS"
                 or not quality.item_accepted(item, ("accept",))):
             return False
@@ -217,8 +217,10 @@ def confirmation_problems(report, tests, rules=None):
             if not assessment["passed"]:
                 problems.extend(assessment["problems"])
             continue
-        items = [item for item in report["items"].values()
-                 if item["plan"]["checkpoint"] == checkpoint and
+        due = report.get("checkpoints", {}).get(checkpoint, {}).get("due", [])
+        items = [item for item_id, item in report["items"].items()
+                 if (item["plan"]["checkpoint"] == checkpoint or
+                     item_id in due and item["plan"].get("timing") == "after_fix") and
                  str(item["plan"]["case_ref"]).upper() == key and
                  item["plan"]["case_version"] == test["case_version"] and
                  item["plan"]["method"] == test["method"]]

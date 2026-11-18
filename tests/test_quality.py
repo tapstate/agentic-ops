@@ -1134,12 +1134,43 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
 
     def test_proposed_test_key_does_not_invalidate_q2_selection(self):
-        self.plan(case_status="proposed"); self.select()
+        self.plan(case_status="proposed", checkpoint="q3-draft"); self.select()
         self.assertTrue(self.view()["items"]["case-a"]["selected"])
-        state = quality.load(self.base, self.task)
-        model = quality.replay(state)
-        model["items"]["case-a"]["plan"].update(case_ref="TAP-456", case_version="jira-v2")
-        self.assertTrue(quality.item_view(model["items"]["case-a"], quality.config(self.base), quality.context(self.base, self.task))["selected"])
+        plan = self.view()["items"]["case-a"]["plan"]
+        before = authorization.plan_digest(self.task)
+        selected = self.view()["items"]["case-a"]["plan_digest"]
+        self.apply("item", {"plan": dict(plan, case_ref="TAP-456", case_version="jira-v2"),
+                            "reason": "回读已计划创建的 Jira Test"})
+        self.assertTrue(self.view()["items"]["case-a"]["selected"])
+        self.assertEqual(selected, self.view()["items"]["case-a"]["plan_digest"])
+        self.assertEqual(before, authorization.plan_digest(task_store.read_task(self.base)))
+
+    def test_repository_result_rejects_url_without_writing_and_accepts_number(self):
+        repo = self.task['repositories'][0]['repository']
+        args = SimpleNamespace(dir=self.base, issue_key=self.task['issue_key'],
+            expected_run_id=self.task['run_id'], repo=repo, pr='https://github.com/' + repo + '/pull/3615',
+            ci=None, delivery_input=None, repair_delivery_digest=None, decision_ref=None)
+        before = task_store.read_task(self.base)
+        with self.assertRaisesRegex(ValueError, '正整数编号'):
+            task.cmd_repository_record(args)
+        self.assertEqual(before, task_store.read_task(self.base))
+        args.pr = '3615'
+        self.assertEqual(0, task.cmd_repository_record(args))
+        self.assertEqual('3615', task_store.read_task(self.base)['repositories'][0]['pull_request'])
+
+    def test_identical_ci_observations_keep_confirmation_digest(self):
+        state = {'repository': 'tapdata/tapdata', 'pr': '1', 'run_id': 'run',
+                 'history': [{'head': 'a' * 40, 'verdict': 'success', 'source': 'gh',
+                              'checks': [{'name': 'unit', 'conclusion': 'SUCCESS'},
+                                         {'name': 'it', 'conclusion': 'SUCCESS'}], 'at': 'first'}]}
+        expected = quality.digest(ci.confirmation_state(state))
+        observation = copy.deepcopy(state['history'][0])
+        observation.update(at='later')
+        observation['checks'].reverse()
+        state['history'].append(observation)
+        self.assertEqual(expected, quality.digest(ci.confirmation_state(state)))
+        observation['checks'][0]['conclusion'] = 'FAILURE'
+        self.assertNotEqual(expected, quality.digest(ci.confirmation_state(state)))
 
     def select(self, key="case-a"):
         return self.apply("select", {"item_id": key, "digest": self.view()["items"][key]["plan_digest"], "proof": proof()})
