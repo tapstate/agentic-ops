@@ -73,6 +73,8 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 
 ### 计时与原生登记
 
+TapData Profile 的 `jira.worklog_reminders=true` 在正常待办中提示未启动计时、暂停及其它会话未结段；其它项目默认不启用此提醒。`task next`、`quality status` 和 `external_sync status` 复用工时模块的只读投影，不创建计时材料，不把缺记录认定为已漏记多少时间。继续实际工作才按返回指引 start/resume，等待仍保持暂停；新会话或异常恢复先 recover。已有待登记或未知发送段附原 issue/run 与工时查询入口，未知发送只回读。已完成或已归档任务不产生新的计时提醒，清理仍只保全已有材料；提醒不参与质量门禁。
+
 使用绑定安装的 Python 入口，`--dir` 为工位。每个工作段生成一次稳定 `segment-id`（8—80 位小写 ASCII 字母、数字及连字符），重试复用；建 run 后所有写调用带 `--expected-run-id`，空闲接管前省略。说明使用简洁单行本次工作，不包含版本、工位、run、用户名、起止时间或登记 ID。
 
 ```sh

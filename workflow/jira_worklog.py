@@ -444,6 +444,28 @@ def all_pending(base):
             for row in pending(base, path.stem.removeprefix('jira-worklog-'))]
 
 
+def timing_reminder(base, task):
+    """只读提示当前计时缺口；不推断正在工作、不创建记录或补算历史。"""
+    if (task.get('stage') == 'completed' or task.get('archive_ref')
+            or project_rules.load_profile(station=base).get('jira', {}).get('worklog_reminders') is not True):
+        return None
+    state = load(base, task['issue_key'])
+    if state['run_id'] not in (None, task['run_id']):
+        return '工时材料属于旧 run，先核实原段；不能借当前 run 发送或恢复计时'
+    if state['active']:
+        row = state['segments'][state['active']]
+        try:
+            session = execution.session_id()
+        except ValueError:
+            return '存在未结工时，当前查询未提供有效会话标识；先核实原会话，新会话或异常恢复用 recover，不直接续算'
+        if row['session_id'] != session:
+            return '存在其它会话未结工时；恢复工作前先 recover 保留未计量尾段，再按实际工作 start，不补算离线时间'
+        return None
+    if not state['segments']:
+        return '本任务尚无计时记录；开始实际工作前按分类 start，不从历史或阶段时间补算工时；等待时不要启动'
+    return '工时当前已暂停；继续实际工作时，同一未发送工作用 resume，否则 start 新段；等待时保持暂停'
+
+
 def boundary(base, task):
     """已有阶段推进的结算点；不创建计时、不根据阶段补算历史。调用者持工位锁。"""
     if not state_path(base, task['issue_key']).exists():

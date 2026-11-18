@@ -8,6 +8,7 @@
   "wiki_repository": "tapstate/wiki",
   "wiki_update_before_takeover": true,
   "jira": {
+    "worklog_reminders": true,
     "site": "https://tapdata.atlassian.net",
     "project_key": "TAP",
     "transitions_config": "jira-transitions.json",
