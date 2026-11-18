@@ -167,6 +167,10 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
             raise ValueError("逐线交付仅追加修复版本，保留已有 fixVersions")
     decisions = jira_status.load_state(base, task).get("decisions", {})
     metadata, uses, unknown = {}, {}, []
+    supplied_metadata = snapshot.get("field_metadata", {})
+    if not isinstance(supplied_metadata, dict) or any(not isinstance(row, dict) for row in supplied_metadata.values()):
+        raise ValueError("field_metadata 必须为原生回读的字段元数据对象")
+    metadata.update(copy.deepcopy(supplied_metadata))
     transitions = snapshot.get("transitions")
     if not isinstance(transitions, list):
         transitions = []
@@ -189,6 +193,9 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
     rows = {}
     for logical, rule in configured.items():
         candidates = [key for key, row in metadata.items() if key == rule.get("jira_id") or row.get("name") in rule["aliases"]]
+        if not candidates:
+            candidates = [key for key, record in decisions.items()
+                          if logical in record.get("logical_keys", [])]
         key = rule.get("jira_id") or (candidates[0] if len(candidates) == 1 else "unresolved:" + logical)
         if len(candidates) > 1:
             unknown.append({"field": logical, "due": True, "reason": "字段别名不唯一"})
@@ -208,14 +215,15 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
               "pending": [], "future": [], "unknown": unknown, "transitions": spec["transitions"],
               "coverage": configuration["coverage"], "fields": {}}
     for key, rule in sorted(rows.items()):
-        meta = metadata.get(key, {})
+        # 历史元数据只用于复核已有决定，不宣称字段仍在当前转换表单中。
+        old = decisions.get(key, {})
+        meta = metadata.get(key, old.get("metadata", {}))
         if repair_delivery.previous_line(task) and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
             if key in proposals:
                 raise ValueError("回补线保留首轮 Issue Analysis / Fix Details，请在 Jira 评论总结")
             continue
         schema = meta.get("schema") or {"type": rule.get("value_type")}
         options = sorted(meta.get("allowedValues", []), key=lambda item: json.dumps(item, sort_keys=True))
-        old = decisions.get(key, {})
         observed, current = field_value(fields, key)
         value = proposals.get(key, current if present(current) else old.get("value"))
         dependencies = {path: get({"facts": task.get("facts", {}), "jira": fields}, path) for path in rule["depends_on"]}
@@ -233,7 +241,8 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
                    transitions=sorted(set(rule["transitions"] + uses.get(key, []))),
                    suggestions=[{"source": path, "value": get(task, path)} for path in rule["source"] if present(get(task, path))],
                    auto_extract=rule["auto_extract"], current_jira_value=current,
-                   current_jira_observed=observed, metadata_verified=bool(meta), valid_value=valid_value(value, schema, options))
+                   current_jira_observed=observed, metadata_verified=bool(meta), valid_value=valid_value(value, schema, options),
+                   logical_keys=rule["logical_keys"], metadata={"schema": schema, "allowedValues": options} if meta else {})
         if due and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
             from workflow.quality_write import jira_field_body
             for logical in rule["logical_keys"]:
@@ -247,11 +256,15 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
             row["sync_status"] = "unread" if not observed else (
                 "matches_confirmed" if old.get("digest") == digest and current == value and row["valid_value"] else "needs_review")
         result["fields"][key] = row
+        if due and key not in metadata and old.get("metadata") and not (
+                observed and current == old.get("value") and old.get("digest") == digest):
+            result["unknown"].append({"field": key, "due": True,
+                "reason": "历史确认的值、依赖或责任人已变化或字段未回读；请补充当前 field_metadata 后重新确认"})
         if key.startswith("unresolved:"):
             result["unknown"].append({"field": key, "due": due and needed, "reason": "字段 ID 未核验，不猜填；取得元数据后再确认值"})
         elif not due:
             result["future"].append(key)
-        elif old.get("digest") == digest and row["valid_value"]:
+        elif old.get("digest") == digest and row["valid_value"] and (not old.get("metadata") or key in metadata or observed and current == value):
             result["confirmed"].append(key)
         elif needed or present(value):
             result["pending"].append(key)
@@ -284,6 +297,7 @@ def confirm(base, issue, run_id, checkpoint, snapshot, proposals, field_digests,
             if key.startswith("unresolved:") or key in packet["future"] or not row["valid_value"] or field_digests[key] != row["digest"]:
                 raise ValueError("字段值、选项、依赖或责任人变化，请重新收集：" + key)
             records[key] = {"digest": row["digest"], "value": copy.deepcopy(value), "proof": proof,
+                            "logical_keys": row["logical_keys"], "metadata": row["metadata"],
                             "source_ref": snapshot["source_ref"], "checkpoint": checkpoint, "material": row.get("material", {}), "before_observed": row["current_jira_observed"],
                             "before": copy.deepcopy(row["current_jira_value"])}
         if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(records, ensure_ascii=False)):

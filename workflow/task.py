@@ -12,6 +12,7 @@ if __name__ == "__main__" and not globals().get("_AO_PRODUCT_ENTRY"):
 
 
 import argparse
+import re
 import json
 import sys
 import time
@@ -466,6 +467,8 @@ def cmd_repository_record(args):
         raise ValueError("交付修补需要原记录摘要、合并回读和研发决定")
     before = (item["pull_request"], item["ci"], list(binding["deliveries"]))
     if args.pr is not None:
+        if not re.fullmatch(r"[1-9][0-9]*", str(args.pr)):
+            raise ValueError("--pr 必须为正整数编号（例如 3615），不能使用 PR URL；请取 URL 末尾编号重新登记")
         item["pull_request"] = args.pr
     if args.ci is not None:
         item["ci"] = args.ci
@@ -1062,7 +1065,7 @@ def main():
     record = repository_sub.add_parser("record-result")
     record.add_argument("--issue-key")
     record.add_argument("--repo", required=True)
-    record.add_argument("--pr")
+    record.add_argument("--pr", help="PR 正整数编号，例如 3615；不接受完整 URL")
     record.add_argument("--ci")
     record.add_argument("--delivery-input")
     record.add_argument("--repair-delivery-digest")

@@ -679,6 +679,43 @@ class JiraStatusTests(unittest.TestCase):
         snapshot['issue']['fields']['assignee'] = {'accountId': 'another-owner'}
         self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
 
+    def test_confirmed_alias_survives_transition_form_disappearance(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        config = json.loads(path.read_text())
+        config['task_classes']['defect_fix']['fields']['choice']['jira_id'] = None
+        path.write_text(json.dumps(config))
+        value = {'id': '1', 'value': 'ordinary'}
+        self.confirm_packet('design_review', snapshot, {'customfield_a': value})
+        snapshot['transitions'] = []
+        snapshot['issue']['fields']['customfield_a'] = value
+        packet = jira_collect.collect(self.base, self.task, 'pr_review', snapshot)
+        self.assertIn('customfield_a', packet['confirmed'])
+        self.assertFalse(any(row.get('due') for row in packet['unknown']))
+        for field, changed in [('customfield_a', {'id': '2', 'value': 'need-details'}),
+                               ('assignee', {'accountId': 'another-user'})]:
+            modified = copy.deepcopy(snapshot)
+            modified['issue']['fields'][field] = changed
+            packet = jira_collect.collect(self.base, self.task, 'pr_review', modified)
+            self.assertNotIn('customfield_a', packet['confirmed'])
+            self.assertTrue(any(row.get('due') for row in packet['unknown']))
+        del snapshot['issue']['fields']['customfield_a']
+        self.assertNotIn('customfield_a', jira_collect.collect(self.base, self.task, 'pr_review', snapshot)['confirmed'])
+
+    def test_alias_can_use_fresh_field_metadata_for_legacy_decisions(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        config = json.loads(path.read_text())
+        config['task_classes']['defect_fix']['fields']['choice']['jira_id'] = None
+        path.write_text(json.dumps(config))
+        snapshot['field_metadata'] = snapshot['transitions'][0]['fields']
+        snapshot['transitions'] = []
+        packet = jira_collect.collect(self.base, self.task, 'pr_review', snapshot)
+        self.assertIn('customfield_a', packet['fields'])
+        self.assertNotIn('unresolved:choice', packet['fields'])
+
     def test_collect_rejects_conflicting_option_identity_without_changing_confirmation(self):
         from workflow import jira_collect
         snapshot = self.collect_fixture()
@@ -1176,6 +1213,27 @@ class AcceptedITTests(unittest.TestCase):
     def test_complete_it_acceptance_without_extra_test(self):
         self.assertTrue(self.accepted())
         self.assertTrue(jira_tests.linked_tests(self.doc, 'TAP-123', self.rules)[0])
+
+    def test_mixed_unit_and_integration_acceptance(self):
+        self.report['items']['integration'] = copy.deepcopy(self.report['items']['it'])
+        self.report['items']['integration']['plan']['method'] = 'integration'
+        self.report['checkpoints']['q4-acceptance']['due'].append('integration')
+        self.assertTrue(self.accepted())
+        self.report['items']['integration']['decision_valid'] = False
+        self.assertFalse(self.accepted())
+
+    def test_q3_test_reuses_current_acceptance_without_duplicate_q4_item(self):
+        item = self.report['items']['it']
+        item['plan'].update(checkpoint='q3-draft', case_ref='TAP-456', case_version='v1')
+        tests = [{'key': 'TAP-456', 'case_version': 'v1', 'method': 'unit'}]
+        self.assertEqual([], jira_tests.confirmation_problems(self.report, tests, self.rules))
+        item['decision_valid'] = False
+        self.assertTrue(jira_tests.confirmation_problems(self.report, tests, self.rules))
+        item['decision_valid'] = True
+        item['plan']['case_version'] = 'old'
+        self.assertTrue(jira_tests.confirmation_problems(self.report, tests, self.rules))
+        item['plan'].update(case_version='v1', timing='before_fix')
+        self.assertTrue(jira_tests.confirmation_problems(self.report, tests, self.rules))
 
     def test_confirmation_and_manual_scenarios_are_not_exempt(self):
         for field, value in [('reviewed', False), ('outcome', 'accept_risk'), ('due', [])]:

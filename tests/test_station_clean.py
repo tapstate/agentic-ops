@@ -186,6 +186,27 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual([], list((self.ws / '.agenticops/operation-data').iterdir()))
         self.assertEqual('unclaimed', execution.status(self.ws)['status'])
 
+    def test_finalizing_residual_is_preserved_and_not_reported_done(self):
+        from workflow import station_operation
+        task = self.takeover()
+        request = self.cleanup_request()
+        original = station_operation.collect_payloads
+        def late_write(base):
+            result = original(base)
+            if station_operation.read(base)['phase'] == 'finalizing':
+                (self.ws / 'runtime/late-output').write_text('preserve')
+                (self.ws / '.agenticops/authorization.json').write_text('{}')
+                (self.ws / '.agenticops/evidence').mkdir(exist_ok=True)
+            return result
+        with mock.patch.object(station_operation, 'collect_payloads', side_effect=late_write):
+            result = self.run_clean(task, request)
+        self.assertEqual('running', result['status'])
+        self.assertFalse(result['cleanup_result']['complete'])
+        self.assertEqual(3, len(result['cleanup_result']['residuals']))
+        result = self.run_clean(task, request)
+        self.assertEqual('running', result['status'])
+        self.assertEqual('preserve', (self.ws / 'runtime/late-output').read_text())
+
     def test_cli_pending_then_resume_and_repeat(self):
         import contextlib
         import io

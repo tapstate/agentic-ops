@@ -430,7 +430,7 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 }
 ```
 
-项目可在 `jira.status_sync.allow_accepted_it_without_test` 显式启用充分 IT 验收路径（默认关闭，TapData 启用）。仅原生回读确认无关联 Test，且全部计划场景框架支持、无需手动替代、当前完整 SHA 的本地和 CI 材料有效、逐场景及逐用例全部 PASS（非零用例，无失败/错误/跳过）、同仓同 scope 的 Unit 检查项及 Q4 有效接受时，不要求额外创建 Test。复用现有计划、执行和用户决定，不新增豁免登记。已有 Test、未知或损坏链接仍完整核验；不适用、风险接受、缺测和失效材料不能替代充分 IT。该条件只作用于当前准入，不改质量规则快照或历史事件，原 run 的有效确认继续复用；PR Checks、Jira 转换表单及服务端 Validator 仍独立核验。
+项目可在 `jira.status_sync.allow_accepted_it_without_test` 显式启用充分 IT 验收路径（默认关闭，TapData 启用）。仅原生回读确认无关联 Test，且全部计划场景框架支持、无需手动替代、当前完整 SHA 的本地和 CI 材料有效、逐场景及逐用例全部 PASS（非零用例，无失败/错误/跳过）、同仓同 scope 的 Unit 或 integration 检查项及 Q4 有效接受时，不要求额外创建 Test。复用现有计划、执行和用户决定，不新增豁免登记。已有 Test、未知或损坏链接仍完整核验；不适用、风险接受、缺测和失效材料不能替代充分 IT。该条件只作用于当前准入，不改质量规则快照或历史事件，原 run 的有效确认继续复用；PR Checks、Jira 转换表单及服务端 Validator 仍独立核验。
 
 `linked_test_details` 在存在关联 Test 的 Tests Passed 或 PR Ready 核对时必需：它是 Agent 从 Jira/Xray Test Details 读取的事实，不由 AgenticOps 推断或写入。无法读取时，工具会要求用户提供关联 Test key、Test Type、用例版本引用和 Jira 来源。`Manual`、`TapTest`、`Unit` 是当前受管类型；`TapCE` 显式忽略但不算通过。若只有 TapCE、类型不支持、关联缺失或 Jira Validator 仍要求 TapCE，用户调整 Jira 或验收方案后重新读取并重做预检；不得盲目重放已经发起的 Jira 状态转换。
 
@@ -503,7 +503,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
   --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_station"
 ```
 
-工具按当前 Project 核对 Test 要求：显式不要求独立 Test 的流程，或满足[充分 IT 验收路径](#非阻断-jira-状态同步)的无关联 Test 场景，不强制补建；已有 Test、缺失或损坏的链接事实仍完整核验。其它要求独立 Test 的流程须从 Jira「已链接工作项」取得非空受管 Test。对实际关联的每个 Test，Test Type 与用例版本须可回读，Manual/Unit 在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项并由用户基于当前 SHA 的 PASS 证据逐项 `accept`；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 或存在上述有效具体提审例外，且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。适用流程要求关联却没有符合关系和类型的 Test、实际关联项未逐项确认、Head 漂移、`defer/accept_risk/rework` 都会列为待办；Checks 缺失、跳过或失败按具体例外核对，未知或等待不能据此放行。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+工具按当前 Project 核对 Test 要求：显式不要求独立 Test 的流程，或满足[充分 IT 验收路径](#非阻断-jira-状态同步)的无关联 Test 场景，不强制补建；已有 Test、缺失或损坏的链接事实仍完整核验。其它要求独立 Test 的流程须从 Jira「已链接工作项」取得非空受管 Test。对实际关联的每个 Test，Test Type 与用例版本须可回读，Manual/Unit 在 Q4 到期范围内以同一 `case_ref`、当前 Jira 用例版本和对应方式核验检查项，并由用户基于当前 SHA 的 PASS 证据逐项 `accept`（可复用已在 Q3 登记的修复后检查项，不要求重复新增 Q4 项）；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 或存在上述有效具体提审例外，且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。适用流程要求关联却没有符合关系和类型的 Test、实际关联项未逐项确认、Head 漂移、`defer/accept_risk/rework` 都会列为待办；Checks 缺失、跳过或失败按具体例外核对，未知或等待不能据此放行。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
 
 ## 影响版本与优先修复线
 
@@ -734,6 +734,8 @@ TapData 精确接受 `Tests Passed`、`PULL REQUEST SUBMITTED`、`MERGED`、`完
 项目 `profile.json` 引用 `jira-transitions.json`，按任务类型声明字段 ID/别名、类型、来源、条件必填、采集节点、决策责任人和依赖。已核验状态目录及转换均标明来源；`coverage.complete_workflow_export=false` 表示没有管理员完整工作流导出，未见转换的拓扑、未来表单和 Validator 不猜填。Agent 可采集任意原生转换的实时表单，未获自动授权的转换只交研发处理。
 
 在 intake、design_review、acceptance、pr_review、transition 的相关人工节点执行 `jira_status.py collect --checkpoint <节点> --issue-key <key> --expected-run-id <run> --input <json> --dir <station>`。输入包含 `snapshot`（原生 issue、transitions.fields、source_ref）与可选 `proposals`（字段 ID 到建议值）。输出按字段 ID 去重，保留所有转换用途，统一展示已有值、可复用确认、本节点待决、未来待采及动态未知项；建议值不是 Jira 已写事实。
+
+字段确认保存已核验的字段 ID、逻辑名和元数据。同一 run 中字段离开当前转换表单后，只在当前 Jira 值已回读且值、依赖、责任人与原确认一致时复用；当前表单提供的新类型或选项优先核验。旧确认缺少字段身份，或值与依赖发生变化时，在 `snapshot.field_metadata` 中补充原生回读的字段 ID 到元数据对象（name、schema、allowedValues），再采集确认；不猜字段 ID，也不把历史选项当作当前可写表单。该补充不改变自动转换权限。
 
 TapData 的 `Fix Details` 仅在采集到期或原生表单要求提前采集时，由已有质量记录生成交付总结素材，不使用完整仓库对象或实施计划作为修复结果的后备建议。`Module` 按原生字段选项由研发确认，不将仓库对象当作模块选项。内部工程定位数据（例如 `worktree.path`）不进入这两类字段建议；显式提议、Jira 原值及实际生成的交付材料仍接受完整敏感检查，不能借此隐藏不合格材料或自动确认字段。
 

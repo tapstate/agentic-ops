@@ -135,6 +135,13 @@ def finish(base, operation, identity):
     operation['cleanup_result'].update(released=True, complete=False, residuals=[])
     operations.save(base, operation)
     residuals = operations.collect_payloads(base) or []
+    # finalizing 可跨进程恢复；旧删除回执不证明此刻仍然没有新残留。
+    runtime = trees.path_for(base, station_layout.station_name(base, 'task-runtime'))
+    for path in (task_store.state_path(base) / 'authorization.json', task_store.state_path(base) / 'evidence'):
+        if path.exists() or path.is_symlink():
+            residuals.append({'path': str(path.relative_to(Path(base).resolve())), 'reason': '最终核验发现任务状态残留，保留并重新预检'})
+    if runtime.is_symlink() or not runtime.is_dir() or any(runtime.iterdir()):
+        residuals.append({'path': str(runtime.relative_to(Path(base).resolve())), 'reason': '最终核验发现运行目录异常或残留，保留并重新预检'})
     if residuals:
         operation['cleanup_result']['residuals'] = residuals
         operations.save(base, operation)
