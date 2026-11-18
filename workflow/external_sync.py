@@ -141,6 +141,11 @@ def warnings(base, task, report=None):
                        "recovery": "下次阶段同步或 Jira 评论时说明；按已有授权补写并回读"})
 
     from workflow import project_rules
+    from workflow import jira_worklog
+    reminder = jira_worklog.timing_reminder(base, task)
+    if reminder:
+        add('jira_worklog_timing', 'deferred', reminder)
+        result[-1]['recovery'] = reminder
     watermark = jira_watermark.status(base, task)
     if watermark.get("outcome") == "verified" and watermark.get("marker_version") != 2 and jira_watermark.config(base).get("schema_version") == 2:
         add("agenticops_version", "deferred", "旧版水印已回读；prepare 补齐四项标记，不覆盖原在途意图")
@@ -411,7 +416,16 @@ def actions(base, task, report=None):
         if kind == "takeover_summary" or kind.startswith(("checkpoint:", "comment:", "jira_fields:")):
             continue
         add(kind, kind, warning["status"], reason=warning["reason"])
-        if kind.startswith("jira_status:"):
+        if kind in ('jira_worklog', 'jira_worklog_timing'):
+            result[-1].update(next_action=('readback' if recovery else 'maintenance_handoff')
+                             if warning['status'] == 'unknown' else 'inspect_worklog',
+                command={'script': 'workflow/jira_worklog.py', 'action': 'status', 'issue_key': task['issue_key']},
+                guidance=(warning['reason'] if kind == 'jira_worklog_timing' else
+                    '按原工作段 issue/run 查询工时：活动段在切换或等待前 pause；新会话/异常恢复先 recover；'
+                    '已结算段在正常节点 prepare 后原生登记并 bind/complete 回读；intent 只回读原意图，不重发；'
+                    '不足一分钟保留累计，不能上取整。旧 run 不借当前 run 发送。'),
+                worklogs=warning.get('worklogs', []))
+        elif kind.startswith("jira_status:"):
             trigger = kind.split(":", 1)[1]
             record = jira_status.load_state(base, task)["attempts"].get(trigger)
             result[-1]["record"] = record

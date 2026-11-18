@@ -19,6 +19,62 @@ from station_fixture import save_task, ownership_snapshot
 
 
 class WorklogTests(unittest.TestCase):
+    def test_missing_timer_is_visible_without_creating_material_or_cleanup_obligation(self):
+        path = log.state_path(self.base, 'TAP-123')
+        before = task_store.read_current(self.base)
+        actions = external_sync.actions(self.base, self.task)['sync_actions']
+        timing = next(x for x in actions if x['kind'] == 'jira_worklog_timing')
+        self.assertIn('尚无计时记录', timing['reason'])
+        self.assertEqual('inspect_worklog', timing['next_action'])
+        self.assertEqual('status', timing['command']['action'])
+        self.assertFalse(path.exists())
+        self.assertEqual(before, task_store.read_current(self.base))
+        self.assertFalse(any(w['kind'].startswith('jira_worklog') for w in
+                             external_sync.existing_warnings(self.base, self.task)))
+        for change in ({'stage': 'completed'}, {'archive_ref': 'saved'}):
+            self.assertIsNone(log.timing_reminder(self.base, dict(self.task, **change)))
+        with mock.patch.object(log.project_rules, 'load_profile', return_value={'jira': {}}):
+            self.assertIsNone(log.timing_reminder(self.base, self.task))
+
+    def test_paused_and_other_session_reminders_preserve_waits_and_original_segments(self):
+        self.call('start')
+        self.assertIsNone(log.timing_reminder(self.base, self.task))
+        path = log.state_path(self.base, 'TAP-123')
+        before = path.read_bytes()
+        with mock.patch.dict(os.environ, {'AGENTICOPS_EXECUTION_ID': '1' * 32}):
+            self.assertIn('recover', log.timing_reminder(self.base, self.task))
+        with mock.patch.dict(os.environ, {'AGENTICOPS_EXECUTION_ID': ''}):
+            self.assertIn('会话标识', log.timing_reminder(self.base, self.task))
+        self.assertEqual(before, path.read_bytes())
+        self.call('pause', at='2026-11-03T10:02:00+00:00')
+        before = path.read_bytes()
+        self.assertIn('等待时保持暂停', log.timing_reminder(self.base, self.task))
+        self.assertEqual(before, path.read_bytes())
+        self.assertIn('旧 run', log.timing_reminder(self.base, dict(self.task, run_id='another-run')))
+
+    def test_unknown_worklog_action_preserves_original_identity_and_never_suggests_resend(self):
+        self.call('start')
+        self.call('pause', at='2026-11-03T10:02:00+00:00')
+        self.call('prepare', snapshot=self.snapshot_file(self.snapshot()))
+        before = log.state_path(self.base, 'TAP-123').read_bytes()
+        action = next(x for x in external_sync.actions(self.base, self.task)['sync_actions']
+                      if x['kind'] == 'jira_worklog')
+        self.assertEqual('unknown', action['status'])
+        self.assertEqual('readback', action['next_action'])
+        self.assertIn('intent 只回读原意图，不重发', action['guidance'])
+        self.assertEqual('TAP-123', action['worklogs'][0]['issue_key'])
+        self.assertEqual(self.task['run_id'], action['worklogs'][0]['run_id'])
+        self.assertEqual(before, log.state_path(self.base, 'TAP-123').read_bytes())
+        terminal = next(x for x in external_sync.actions(self.base, dict(self.task, stage='completed'))['sync_actions']
+                        if x['kind'] == 'jira_worklog')
+        self.assertEqual('readback', terminal['next_action'])
+        self.assertNotIn('native_request', terminal)
+        with mock.patch('workflow.sync_recovery.require_receipt', side_effect=ValueError('冻结')):
+            blocked = next(x for x in external_sync.actions(self.base, self.task)['sync_actions']
+                           if x['kind'] == 'jira_worklog')
+        self.assertEqual('maintenance_handoff', blocked['next_action'])
+        self.assertEqual(before, log.state_path(self.base, 'TAP-123').read_bytes())
+
     def test_rest_dates_and_explicit_minute_precision_preserve_remainder(self):
         self.call('start')
         self.call('pause', at='2026-11-03T10:07:18+00:00')
