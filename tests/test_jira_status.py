@@ -347,7 +347,7 @@ class JiraStatusTests(unittest.TestCase):
         prepared = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
         self.assertEqual(prepared["transition_id"], "51")
         snapshot["issue"]["fields"]["status"]["name"] = "正在进行"
-        self.assertEqual(jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "")["outcome"], "succeeded")
+        self.assertEqual(jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "")["outcome"], "satisfied")
         # Same-version persisted records still load; no repeated write after completion.
         self.assertTrue(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["repeated"])
 
@@ -376,7 +376,39 @@ class JiraStatusTests(unittest.TestCase):
                 snapshot['issue']['fields']['status']['name'] = 'In Progress'
                 done = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown', snapshot, '',
                                             operation_id='op-' + task_class.replace('_', '-'))
-                self.assertEqual(done['outcome'], 'succeeded')
+                self.assertEqual(done['outcome'], 'satisfied')
+
+    def test_unknown_transition_target_does_not_mask_drifted_inputs(self):
+        snapshot = self.snapshot()
+        operation = 'op-transition-inputs'
+        approval = {'id': 'customfield_10413', 'value': {'id': '10653'}}
+        snapshot['transitions'][0]['fields']['customfield_10413'] = {'required': False}
+        snapshot['issue']['fields']['customFields'] = {'Story Test Design Review Result': approval}
+        prepared = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, operation)
+        self.assertEqual('ready', prepared['outcome'])
+        self.assertIn('assignee', prepared['request']['inputs'])
+        self.assertEqual({'id': '10653'}, prepared['request']['inputs']['customfield_10413'])
+        snapshot['issue']['fields']['status']['name'] = 'In Progress'
+        assignee = snapshot['issue']['fields'].pop('assignee')
+        for wrong in (None, {'accountId': 'other'}):
+            if wrong is not None:
+                snapshot['issue']['fields']['assignee'] = wrong
+            observed = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown',
+                                             snapshot, '', operation)
+            self.assertEqual('unknown', observed['outcome'])
+            self.assertEqual('In Progress', observed['readback_status'])
+            self.assertEqual('target_read_back_fields_unverified', observed['reason'])
+            self.assertEqual('assignee', observed['guidance'][0]['field'])
+        snapshot['issue']['fields']['assignee'] = assignee
+        approval['value'] = {'id': 'another-option'}
+        observed = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown',
+                                         snapshot, '', operation)
+        self.assertEqual('unknown', observed['outcome'])
+        self.assertEqual('customfield_10413', observed['guidance'][0]['field'])
+        approval['value'] = {'id': '10653'}
+        observed = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown',
+                                         snapshot, '', operation)
+        self.assertEqual('satisfied', observed['outcome'])
 
     def test_native_required_assignee_still_requires_decision(self):
         snapshot = self.feature_snapshot()
@@ -435,6 +467,50 @@ class JiraStatusTests(unittest.TestCase):
         snapshot["transitions"][1]["isAvailable"] = False
         self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
 
+    def test_transition_success_receipt_does_not_require_status_snapshot(self):
+        from workflow import quality
+
+        operation = 'op-transition-success'
+        prepared = jira_status.prepare(self.base, 'TAP-123', 'takeover', self.snapshot(), operation)
+        self.assertEqual('ready', prepared['outcome'])
+        receipt = {
+            'site': 'https://tapdata.atlassian.net',
+            'operation_id': operation,
+            'request_digest': quality.digest({'transition': {'id': prepared['transition_id']}}),
+            'method': 'POST',
+            'path': '/rest/api/3/issue/TAP-123/transitions',
+            'http_status': 204,
+            'source_ref': 'jira:transition-response',
+        }
+        with self.assertRaisesRegex(ValueError, '不能证明'):
+            jira_status.complete(self.base, 'TAP-123', 'takeover', 'succeeded',
+                                 dict(receipt, request_digest='wrong'), '', operation)
+        result = jira_status.complete(self.base, 'TAP-123', 'takeover', 'succeeded', receipt, '', operation)
+        self.assertEqual('native_write_completed', result['reason'])
+        self.assertNotIn('readback_status', result)
+        self.assertEqual(result, jira_status.complete(
+            self.base, 'TAP-123', 'takeover', 'succeeded', receipt, '', operation))
+
+    def test_mcp_transition_receipt_confirms_target_without_get(self):
+        from workflow import quality
+
+        operation = 'op-mcp-transition'
+        prepared = jira_status.prepare(self.base, 'TAP-123', 'takeover', self.snapshot(), operation)
+        receipt = {
+            'site': 'https://tapdata.atlassian.net', 'operation_id': operation,
+            'request_digest': quality.digest({'transition': {'id': prepared['transition_id']}}),
+            'tool': 'transitionJiraIssue', 'source_ref': 'jira:mcp-transition-response',
+            'response': {'data': {'transitionId': int(prepared['transition_id']),
+                                  'statusName': 'In Progress', 'message': 'Issue TAP-123 transitioned successfully'}},
+        }
+        wrong = copy.deepcopy(receipt)
+        wrong['response']['data']['statusName'] = 'Done'
+        with self.assertRaisesRegex(ValueError, '不能证明'):
+            jira_status.complete(self.base, 'TAP-123', 'takeover', 'succeeded', wrong, '', operation)
+        result = jira_status.complete(self.base, 'TAP-123', 'takeover', 'succeeded', receipt, '', operation)
+        self.assertEqual('In Progress', result['readback_status'])
+        self.assertEqual('native_write_completed', result['reason'])
+
     def test_takeover_prepares_once_and_readback_completes(self):
         from workflow import archive_store
         reservation = archive_store.reserve(self.base, self.task['issue_key'], self.task['run_id'])
@@ -447,7 +523,7 @@ class JiraStatusTests(unittest.TestCase):
         self.assertTrue(repeated["repeated"])
         readback = self.snapshot(status="In Progress")
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
-        self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(done["outcome"], "satisfied")
         self.assertEqual(task_state_snapshot(self.base), before)
         self.assertEqual([], list(reservation.iterdir()))
 
@@ -476,7 +552,7 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(ready["target_statuses"], ["In Progress", "正在进行"])
         readback = self.snapshot(status="正在进行")
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
-        self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(done["outcome"], "satisfied")
 
     def test_mismatch_and_missing_fields_skip_without_retry(self):
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Open"))
@@ -565,6 +641,71 @@ class JiraStatusTests(unittest.TestCase):
         snapshot['transitions'] = []
         snapshot['issue']['fields']['customfield_b'] = '人工备注：保留'
         return snapshot
+
+    def test_field_success_receipt_closes_original_intent_without_snapshot(self):
+        from workflow import jira_collect
+
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '目标\n第一行'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        original = jira_collect.prepare_fields(self.base, self.task, 'design_review', {
+            'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-success'})
+        receipt = {
+            'site': 'https://tapdata.atlassian.net',
+            'operation_id': original['operation_id'],
+            'request_digest': original['request_digest'],
+            'method': 'PUT',
+            'path': '/rest/api/3/issue/' + self.task['issue_key'],
+            'http_status': 204,
+            'source_ref': 'jira:original-response',
+        }
+        document = {'result': 'succeeded', 'operation_id': original['operation_id'], 'receipt': receipt}
+        with self.assertRaisesRegex(ValueError, '不能证明'):
+            jira_collect.readback_fields(self.base, self.task, dict(document, receipt=dict(receipt, http_status=202)))
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, document)['status'])
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, document)['status'])
+        self.assertEqual([], jira_status.pending_field_writes(self.base, self.task))
+
+    def test_mcp_edit_receipt_needs_business_success_not_tool_success(self):
+        from workflow import jira_collect
+
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '目标\n第一行'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        original = jira_collect.prepare_fields(self.base, self.task, 'design_review', {
+            'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'mcp-edit'})
+        receipt = {
+            'site': 'https://tapdata.atlassian.net', 'operation_id': original['operation_id'],
+            'request_digest': original['request_digest'], 'tool': 'editJiraIssue',
+            'source_ref': 'jira:original-mcp-edit',
+            'response': {'data': {'error': 'EDIT_FAILED', 'status': 400}},
+        }
+        document = {'result': 'succeeded', 'operation_id': original['operation_id'], 'receipt': receipt}
+        with self.assertRaisesRegex(ValueError, '不能证明'):
+            jira_collect.readback_fields(self.base, self.task, document)
+        receipt['response'] = {'data': {'id': '123', 'key': self.task['issue_key'],
+                                       'fields': {'summary': '默认回执字段'}, 'appliedContentFormat': 'markdown'}}
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, document)['status'])
+        self.assertEqual([], jira_status.pending_field_writes(self.base, self.task))
+
+    def test_mcp_markdown_hard_breaks_recover_original_intent(self):
+        from workflow import jira_collect
+
+        snapshot = self.field_write_fixture()
+        proposals = {'customfield_b': '目标\n第一行\n• 要点'}
+        self.confirm_packet('design_review', snapshot, proposals)
+        document = {'snapshot': snapshot, 'proposals': proposals, 'operation_id': 'field-markdown'}
+        jira_collect.prepare_fields(self.base, self.task, 'design_review', document)
+        snapshot['issue']['fields']['customfield_b'] = '目标  \n第一行  \n• 要点'
+        with self.assertRaisesRegex(ValueError, '不匹配'):
+            jira_collect.readback_fields(self.base, self.task, document)
+        snapshot['body_representation'] = 'atlassian-mcp-markdown'
+        self.assertEqual('verified', jira_collect.readback_fields(self.base, self.task, document)['status'])
+        fields = jira_collect.collect(self.base, self.task, 'design_review', snapshot)['fields']
+        self.assertEqual('matches_confirmed', fields['customfield_b']['sync_status'])
+        snapshot['issue']['fields']['customfield_b'] += '被修改'
+        with self.assertRaisesRegex(ValueError, '不匹配'):
+            jira_collect.readback_fields(self.base, self.task, document)
 
     def test_field_write_confirmation_readback_and_material_drift(self):
         from workflow import jira_collect, external_sync
@@ -790,7 +931,7 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual('ready', third['outcome'])
         repeated = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-second')
         self.assertTrue(repeated['repeated'])
-        self.assertEqual('succeeded', repeated['outcome'])
+        self.assertEqual('satisfied', repeated['outcome'])
         self.assertEqual(3, len(jira_status.load_state(self.base, self.task)['attempts_by_id']))
 
     def test_manual_transition_returns_collection_without_auto_authority(self):
@@ -1039,7 +1180,7 @@ class TerminalStatusTests(unittest.TestCase):
             jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(), "op-new-takeover")
         before = task_state_snapshot(self.base)
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", self.snapshot("In Progress"), "", operation_id)
-        self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(done["outcome"], "satisfied")
         self.assertEqual(done["operation_id"], record["operation_id"])
         self.assertEqual(before, task_state_snapshot(self.base))
         station_resources.verify_known_external(self.base, self.task)

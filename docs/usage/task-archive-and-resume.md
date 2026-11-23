@@ -26,7 +26,7 @@ python3 <product-root>/workflow/station-clean.py --dir <station> --execute --act
 
 程序检查保留代码的工作区、分支、历史基线及远端 Head；不会执行 commit/push。返回 `awaiting_jira`、稳定正文和内容摘要，保存原操作。Agent 用原生 Jira 工具查找相同摘要并回读；已有相同正文则复用，确认未写入且有授权才新增评论，未知结果禁止重发。正文包含可读取的方案、进度、代码引用与环境缺项，不含旧授权或阶段迁移数据。
 
-将原生回读整理为 `site/issue_key/comment_id/body/source_ref`，原操作继续：
+创建评论明确成功后立即保留原评论 ID。若原生响应同时证明同一任务已保存的完整正文，直接复用该响应。仅返回 ID 或回显请求时，按该 ID 补读正文。将取得的证据整理为 `site/issue_key/comment_id/body/source_ref`，沿原操作继续：
 
 ```sh
 python3 <product-root>/workflow/station-clean.py --dir <station> --resume --operation-id <原操作> --jira-readback <回读.json>
@@ -145,6 +145,6 @@ Agent 使用共享 [ao-task-resume](../../skills/shared/ao-task-resume/SKILL.md)
 
 默认清理只删除已确认范围内的本地材料，不撤销 Jira 上的方案或历史成果。研发明确放弃已记录的实现或进度时，Agent 整理新的有效进度、保留方案及剩余事项，经确认后向清理入口提供 `--progress-correction-file <文本文件>`（task.py clean 的 JSON 输入使用 `progress_correction`）。说明不含秘密，不改 Jira 历史或自动设为完成。
 
-本地成功与 Jira 更正独立报告。清理结果中的 progress_correction 提供稳定正文、摘要与目标；Agent 在本地清理完成后用原生工具查重、写入并回读，未知结果先查原操作，不能重发。回读的 site/issue_key/comment_id/body/source_ref 沿 `task.py cleanup-readback --operation-id <原清理编号> --input <回读.json> --dir <工位>` 核验。接口只收尾更正，不重新删除文件或取得任务接管权。
+本地成功与 Jira 更正独立报告。清理结果中的 progress_correction 提供稳定正文、摘要与目标；Agent 在本地清理完成后用原生工具查重并写入。明确成功后保留原评论 ID，已返回同一任务完整保存正文时复用，否则只补读该评论。未知结果沿原清理操作定位，不能重复发布。回读的 site/issue_key/comment_id/body/source_ref 沿 `task.py cleanup-readback --operation-id <原清理编号> --input <回读.json> --dir <工位>` 核验。接口只收尾更正，不重新删除文件或取得任务接管权。
 
 Jira 不可用时本地清理仍可完成，原有操作回执保留更正待办，后续新任务不抹掉它；本地清理完成不等于远端成果已更正。注销须先完成回读，避免删除唯一线索。旧版本不得继续写入带有待更正记录的新现场。此入口是已确认语义说明的回读，不自动判断哪些历史业务决定失效；恢复 Agent 仍核对 Jira 最新有效决定。

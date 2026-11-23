@@ -349,11 +349,61 @@ def body_matches(worklog, wanted, row):
             and instant(worklog.get('started', '')) == instant(wanted['started']) and comment_ok)
 
 
+def property_request(state, row):
+    return {'site': row['request']['site'], 'tool': 'editJiraEntityProperty', 'arguments': {
+        'entityType': 'issueWorklog', 'issueIdOrKey': state['issue_key'], 'worklogId': row['worklog_id'],
+        'propertyKey': MCP_PROPERTY, 'value': {'id': row['property_id']}}}
+
+
+def worklog_receipt(row, receipt, request):
+    source = receipt.get('source_ref')
+    response = receipt.get('response', {}).get('data', {})
+    if (receipt.get('site') != row['request']['site'] or receipt.get('segment_id') != row['id']
+            or receipt.get('request_digest') != digest(request) or not isinstance(source, str) or not source.strip()
+            or not isinstance(response, dict) or 'error' in response):
+        raise ValueError('Jira 工时成功响应不属于原操作')
+    return source, response
+
+
+def bind_created(state, row, receipt):
+    source, response = worklog_receipt(row, receipt, row['request'])
+    worklog_id = response.get('id')
+    args = row['request']['arguments']
+    if (response.get('message') != f"Worklog added to {state['issue_key']}"
+            or not isinstance(worklog_id, str) or not worklog_id.isdigit() or worklog_id in row['before_worklog_ids']
+            or row.get('worklog_id', worklog_id) != worklog_id
+            or response.get('timeSpent') != args['timeSpent']
+            or not isinstance(response.get('started'), str)
+            or instant(response['started']) != instant(args['started'])):
+        raise ValueError('MCP 工时创建响应的任务、工时 ID、开始时间或实际耗时未核验，需按原工时回读')
+    if row.get('worklog_id'):
+        return None
+    row.update(worklog_id=worklog_id, readback_ref=source)
+    return property_request(state, row)
+
+
+def complete_property(state, row, receipt):
+    if row.get('transport') != 'atlassian_mcp' or not row.get('worklog_id'):
+        raise ValueError('工时属性回执需要已绑定的原 MCP 工时 ID')
+    source, response = worklog_receipt(row, receipt, property_request(state, row))
+    if (response.get('key') != MCP_PROPERTY or response.get('entityType') != 'issueWorklog'
+            or response.get('status') not in ('created', 'updated')):
+        raise ValueError('MCP 工时属性响应缺少已完成的原属性结果')
+    if row['status'] == 'verified':
+        if row.get('readback_ref') != source:
+            raise ValueError('工时已有不同回执，拒绝覆盖')
+        return
+    row.update(status='verified', readback_ref=source)
+    row.pop('reason', None)
+
+
 def bind(base, state, segment_id, snapshot):
     """两步 MCP 的创建回读：只绑定唯一新工时，再准备属性写入；不重新创建。"""
     row = state['segments'][segment_id]
     if row['status'] != 'intent' or row.get('transport') != 'atlassian_mcp':
         raise ValueError('没有原 MCP 工时创建意图')
+    if 'receipt' in snapshot:
+        return bind_created(state, row, snapshot['receipt'])
     site, issue_id, actor = native_identity(base, state['issue_key'], snapshot)
     if (site != row['request']['site'] or issue_id != row['issue_id'] or actor != row['actor_account_id']
             or snapshot.get('worklogs_complete') is not True or not isinstance(snapshot.get('worklogs'), list)):
@@ -375,9 +425,7 @@ def bind(base, state, segment_id, snapshot):
     if property_value == {'id': row['property_id']}:
         complete(base, state, segment_id, snapshot)
         return None
-    return {'site': site, 'tool': 'editJiraEntityProperty', 'arguments': {
-        'entityType': 'issueWorklog', 'issueIdOrKey': state['issue_key'], 'worklogId': row['worklog_id'],
-        'propertyKey': MCP_PROPERTY, 'value': {'id': row['property_id']}}}
+    return property_request(state, row)
 
 
 def minute_precision(snapshot):
@@ -387,10 +435,33 @@ def minute_precision(snapshot):
             and bool(snapshot['worklog_precision_ref'].strip()))
 
 
+def complete_rest(row, receipt):
+    source, response = worklog_receipt(row, receipt, row['request'])
+    if receipt.get('http_status') != 201:
+        raise ValueError('REST 工时回执需要原创建成功响应')
+    worklog = response.get('worklog', {})
+    wanted = expected(row)
+    worklog_id = str(worklog.get('id', ''))
+    if (not worklog_id.isdigit() or row.get('worklog_id', worklog_id) != worklog_id
+            or not body_matches(worklog, wanted, row)
+            or any(item not in worklog.get('properties', []) for item in wanted['properties'])):
+        raise ValueError('REST 工时回执缺少已保存工时或属性证据；按原工时补读')
+    if row['status'] == 'verified' and row.get('readback_ref') != source:
+        raise ValueError('工时已有不同回执，拒绝覆盖')
+    seconds = worklog['timeSpentSeconds']
+    row.update(status='verified', worklog_id=worklog_id, logged_seconds=seconds,
+               unlogged_seconds=row['seconds'] - seconds, readback_ref=source)
+    row.pop('reason', None)
+
+
 def complete(base, state, segment_id, snapshot):
     row = state['segments'][segment_id]
     if row['status'] not in ('intent', 'verified'):
         raise ValueError('没有原工时发送意图；不能用回读新建工时')
+    if 'receipt' in snapshot:
+        if row.get('transport') == 'atlassian_mcp':
+            return complete_property(state, row, snapshot['receipt'])
+        return complete_rest(row, snapshot['receipt'])
     site, issue_id, actor = native_identity(base, state['issue_key'], snapshot)
     if (site != row['request']['site'] or issue_id != row['issue_id'] or actor != row['actor_account_id']):
         raise ValueError('工时回读站点、任务或登录用户与原意图不一致')
@@ -564,6 +635,7 @@ def command(args):
                                for row in state['segments'].values() if row['status'] == 'intent']
         if request:
             result['native_request'] = request
+            result['request_digest'] = digest(request)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

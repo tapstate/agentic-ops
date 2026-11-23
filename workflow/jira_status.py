@@ -3,7 +3,7 @@
 
 每个 task/run/trigger 幂等准备。外部工具由 Agent 原生权限执行，不保证强制单次调用。
 prepare 接受实时 Jira issue 与可用 transitions 快照，
-返回 transition 意图或跳过原因；complete 导入写后回读。任何结果都不改变本地任务阶段。
+返回 transition 意图或跳过原因；complete 导入成功回执或写后回读。任何结果都不改变本地任务阶段。
 """
 from __future__ import annotations
 
@@ -359,9 +359,15 @@ def prepare(base, issue_key, trigger, snapshot, operation_id=None):
             field_keys.update(transition.get("fields", {}))
         for logical in rule.get("field_requirements", []):
             field_keys.update(rules.get("field_mappings", {}).get(logical, {}).get("aliases", [logical]))
+        from workflow import jira_collect
+        inputs = {}
+        for key in sorted(field_keys):
+            observed, value = jira_collect.field_value(fields, key)
+            if observed:
+                inputs[key] = value
         request = {"run_id": task["run_id"], "trigger": trigger, "operation_id": operation_id,
                    "expected_from": previous["from_status"] if previous and prior_operation == operation_id else status["name"],
-                   "inputs": {key: fields.get(key) for key in sorted(field_keys) if key in fields},
+                   "inputs": inputs,
                    "form_digest": quality.digest((transition or {}).get("fields", {})),
                    "rule_digest": quality.digest(rule),
                    "decisions": {key: value["digest"] for key, value in state.get("decisions", {}).items() if key in field_keys}}
@@ -497,35 +503,86 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
 
 @sync_recovery.local_locked
 def complete(base, issue_key, trigger, outcome, snapshot, message, operation_id=None):
-    if outcome not in ("failed", "unknown", "not_written"):
+    if outcome not in ("failed", "unknown", "not_written", "succeeded"):
         raise ValueError("无效 Jira 回执结果")
     task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
-    if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
+    if not record or record.get("outcome") not in ("ready", "unknown", "failed", "succeeded"):
         raise ValueError("本节点没有待完成的 Jira 状态转换意图")
     sync_recovery.require_receipt(base, task)
     original = copy.deepcopy(record)
     if operation_id is not None and record.get("operation_id") != operation_id:
         raise ValueError("Jira 回执不是原 operation")
+    if outcome == "succeeded":
+        from workflow import jira_collect
+        if not operation_id or not record.get("transition_id"):
+            raise ValueError("转换成功回执需要原操作及转换 ID")
+        request = {"transition": {"id": record["transition_id"]}}
+        observed_status = None
+        if snapshot.get("tool") == "transitionJiraIssue":
+            source_ref = sync_recovery.jira_response_source(base, operation_id, request, snapshot)
+            response = snapshot.get("response", {}).get("data", {})
+            observed_status = response.get("statusName")
+            if ("error" in response or str(response.get("transitionId")) != record["transition_id"]
+                    or response.get("message") != "Issue %s transitioned successfully" % issue_key
+                    or observed_status not in record.get("target_statuses", [record["target_status"]])):
+                raise ValueError("MCP 回执不能证明原 Jira 转换已完成")
+        else:
+            source_ref = sync_recovery.jira_rest_completion(
+                base, operation_id, request, snapshot,
+                method="POST", path="/rest/api/3/issue/" + issue_key + "/transitions")
+        jira_collect.require_safe(project_rules.load_admission(station=base), source_ref, "Jira 转换回执")
+        if record.get("outcome") == "succeeded":
+            if record.get("reason") == "native_write_completed" and record.get("readback_ref") == source_ref:
+                return record
+            raise ValueError("转换已有不同结论，拒绝替换原回执")
+        record.update(completed_at=now(), readback_ref=source_ref, outcome="succeeded",
+                      reason="native_write_completed", guidance=[])
+        if observed_status:
+            record["readback_status"] = observed_status
+        if record.get("attempt_id"):
+            state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
+        save_state(base, task, state, recovery=(trigger, original))
+        return record
+    if record.get("outcome") == "succeeded":
+        raise ValueError("转换已结清，不能替换原回执")
     if outcome == "not_written":
         evidence = snapshot.get("operation_result", {})
         if (not operation_id or evidence.get("operation_id") != operation_id or evidence.get("effect") != "not_written"
                 or not evidence.get("source_ref")):
             raise ValueError("确认未写入需要原操作明确结果来源，当前状态不等于目标不能证明未写入")
-    _, _, status = issue_from(snapshot, issue_key)
+    from workflow import jira_collect
+
+    _, fields, status = issue_from(snapshot, issue_key)
     reached = status["name"] in record.get("target_statuses", [record["target_status"]])
+    missing = []
+    if reached:
+        metadata = snapshot.get("field_metadata", {})
+        for field, expected in record.get("request", {}).get("inputs", {}).items():
+            present, actual = jira_collect.field_value(fields, field)
+            decision = state.get("decisions", {}).get(field, {})
+            schema = metadata.get(field, decision.get("metadata", {})).get("schema", {})
+            if not present or not jira_collect.field_matches(
+                    expected, actual, schema, field, snapshot.get("body_representation")):
+                missing.append(field)
     record["completed_at"] = now()
     record["readback_ref"] = snapshot["source_ref"]
     record["readback_status"] = status["name"]
-    record["outcome"] = "succeeded" if reached else outcome
-    record["reason"] = "target_read_back" if reached else "transition_%s" % outcome
+    record["outcome"] = "satisfied" if reached and not missing and outcome != "not_written" else outcome
+    record["reason"] = ("target_read_back_fields_unverified" if missing else "target_read_back"
+                        if record["outcome"] == "satisfied" else "transition_%s" % outcome)
     if message:
         text = str(message)[:600]
         admission = project_rules.load_admission(station=base)
         record["message"] = ("外部错误信息含敏感内容，原文未保存" if project_rules.scan_sensitive(admission, text)
                              else text)
-    if not reached:
+    if missing:
+        record["guidance"] = [{"field": field, "guidance": "目标状态已达到，原转换字段缺失或不匹配，先补查原值。"}
+                              for field in missing]
+    elif record["outcome"] == "satisfied":
+        record["guidance"] = []
+    else:
         record["guidance"] = [{"guidance": "自动状态转换未确认成功；本地流程继续，PR Ready 时根据 Jira 原始提示人工处理。"}]
     if record.get("attempt_id"):
         state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
@@ -548,7 +605,7 @@ def main():
     p.add_argument("--issue-key", required=True)
     p.add_argument("--trigger", required=True)
     p.add_argument("--operation-id", required=True)
-    p.add_argument("--outcome", choices=("failed", "unknown", "not_written"), required=True)
+    p.add_argument("--outcome", choices=("failed", "unknown", "not_written", "succeeded"), required=True)
     p.add_argument("--input", required=True)
     p.add_argument("--message", default="")
     p.add_argument("--dir", default=".")
@@ -579,7 +636,7 @@ def main():
             if args.command in ("collect", "confirm", "prepare_fields", "readback_fields"):
                 from workflow import jira_collect
                 document = json.loads(Path(args.input).read_text())
-                snapshot = document["snapshot"]
+                snapshot = document["snapshot"] if args.command in ("collect", "confirm") else None
                 proposals = document.get("proposals", {})
                 if args.command == "prepare_fields":
                     result = jira_collect.prepare_fields(args.dir, task, args.checkpoint, document)

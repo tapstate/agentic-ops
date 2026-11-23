@@ -560,7 +560,8 @@ class CheckpointTests(unittest.TestCase):
         with mock.patch.object(jira_status, "load_state", return_value=sync), \
                 mock.patch.object(jira_status, "save_state") as saved:
             result = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "")
-        self.assertEqual(result["outcome"], "succeeded")
+        self.assertEqual(result["outcome"], "satisfied")
+        self.assertEqual(result["reason"], "target_read_back")
         saved.assert_called_once()
         self.assertEqual(self.read()["stage"], "task_intake")
 

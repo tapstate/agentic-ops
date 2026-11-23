@@ -275,7 +275,7 @@ def takeover_progress(base, task, publications, *, summary_required=True):
     steps = {"markers": coordination and marker_ready, "summary": not summary_required or publication.get("status") == "verified", "source": source_ready}
     missing = [key for key, done in steps.items() if not done]
     field_ids = [rules["field_id"], *rules.get("marker_fields", {}).values()]
-    marker_id = "markers-" + quality.digest([task["issue_key"], task["run_id"], "takeover-markers"])[:24]
+    marker_id = jira_watermark.operation_id(task)
     # ready 表示精确意图存在，不能证明请求尚未发送；中断后先回读。
     legacy_resolved = (rules.get("schema_version") == 2 and marker.get("marker_version") != 2
                        and (marker.get("outcome") == "verified" or
