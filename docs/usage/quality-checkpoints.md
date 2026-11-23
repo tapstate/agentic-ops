@@ -4,11 +4,24 @@ quality.py 的 status/apply 默认省略完整 context、方法定义和历史�
 
 ## Jira 原生工具选择与认证
 
-Jira 操作优先使用 MCP。已核实连接器不支持某项操作、必填参数或原始字段表示时，直接使用 Jira REST API 完成该项，不要求每次先调用失败，也不重复索取已覆盖操作的授权；其它受支持操作继续使用 MCP。认证失败、权限不足和结果未知不等于能力缺失：401/403 先处理认证或权限，未知写入先回读原请求，不能换工具重发。工具替换不改变任务归属、审批、写入范围及成果核验要求，不新增产品 Jira 客户端。
+Jira 操作优先使用 MCP。已核实连接器不支持某项操作、必填参数或原始字段表示时，直接使用 Jira REST API 完成该项，不要求每次先调用失败，也不重复索取已覆盖操作的授权；其它受支持操作继续使用 MCP。认证失败、权限不足和结果未知不等于能力缺失：401/403 先处理认证或权限，未知写入按下述合同恢复，不能换工具绕过原操作的保护。工具替换不改变任务归属、审批、写入范围及成果核验要求，不新增产品 Jira 客户端。
 
 REST 优先复用用户已授权的认证配置或代理。需要配置时，在当前工位 `config/jira/rest-auth.json` 创建不覆盖已有内容的模板，权限设为 `0600`，由用户本地填写 `site_url`、`cloud_id`、`email`、`api_token` 和 `token_type`；不在聊天索取 token。`token_type=classic` 使用该站点 `/rest/api/3`，`token_type=scoped` 使用 `https://api.atlassian.com/ex/jira/<cloud_id>/rest/api/3`，以实际令牌类型及授权范围核验。只向明确绑定的 Jira 站点或 Atlassian API 端点发送认证，不把凭据输出到日志、Jira、源码或普通证据；任务清理保留 config，工位清理沿配置处置合同。切换连接后核对当前用户、站点及目标任务，不假定与 MCP 身份相同。
 
 用户不愿配置或授权 REST，或没有可用 REST 路径时，再提示浏览器作为可选方式；浏览器须由用户选择，拒绝后只暂停依赖步骤并保留待办。不把每次 MCP 报错都变成工具选择或授权问答。
+
+### Jira 写入结果与恢复合同
+
+| 原操作结果 | 处理方式 |
+|---|---|
+| 明确成功 | 原生响应按已核验的接口语义证明原请求已完成，且覆盖目标和写入范围时，保存绑定原意图的响应来源和已返回的对象 ID，直接结清。创建对象须取得稳定 ID 或 key。仅受理、部分成功和工具外层成功分别按实际证据记录。 |
+| 明确未生效 | 已确认未发送或服务端明确未执行，且故障可恢复时，沿原操作有限重试。遵守服务端等待提示，核对授权和原前置条件仍有效。更改目标或载荷须重新准备。 |
+| 结果未知，原请求可安全重放 | 仅在对应连接器及具体操作已验证服务端幂等或条件写入语义，能保证原请求重放不会重复创建、重复触发副作用或覆盖并发编辑时，允许使用同一站点、目标、请求、服务端幂等键或条件原样有限重试。本地 `operation_id` 只关联原意图。条件失败、证据缺失或重试耗尽时，回到原操作定向核验。 |
+| 结果未知，缺少安全重放保证 | 定向回读原操作，优先使用已保存的响应、对象 ID 或唯一标记。纯通知可在同一站点、任务及原作者范围内按完整编号唯一定位。短暂查不到、权限不足或多个匹配时保留未知。 |
+
+写入结清记录一次请求的结果。负责人、当前归属、原生字段值、实际工时和归档可恢复性按各自消费合同核验。成功响应已提供所需的实际保存结果且满足时点要求时，直接复用；缺什么补什么。有效内容比对只允许已验证的等价表示，保留正文、链接、段落和列表的实际语义。已发出的旧操作沿原请求和原编号恢复，可复用能绑定原请求的历史成功响应；缺证据时按旧操作的现有入口定向回读。
+
+以上是实施目标。现役版本只使用已支持并验证的回执及恢复入口，具体写入步骤仍以安装版本为准。新增或修改入口时，验收覆盖明确成功后无额外确认查询、未知时安全重试或定向回读、并发编辑、部分成功、旧意图接续，以及下游证据不足时的暂停。
 
 ## 接管摘要发布与回读
 
@@ -50,6 +63,8 @@ TapData 通过 `jira.takeover_watermark` schema 2 配置字段 ID；脚本读写
 `prepare` 固定四项值并返回一次 issue edit 的 `native_request.fields`。原生工具写入四项后重新读四项，把原始回读交给当前 run 的 `jira_watermark.py complete --outcome unknown --input <回读快照.json>`，由该入口核验一致后置为 `verified`。REST 返回完整任务回读时，直接把原生工作项 JSON 放入快照的 `issue`，并附上 `site`、`source_ref` 和同一连接回读的 `current_user`。REST 仅补查缺项时，按上文将原值放入 `field_readbacks`。采集脚本只组装证据，保留字段的原始表示，不把回读与 `expected_fields` 逐字比较、不改写接管时间，也不根据比较结果提前退出。
 
 `complete` 将接管时间统一到 UTC 后按分钟比较，忽略秒和小数秒。跨分钟仍不一致，版本、工位及 run 严格匹配。水印记录校验及摘要发送前复核使用相同规则，原始时间、写入载荷及其摘要和实际回读值原样保留，不修改时间生成或用户指定的授权期限。当前连接器没有同时写评论和字段的操作，因此先整体写标记并回读，再写摘要。没有全局并发锁，两个工位可能先后写入并各自回读成功，须在后续工作段及关键写入前回读发现覆盖，不宣称互斥。
+
+支持写入回执的版本可通过 `jira_watermark.py complete --outcome succeeded` 保存原生编辑成功响应。它绑定 `takeover.markers.operation_id` 与原 `native_request` 的摘要，阻止重发。接管摘要与依赖归属的动作仍等待同一连接对当前四项标记的观察；写入响应包含足够的实际保存值、身份和来源时，可复用为该观察。
 
 同工位、同 run 恢复保留原版本和 Begin At，包括产品升级后；新 run 在旧运行处置已核实后整体更新。旧版单字段意图先沿原 complete 回读；残缺字段由 Agent 核实人工修复，整体四项同 run 回读后 prepare 保留旧记录并采用，不能把旧 verified 当作四项成功。未知写入先回读原意图，不重新生成；只有已核实原写入未生效、当前四项仍与原写前值一致时，才用新快照的 `not_applied_ref` 给出依据并再次 prepare 原载荷。字段失败暂停依赖归属的写入，独立只读准备继续。原操作曾核验成功后，远端清空或变化不再解释为“原写入未生效”；保留首次核验来源，禁止重新发起该标记写入。类型错误、来源冲突和不可读均撤销当前 verified 结论，保留原载荷和历史核验事实。
 
@@ -95,7 +110,9 @@ python3 <agenticops-root>/workflow/jira_worklog.py status --dir <工位> --issue
 
 已有 REST 原子属性意图仍沿原载荷回读；拥有直接 API 能力时可声明 `capabilities.worklog_properties=true`、`capabilities.adjust_estimate_leave=true` 使用秒数和 `agenticops.worklog` 属性，不将旧意图改为 MCP 模式或改变原预估策略。没有适用原生能力时 defer 保存已知未发送原因，继续无依赖工作。输入来源和能力由 Agent 实际核验，程序不认证外部事实；普通评论不能冒充 Worklog。
 
-REST 开始时间使用 Jira 接受的毫秒及无冒号时区格式。若真实请求和回读证明服务端按分钟向下取整，在快照声明 `capabilities.worklog_precision_seconds=60` 并提供 `worklog_precision_ref`；新请求只发送完整分钟，不足一分钟保留累计。旧意图也只沿原属性唯一定位、核对作者/任务/时间/正文，并仅接纳该精度下的精确向下取整值，记录 `logged_seconds` 与 `unlogged_seconds`；不改原载荷、不重发差额。没有精度证据、其它时长差异或归属变化仍拒绝。真实已登记时间与未登记余量分别披露并保全。
+MCP 工时创建响应已包含原任务身份、工时 ID、开始时间及实际耗时时，可直接向 `bind` 提交 `receipt` 来绑定工时并准备属性写入。属性响应明确返回该键已创建或更新时，向 `complete` 提交 `receipt` 即可结算。两处回执均提供 `site`、`segment_id`、发送前返回的 `request_digest`、原生 `response` 及 `source_ref`。重复导入创建回执不会重新生成属性请求；原响应缺项或未知时沿绑定工时定向恢复。
+
+REST 原子创建的 201 响应若确实返回已保存工时和原操作属性，可将原响应工时放入 `receipt.response.data.worklog`，附 `http_status=201` 及同样的操作绑定字段，直接提交 `complete`。响应缺值、实际时长差异或属性未返回时沿原工时定向核验。REST 开始时间使用 Jira 接受的毫秒及无冒号时区格式。若真实请求和回读证明服务端按分钟向下取整，在快照声明 `capabilities.worklog_precision_seconds=60` 并提供 `worklog_precision_ref`；新请求只发送完整分钟，不足一分钟保留累计。旧意图也只沿原属性唯一定位、核对作者/任务/时间/正文，并仅接纳该精度下的精确向下取整值，记录 `logged_seconds` 与 `unlogged_seconds`；不改原载荷、不重发差额。没有精度证据、其它时长差异或归属变化仍拒绝。真实已登记时间与未登记余量分别披露并保全。
 
 ### 恢复与保全
 
@@ -654,7 +671,7 @@ Fix Details 面向任务交付，PR 面向单仓审查。Agent 使用同一批�
 
 对已核验为字面文本的新草稿，沿原 draft/confirm，在 `prepare_write` 的 payload 增加 `comment_transport`，填入 `format=literal-html-v1` 与同一连接原生回读的 `author_account_id`。已确认正文、格式版本和作者随原操作保留。仅本次成功准备返回 `native_request`。支持 HTML 的连接器使用其中的 `body`，显式选择 HTML 格式；直接使用 Jira REST v3 时，以 `rest_body` 对象作为请求体。两个表示由同一确认正文生成，使用相同 `site`、`issue_key` 和末尾的 `delivery_marker`；状态查询提供编号和回读线索。连接器参数以其实际工具说明为准。
 
-仅告知已发生事项、且正文不会作为接管、检查点发布或成果接续证据的评论，可在 `draft` 声明 `delivery_only=true`。收到原生写入成功后提交 `receipt`，提供 `result=created`、原 `operation_id`、`comment_id` 和 `source_ref`。状态记为 `delivered`，该通知完成收尾。检查点评论和接管摘要始终需要核验正文；`delivered` 的评论不能关联为检查点发布证据。缺省使用正文核验，已有操作按原意图继续。
+仅告知已发生事项、且正文不会作为接管、检查点发布或成果接续证据的评论，可在 `draft` 声明 `delivery_only=true`。收到原生写入成功后提交 `receipt`，提供 `result=created`、原 `operation_id`、`comment_id` 和 `source_ref`。状态记为 `delivered`，该通知完成收尾。检查点评论和接管摘要始终需要核验正文；`delivered` 的评论不能关联为检查点发布证据。缺省使用正文核验，已有操作按原意图继续。纯通知的成功响应丢失时，只有原请求带稳定投递编号、且在同一任务中查全相关评论并按原作者与完整编号唯一定位，才可用取得的评论 ID 和查询来源提交原 `receipt result=created`。仅适用于原草稿已声明 `delivery_only` 的情况。
 
 需要正文核验时，若成功响应已返回保存后的完整正文、评论 ID、作者及可核对的站点和任务，且当前节点无需更晚时点的状态，可直接把该响应作为 `readback` 的来源，省去再次查询和单独记录 `created`。如果响应只给 ID、缺字段或仅回显请求，按 ID 补查。响应丢失时在原站点和任务分页回读，按原作者的 `accountId` 和完整编号唯一定位。无匹配或多个匹配时保留未知。MCP 评论列表须选择能返回 `author.accountId` 的视图，Atlassian MCP 使用 `view=full` 和 `responseContentFormat=html`，将原生 `body` 以 `body_representation=literal-html-v1` 提交。直接使用 Jira REST v3 时，以 `body_representation=literal-adf-v1` 提交原始 `body` 对象；`renderedBody` 可能加入任务链接等展示元素，不能用来核验原始文档。两条路径均核对站点、任务、作者、已知评论 ID、正文和结构。找到评论但正文变化时保留原操作待核对，继续无依赖工作。编号用于回读定位，Jira 不提供据此防重的保证。
 
@@ -682,6 +699,8 @@ TapData 评论面向研发、测试和审查人。首次接管、方案确定或
 方案确认后、实施前同步 Issue Analysis；修改形成且首轮验证后同步阶段性 Fix Details，明确待验收，最终验收或 CI 结论变化后更新。字段采集不是同步成功：先读取完整原值，保留人工内容并形成 proposals，复用有效决定 confirm，再执行 `jira_status prepare_fields --checkpoint <节点> --input <文件>`。输入复用 snapshot/proposals，增加稳定 operation_id；返回 native_request 后由 Agent 原生写入，保存原操作并执行 `readback_fields`，输入带原 operation_id 和原生 snapshot。所有入口均带 issue-key、expected-run-id、dir。明确未写入时可向 readback_fields 提交 result=not_written，snapshot.operation_result 须包含原 operation_id、effect=not_written 和 source_ref，并核验原写前值；只有明确拒绝才能解除未知，不能从未查到推断。回读仅验证原全文，不将旧操作成功解释为当前方案已同步；待办按当前材料判断新鲜度。字段缺值、仅 ID 或无法表示完整富文本时先补查，不当空值覆盖。普通文本保持真实原生值；含媒体或格式结构的字段须使用可保留结构的原生表示，不自行扁平化。
 
 字段或评论失败只暂停依赖的同步，继续无依赖研发；创建响应丢失先按原意图、目标、作者、正文及返回 ID 定位，无法唯一定位时保留未知，不重发。新操作和旧记录沿所属入口恢复，不修改旧事件或旧正文。跨工位需要的当前方案、实际成果、源码与证据引用保存在 Jira 字段和既有持久接续材料，不能仅留本机路径；清理前核验可取回性。评论简化不改变 Q1—Q6、状态转换、PR Ready 或成果保全要求。
+
+支持原生 REST 回执的版本中，单任务字段编辑返回 204 后，可沿原编号向 `readback_fields` 提交 `result=succeeded` 和 `receipt`，无需重新查询。回执包含 `site`、`operation_id`、`request_digest`（沿用 prepare 输出）、`method=PUT`、原 `path`、`http_status=204` 及可访问的 `source_ref`。Agent 必须根据原生请求与原响应填入，不能把工具外层成功当作 HTTP 204。仅发送 `transition.id` 的 REST 状态转换可用 `complete --outcome succeeded` 提交同结构回执，方法为 POST，路径为任务的 transitions 入口，摘要来自实际发送的转换载荷。仅发送转换 ID 的 MCP `transitionJiraIssue` 也可用 `complete --outcome succeeded`，提供工具名、原转换摘要及保留原生 `data` 包络的 `response`，核对原转换 ID 与实际到达状态。AgenticOps 准备的状态转换只发送已准备的转换 ID。字段变更沿字段写入入口单独准备和结清。结果未知时，当前状态达到目标且原转换依赖字段均匹配，记为 `satisfied`，表示当前条件满足。字段缺失或不匹配时保留原操作的结果和待补查字段，不以目标状态归因本次写入。MCP `editJiraIssue` 的普通字段更新可以用同样的字段入口，回执提供 `tool=editJiraIssue` 和保留原生 `data` 包络的 `response`。必须实际绑定完整字段请求；带排序等其它副作用的请求沿原入口核验。其它写入表示继续沿对应入口恢复。未知字段回读若确来自 MCP Markdown，可在原快照声明 `body_representation=atlassian-mcp-markdown`，供普通段落的硬换行等价核验使用。
 
 字段回读按当前原生表单 schema 核对：选项/版本使用 ID，人员使用 accountId，级联选项同时核对 child；拟写值明确指定的展示属性仍须一致，回读补充的信息不等于写入内容变化。普通文本可与仅含 paragraph、text、hardBreak 的 ADF 严格核对换行及完整文字。Markdown 单层无序列表可与 bulletList/listItem 回读核对：每项仅一个无标记、无换行的非空段落，保留完整正文、顺序和项数；仅接受 `- `、`* `、`+ ` 列表标记及列表前一个或两个换行的排版差异。嵌套列表、多段列表项、有序列表、标记、链接、媒体、未知节点或属性继续拒绝，不降为纯文本。旧意图沿原编号恢复，不手工裁剪原生回读来制造等值；无法匹配的表示继续保留待核验。
 

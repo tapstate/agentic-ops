@@ -238,6 +238,29 @@ class WorklogTests(unittest.TestCase):
         self.assertEqual('verified', done['segments'][0]['status'])
         self.assertEqual([], log.pending(self.base, 'TAP-123'))
 
+    def test_mcp_success_receipts_bind_create_and_complete_property_without_reads(self):
+        prepared = self.mcp_prepared()
+        request = prepared['native_request']
+        response = {'data': {'id': '456', 'timeSpent': request['arguments']['timeSpent'],
+                             'started': request['arguments']['started'], 'message': 'Worklog added to TAP-123'}}
+        receipt = {'segment_id': 'segment-0001', 'site': request['site'], 'source_ref': 'jira:create',
+                   'request_digest': prepared['request_digest'], 'response': response}
+        mismatched = copy.deepcopy(receipt)
+        mismatched['response']['data']['message'] = 'Worklog added to TAP-456'
+        with self.assertRaisesRegex(ValueError, '任务'):
+            self.call('bind', snapshot=self.snapshot_file({'receipt': mismatched}))
+        self.assertNotIn('worklog_id', log.load(self.base, 'TAP-123')['segments']['segment-0001'])
+        bound = self.call('bind', snapshot=self.snapshot_file({'receipt': receipt}))
+        self.assertEqual('456', bound['native_request']['arguments']['worklogId'])
+        self.assertNotIn('native_request', self.call('bind', snapshot=self.snapshot_file({'receipt': receipt})))
+        written = {'data': {'entityType': 'issueWorklog', 'key': log.MCP_PROPERTY, 'status': 'created'}}
+        receipt.update(source_ref='jira:property', request_digest=bound['request_digest'], response=written)
+        with self.assertRaisesRegex(ValueError, '原操作'):
+            self.call('complete', snapshot=self.snapshot_file({'receipt': dict(receipt, request_digest='wrong')}))
+        done = self.call('complete', snapshot=self.snapshot_file({'receipt': receipt}))
+        self.assertEqual('verified', done['segments'][0]['status'])
+        self.assertEqual([], log.pending(self.base, 'TAP-123'))
+
     def test_mcp_missing_response_recovers_unique_new_record_without_creating(self):
         self.mcp_prepared()
         snapshot = self.mcp_readback()
@@ -397,6 +420,16 @@ class WorklogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             log.attach_takeover(self.base, dict(self.task, run_id='another-run'))
         self.assertEqual(before, log.state_path(self.base, 'TAP-123').read_bytes())
+
+    def test_rest_creation_receipt_can_supply_complete_persisted_worklog(self):
+        request = self.prepared()
+        worklog = self.readback(request)['worklogs'][0]
+        receipt = {'segment_id': 'segment-0001', 'site': request['site'], 'source_ref': 'jira:rest-create',
+                   'request_digest': log.digest(request), 'http_status': 201,
+                   'response': {'data': {'worklog': worklog}}}
+        done = self.call('complete', snapshot=self.snapshot_file({'receipt': receipt}))
+        self.assertEqual('verified', done['segments'][0]['status'])
+        self.assertEqual(worklog['timeSpentSeconds'], done['segments'][0]['logged_seconds'])
 
     def test_write_response_loss_converges_by_property_without_second_send(self):
         request = self.prepared()

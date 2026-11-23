@@ -255,6 +255,24 @@ class FourMarkerTests(unittest.TestCase):
                       if row['kind'] == 'agenticops_version')
         self.assertFalse(action['original_target_observed'])
 
+    def test_native_success_closes_marker_write_but_requires_current_ownership(self):
+        from workflow import quality
+
+        record = jira_watermark.prepare(self.base, 'TAP-123', self.snapshot())
+        receipt = {'site': 'https://tapdata.atlassian.net', 'source_ref': 'jira:marker-write',
+                   'operation_id': jira_watermark.operation_id(self.task),
+                   'request_digest': quality.digest(record['native_request']), 'method': 'PUT',
+                   'path': '/rest/api/3/issue/TAP-123', 'http_status': 204}
+        completed = jira_watermark.complete(self.base, 'TAP-123', 'succeeded', receipt)
+        self.assertEqual('jira:marker-write', completed['write_ref'])
+        self.assertFalse(jira_watermark.summary_ready(self.base, self.task))
+        self.assertNotIn('native_request', completed)
+        with self.assertRaisesRegex(ValueError, '禁止重复写入'):
+            jira_watermark.prepare(self.base, 'TAP-123', dict(self.snapshot(), not_applied_ref='jira:conflict'))
+        observed = jira_watermark.complete(self.base, 'TAP-123', 'unknown', self.snapshot(record['expected_fields']))
+        self.assertEqual('jira:marker-write', observed['write_ref'])
+        self.assertTrue(jira_watermark.summary_ready(self.base, self.task))
+
     def test_minute_readback_recovers_original_intent_without_rewriting_payload(self):
         from workflow import external_sync
         original_time = '2026-10-27T19:52:44+0800'

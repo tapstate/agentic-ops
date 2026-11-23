@@ -63,3 +63,42 @@ def validate_update(before, after, mutable):
     """恢复只能补结果，不能修改原目标、载荷或发送意图身份。"""
     if {k: v for k, v in before.items() if k not in mutable} != {k: v for k, v in after.items() if k not in mutable}:
         raise ValueError("回执恢复不得改变原外部操作目标或意图")
+
+
+def jira_response_source(base, operation_id, request, receipt):
+    """核对原生响应所在站点和原请求；响应内容由 Agent 实际留存。"""
+    from workflow import project_rules, quality
+
+    site = project_rules.load_profile(station=base).get("jira", {}).get("site")
+    source = receipt.get("source_ref")
+    if (not site or receipt.get("site") != site or receipt.get("operation_id") != operation_id
+            or receipt.get("request_digest") != quality.digest(request)
+            or not isinstance(source, str) or not source.strip()):
+        raise ValueError("Jira 回执不能证明原请求已完成")
+    return source
+
+
+def jira_mcp_edit_completion(base, operation_id, request, receipt):
+    source = jira_response_source(base, operation_id, request, receipt)
+    response = receipt.get("response")
+    issue = response.get("data") if isinstance(response, dict) else None
+    if (not isinstance(issue, dict) or issue.get("key") != request["issue_key"]
+            or not isinstance(issue.get("id"), str) or not issue["id"].isdigit()
+            or not isinstance(issue.get("fields"), dict) or "error" in issue or "ranking" in issue):
+        raise ValueError("MCP 回执不能证明原字段编辑已完成")
+    return source
+
+
+def jira_rest_completion(base, operation_id, request, receipt, *, method, path):
+    """将原生 Jira REST 204 回执绑定到已准备的请求。"""
+    source = jira_response_source(base, operation_id, request, receipt)
+    if receipt.get("method") != method or receipt.get("path") != path or receipt.get("http_status") != 204:
+        raise ValueError("Jira 回执不能证明原请求已完成")
+    return source
+
+
+def jira_edit_completion(base, operation_id, request, receipt):
+    if receipt.get("tool") == "editJiraIssue":
+        return jira_mcp_edit_completion(base, operation_id, request, receipt)
+    return jira_rest_completion(base, operation_id, request, receipt,
+                                method="PUT", path="/rest/api/3/issue/" + request["issue_key"])

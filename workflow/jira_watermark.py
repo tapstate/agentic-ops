@@ -155,6 +155,11 @@ def markers_equal(actual, expected, time_field):
                for k, v in expected.items())
 
 
+def operation_id(task):
+    from workflow import quality
+    return "markers-" + quality.digest([task["issue_key"], task["run_id"], "takeover-markers"])[:24]
+
+
 def validate_record(record):
     """只接受可证明一次精确写入或回读结果的水印记录。"""
     required = {
@@ -181,6 +186,8 @@ def validate_record(record):
                 or not all(isinstance(actor.get(k), str) and actor[k].strip() for k in ("accountId", "displayName", "source_ref"))):
             raise ValueError("Jira 四项接管标记或登录用户记录无效")
         marker_time(fields[mapping["begin_at"]])
+    if "write_ref" in record and (not isinstance(record["write_ref"], str) or not record["write_ref"].strip()):
+        raise ValueError("Jira 水印成功回执来源无效")
     if record.get("verified_ref") is not None and (not isinstance(record["verified_ref"], str) or not record["verified_ref"].strip()):
         raise ValueError("Jira 标记首次核验来源无效")
     if 'ownership' in record:
@@ -241,7 +248,7 @@ def save_state(base, task, state, recovery=None):
             if recovery.get("verified_ref") and state["watermark"].get("verified_ref") != recovery["verified_ref"]:
                 raise ValueError("不得撤销或改写首次核验来源")
             sync_recovery.validate_update(recovery, state["watermark"],
-                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields", "verified_ref", "ownership"})
+                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message", "readback_fields", "verified_ref", "ownership", "write_ref"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 水印回执")
         task_store._write_json_atomic(state_path(base, task), state)
@@ -330,7 +337,7 @@ def prepare(base, issue_key, snapshot):
 
 @sync_recovery.local_locked
 def complete(base, issue_key, outcome, snapshot, message=""):
-    if outcome not in ("failed", "unknown"):
+    if outcome not in ("failed", "unknown", "succeeded"):
         raise ValueError("无效水印回执结果")
     task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
@@ -339,6 +346,23 @@ def complete(base, issue_key, outcome, snapshot, message=""):
         raise ValueError("当前 task/run 没有待回读的 Jira 接管水印意图")
     sync_recovery.require_receipt(base, task)
     original = copy.deepcopy(record)
+    if outcome == "succeeded":
+        fields = record.get("expected_fields", {record["field_id"]: record["version"]})
+        request = {"issue_key": task["issue_key"], "fields": fields}
+        source = sync_recovery.jira_edit_completion(base, operation_id(task), request, snapshot)
+        if project_rules.scan_sensitive(project_rules.load_admission(station=base), source):
+            raise ValueError("Jira 水印成功回执来源含敏感内容")
+        if record.get("write_ref"):
+            if record["write_ref"] != source:
+                raise ValueError("原水印已有不同的成功回执")
+            return record
+        record["write_ref"] = source
+        if record["outcome"] == "ready":
+            record.update(outcome="unknown", reason="write_completed_ownership_unverified",
+                          completed_at=now(), readback_ref=source)
+            record.pop("native_request", None)
+        save_state(base, task, state, recovery=original)
+        return record
     if record.get("marker_version") == 2:
         return complete_markers(base, task, state, snapshot, outcome, message)
     fields, issue_type_id = issue_from(snapshot, issue_key)
@@ -395,7 +419,7 @@ def prepare_markers(base, task, state, snapshot):
         if result["outcome"] != "verified" and snapshot.get("not_applied_ref"):
             if "verified_ref" not in result:
                 raise ValueError("旧标记缺少核验历史，不能证明原操作从未成功；仅回读或交接，不重复写入")
-            if result.get("verified_ref"):
+            if result.get("verified_ref") or result.get("write_ref"):
                 raise ValueError("原标记曾经核验成功；当前变化不能解释为原写入未生效，禁止重复写入")
             jira_ownership.inspect(base, task["issue_key"], snapshot, task)
             if (not isinstance(snapshot["not_applied_ref"], str) or not snapshot["not_applied_ref"].strip()
@@ -540,7 +564,7 @@ def main():
     complete_parser = sub.add_parser("complete")
     complete_parser.add_argument("--expected-run-id", required=True)
     complete_parser.add_argument("--issue-key", required=True)
-    complete_parser.add_argument("--outcome", choices=("failed", "unknown"), required=True)
+    complete_parser.add_argument("--outcome", choices=("failed", "unknown", "succeeded"), required=True)
     complete_parser.add_argument("--input", required=True)
     complete_parser.add_argument("--message", default="")
     complete_parser.add_argument("--dir", default=".")

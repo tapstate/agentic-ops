@@ -225,7 +225,11 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
         schema = meta.get("schema") or {"type": rule.get("value_type")}
         options = sorted(meta.get("allowedValues", []), key=lambda item: json.dumps(item, sort_keys=True))
         observed, current = field_value(fields, key)
-        value = proposals.get(key, current if present(current) else old.get("value"))
+        matches_previous = observed and field_matches(
+            old.get("value"), current, schema, key, snapshot.get("body_representation"))
+        suggested = old.get("value") if matches_previous or not present(current) else current
+        value = proposals.get(key, suggested)
+        matches_value = observed and field_matches(value, current, schema, key, snapshot.get("body_representation"))
         dependencies = {path: get({"facts": task.get("facts", {}), "jira": fields}, path) for path in rule["depends_on"]}
         owner = {"role": rule["decision_owner"], "assignee": (fields.get("assignee") or {}).get("accountId")}
         semantic = {"field": key, "value": value, "schema": schema, "options": options, "dependencies": dependencies,
@@ -254,17 +258,17 @@ def collect(base, task, checkpoint, snapshot, proposals=None):
         if due and set(rule["logical_keys"]) & {"issue_analysis", "fix_details"}:
             row["publication_required"] = True
             row["sync_status"] = "unread" if not observed else (
-                "matches_confirmed" if old.get("digest") == digest and current == value and row["valid_value"] else "needs_review")
+                "matches_confirmed" if old.get("digest") == digest and matches_value and row["valid_value"] else "needs_review")
         result["fields"][key] = row
         if due and key not in metadata and old.get("metadata") and not (
-                observed and current == old.get("value") and old.get("digest") == digest):
+                matches_previous and old.get("digest") == digest):
             result["unknown"].append({"field": key, "due": True,
                 "reason": "历史确认的值、依赖或责任人已变化或字段未回读；请补充当前 field_metadata 后重新确认"})
         if key.startswith("unresolved:"):
             result["unknown"].append({"field": key, "due": due and needed, "reason": "字段 ID 未核验，不猜填；取得元数据后再确认值"})
         elif not due:
             result["future"].append(key)
-        elif old.get("digest") == digest and row["valid_value"] and (not old.get("metadata") or key in metadata or observed and current == value):
+        elif old.get("digest") == digest and row["valid_value"] and (not old.get("metadata") or key in metadata or matches_value):
             result["confirmed"].append(key)
         elif needed or present(value):
             result["pending"].append(key)
@@ -340,7 +344,8 @@ def prepare_fields(base, task, checkpoint, document):
     require_safe(project_rules.load_admission(station=base), record, "字段发送意图")
     writes[key] = record
     jira_status.save_state(base, task, state)
-    return dict(record, native_request={"issue_key": task["issue_key"], "fields": proposals})
+    request = {"issue_key": task["issue_key"], "fields": proposals}
+    return dict(record, native_request=request, request_digest=quality.digest(request))
 
 
 def plain_adf_paragraph(node):
@@ -388,7 +393,7 @@ def plain_adf_matches(expected, observed):
     return re.fullmatch("".join(patterns), expected) is not None
 
 
-def field_matches(expected, observed, schema, field):
+def field_matches(expected, observed, schema, field, representation=None):
     """只接纳已知 Jira 字段的原生表示；不剥离任意富文本结构。"""
     if (schema.get("type") == "array" and field in ("fixVersions", "versions")
             and isinstance(expected, list) and isinstance(observed, list)):
@@ -408,8 +413,21 @@ def field_matches(expected, observed, schema, field):
     if expected == observed:
         return True
     kind = schema.get("type")
-    if kind == "string" and isinstance(expected, str) and isinstance(observed, dict):
-        return plain_adf_matches(expected, observed)
+    if kind == "string" and isinstance(expected, str):
+        if isinstance(observed, dict):
+            return plain_adf_matches(expected, observed)
+        if representation == "atlassian-mcp-markdown" and isinstance(observed, str):
+            lines = expected.split("\n")
+            # Only plain paragraphs. Markdown constructs retain their original comparison.
+            if any(line and (line != line.strip() or re.search(r"[`*_~\\\[\]<>#|]", line)
+                            or re.match(r"(?:[-+](?: |$)|[-=]+$|[0-9]+[.)] )", line))
+                   for line in lines):
+                return False
+            returned = observed.split("\n")
+            return len(lines) == len(returned) and all(
+                actual == wanted or (
+                    wanted and index + 1 < len(lines) and lines[index + 1] and actual == wanted + "  ")
+                for index, (wanted, actual) in enumerate(zip(lines, returned)))
     if kind == "array" and isinstance(expected, list) and isinstance(observed, list):
         item = schema.get("items")
         if item not in ("user", "version", "option") or len(expected) != len(observed):
@@ -442,6 +460,19 @@ def readback_fields(base, task, document):
     if not record:
         raise ValueError("没有原字段写入意图")
     original = copy.deepcopy(record)
+    if document.get("result") == "succeeded":
+        from workflow import sync_recovery
+        request = {"issue_key": task["issue_key"], "fields": record["fields"]}
+        source_ref = sync_recovery.jira_edit_completion(
+            base, document["operation_id"], request, document.get("receipt", {}))
+        require_safe(project_rules.load_admission(station=base), source_ref, "字段写入回执")
+        if record["status"] == "verified" and record.get("readback_ref") == source_ref:
+            return record
+        if record["status"] != "intent":
+            raise ValueError("字段操作已有不同结论，拒绝替换原回执")
+        record.update(status="verified", readback_ref=source_ref)
+        jira_status.save_state(base, task, state, recovery=("field:" + document["operation_id"], original))
+        return record
     snapshot = document["snapshot"]
     _, fields, _ = jira_status.issue_from(snapshot, task["issue_key"])
     if not snapshot.get("source_ref"):
@@ -458,7 +489,7 @@ def readback_fields(base, task, document):
     else:
         packet = collect(base, task, record["checkpoint"], snapshot, record["fields"])
         if any(not field_value(fields, key)[0] or not field_matches(value, field_value(fields, key)[1],
-                   packet["fields"][key]["schema"], key)
+                   packet["fields"][key]["schema"], key, snapshot.get("body_representation"))
                for key, value in record["fields"].items()):
             raise ValueError("字段回读不完整或正文不匹配；保留原意图，禁止盲目重发")
         record.update(status="verified", readback_ref=snapshot["source_ref"])
